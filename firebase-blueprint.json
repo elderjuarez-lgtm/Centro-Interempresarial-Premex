@@ -1,0 +1,240 @@
+{
+  "entities": {
+    "Reconciliation": {
+      "title": "Reconciliation",
+      "description": "Saved intercompany reconciliation state (companies, movements, difference comments, and active period) for cloud persistence and shareable viewing.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the reconciliation owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of the user who saved the reconciliation",
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "description": "Descriptive title of the saved reconciliation",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "selectedMonth": {
+          "type": "string",
+          "description": "Active reconciliation period filter",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "entities": {
+          "type": "array",
+          "description": "Ordered list of companies feeding the reconciliation matrices"
+        },
+        "movements": {
+          "type": "array",
+          "description": "Intercompany CXC and CXP movement items"
+        },
+        "comments": {
+          "type": "object",
+          "description": "Map of pair IDs to editable difference explanations"
+        },
+        "closedMonths": {
+          "type": "object",
+          "description": "Map of closed month keys to immutable closure metadata and snapshots"
+        },
+        "movementsCount": {
+          "type": "integer",
+          "description": "Total number of movements saved"
+        },
+        "entitiesCount": {
+          "type": "integer",
+          "description": "Total number of configured companies saved"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "selectedMonth",
+        "entities",
+        "movements",
+        "comments",
+        "movementsCount",
+        "entitiesCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ClosedPeriod": {
+      "title": "ClosedPeriod",
+      "description": "Immutable permanent archive of a closed monthly reconciliation.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who closed the period",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of the user who closed the period",
+          "maxLength": 120
+        },
+        "reconciliationId": {
+          "type": "string",
+          "description": "Parent reconciliation document ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "month": {
+          "type": "string",
+          "description": "Closed month identifier",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the closed reconciliation period",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "entities": {
+          "type": "array",
+          "description": "Frozen list of companies at the time of closing"
+        },
+        "movements": {
+          "type": "array",
+          "description": "Frozen list of monthly movements at the time of closing"
+        },
+        "comments": {
+          "type": "object",
+          "description": "Frozen map of difference comments at the time of closing"
+        },
+        "movementsCount": {
+          "type": "integer",
+          "description": "Number of movements in the closed month"
+        },
+        "entitiesCount": {
+          "type": "integer",
+          "description": "Number of companies at closure"
+        },
+        "differencesCount": {
+          "type": "integer",
+          "description": "Number of pending differences at closure"
+        },
+        "closedAtIso": {
+          "type": "string",
+          "description": "ISO timestamp when the month was closed",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of archival creation"
+        }
+      },
+      "required": [
+        "ownerId",
+        "reconciliationId",
+        "month",
+        "title",
+        "entities",
+        "movements",
+        "comments",
+        "movementsCount",
+        "entitiesCount",
+        "differencesCount",
+        "closedAtIso",
+        "createdAt"
+      ]
+    },
+    "CompanyDirectory": {
+      "title": "CompanyDirectory",
+      "description": "Independent master catalog of companies (name, NIT, contact email, code, country, currency, matrix order) per scope, editable regardless of closed reconciliation months.",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": ["internacionales", "nacionales"],
+          "description": "Scope group identifier",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "entities": {
+          "type": "array",
+          "description": "Ordered list of configured companies"
+        },
+        "entitiesCount": {
+          "type": "integer",
+          "description": "Total number of companies in the directory"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the last user who updated the company directory",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByName": {
+          "type": "string",
+          "description": "Display name of the last user who updated the company directory",
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial directory creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last directory update"
+        }
+      },
+      "required": [
+        "scope",
+        "entities",
+        "entitiesCount",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/reconciliations/{reconciliationId}": {
+      "schema": {
+        "$ref": "#/entities/Reconciliation"
+      },
+      "description": "Stores saved intercompany reconciliations that can be updated by their owner and viewed via a shared link."
+    },
+    "/closed_periods/{archiveId}": {
+      "schema": {
+        "$ref": "#/entities/ClosedPeriod"
+      },
+      "description": "Stores permanent, append-only immutable archives of closed monthly reconciliations."
+    },
+    "/company_directories/{scopeId}": {
+      "schema": {
+        "$ref": "#/entities/CompanyDirectory"
+      },
+      "description": "Stores independent company directories per scope (internacionales, nacionales) editable independently of closed months."
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Centro Interempresarial Anitox",
+  "description": "Plataforma corporativa de conciliación interempresarial, matrices de cuentas por cobrar y pagar, diferencias y sincronización con Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

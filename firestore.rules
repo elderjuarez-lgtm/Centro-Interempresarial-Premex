@@ -1,0 +1,249 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: deny all by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidReconciliation(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'title',
+          'selectedMonth',
+          'entities',
+          'movements',
+          'comments',
+          'movementsCount',
+          'entitiesCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId',
+          'ownerName',
+          'title',
+          'selectedMonth',
+          'entities',
+          'movements',
+          'comments',
+          'closedMonths',
+          'movementsCount',
+          'entitiesCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.ownerId is string && isValidId(data.ownerId) &&
+        (!('ownerName' in data) || (data.ownerName is string && data.ownerName.size() <= 120)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        data.selectedMonth is string && data.selectedMonth.size() >= 1 && data.selectedMonth.size() <= 60 &&
+        data.entities is list && data.entities.size() <= 200 &&
+        (data.entities.size() == 0 || data.entities[0] is map) &&
+        data.movements is list && data.movements.size() <= 5000 &&
+        (data.movements.size() == 0 || data.movements[0] is map) &&
+        data.comments is map && data.comments.size() <= 2000 &&
+        (!('closedMonths' in data) || (data.closedMonths is map && data.closedMonths.size() <= 120)) &&
+        data.movementsCount is int && data.movementsCount >= 0 && data.movementsCount <= 5000 &&
+        data.entitiesCount is int && data.entitiesCount >= 0 && data.entitiesCount <= 200 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidClosedPeriod(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'reconciliationId',
+          'month',
+          'title',
+          'entities',
+          'movements',
+          'comments',
+          'movementsCount',
+          'entitiesCount',
+          'differencesCount',
+          'closedAtIso',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId',
+          'ownerName',
+          'reconciliationId',
+          'month',
+          'title',
+          'entities',
+          'movements',
+          'comments',
+          'movementsCount',
+          'entitiesCount',
+          'differencesCount',
+          'closedAtIso',
+          'createdAt'
+        ]) &&
+        data.ownerId is string && isValidId(data.ownerId) &&
+        (!('ownerName' in data) || (data.ownerName is string && data.ownerName.size() <= 120)) &&
+        data.reconciliationId is string && isValidId(data.reconciliationId) &&
+        data.month is string && data.month.size() >= 1 && data.month.size() <= 60 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        data.entities is list && data.entities.size() <= 200 &&
+        (data.entities.size() == 0 || data.entities[0] is map) &&
+        data.movements is list && data.movements.size() <= 5000 &&
+        (data.movements.size() == 0 || data.movements[0] is map) &&
+        data.comments is map && data.comments.size() <= 2000 &&
+        data.movementsCount is int && data.movementsCount >= 0 && data.movementsCount <= 5000 &&
+        data.entitiesCount is int && data.entitiesCount >= 0 && data.entitiesCount <= 200 &&
+        data.differencesCount is int && data.differencesCount >= 0 && data.differencesCount <= 5000 &&
+        data.closedAtIso is string && data.closedAtIso.size() >= 1 && data.closedAtIso.size() <= 60 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidCompanyDirectory(data) {
+      return data.keys().hasAll([
+          'scope',
+          'entities',
+          'entitiesCount',
+          'updatedBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'scope',
+          'entities',
+          'entitiesCount',
+          'updatedBy',
+          'updatedByName',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.scope is string && data.scope in ['internacionales', 'nacionales'] &&
+        data.entities is list && data.entities.size() <= 200 &&
+        (data.entities.size() == 0 || data.entities[0] is map) &&
+        data.entitiesCount is int && data.entitiesCount >= 0 && data.entitiesCount <= 200 &&
+        data.updatedBy is string && isValidId(data.updatedBy) &&
+        (!('updatedByName' in data) || (data.updatedByName is string && data.updatedByName.size() <= 120)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    match /reconciliations/{reconciliationId} {
+      // Shared link viewers can read a specific reconciliation by valid ID (contains no PII)
+      allow get: if isValidId(reconciliationId);
+
+      // Authenticated users can only list their own reconciliations
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      // Only verified signed-in users can create a reconciliation owned by themselves
+      allow create: if isVerifiedUser() &&
+        isValidId(reconciliationId) &&
+        isValidReconciliation(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      // Only the verified owner can update allowed fields, preserving ownerId, createdAt, and all previously closed months
+      allow update: if isVerifiedUser() &&
+        isValidId(reconciliationId) &&
+        isValidReconciliation(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (!('closedMonths' in existing()) ||
+          ('closedMonths' in incoming() && incoming().closedMonths.keys().hasAll(existing().closedMonths.keys()))) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'ownerName',
+          'title',
+          'selectedMonth',
+          'entities',
+          'movements',
+          'comments',
+          'closedMonths',
+          'movementsCount',
+          'entitiesCount',
+          'updatedAt'
+        ]);
+
+      // Only the verified owner can delete a reconciliation if it has no closed months
+      allow delete: if isVerifiedUser() &&
+        isValidId(reconciliationId) &&
+        existing().ownerId == request.auth.uid &&
+        (!('closedMonths' in existing()) || existing().closedMonths.size() == 0);
+    }
+
+    match /closed_periods/{archiveId} {
+      // Shared link viewers can read a specific archived closed month by valid ID
+      allow get: if isValidId(archiveId);
+
+      // Authenticated users can list only their own closed period archives
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      // Only verified owners can create an immutable closed period archive tied to an existing reconciliation they own
+      allow create: if isVerifiedUser() &&
+        isValidId(archiveId) &&
+        isValidClosedPeriod(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/reconciliations/$(incoming().reconciliationId)) &&
+        get(/databases/$(database)/documents/reconciliations/$(incoming().reconciliationId)).data.ownerId == request.auth.uid;
+
+      // Permanent immutability: closed period archives can never be updated or deleted
+      allow update, delete: if false;
+    }
+
+    match /company_directories/{scopeId} {
+      // Shared link viewers can read the company directory for valid scopes
+      allow get: if isValidId(scopeId) && scopeId in ['internacionales', 'nacionales'];
+
+      // List is not needed since directories are fetched directly by scopeId
+      allow list: if false;
+
+      // Any verified signed-in user can create or update the independent company directory regardless of closed months
+      allow create: if isVerifiedUser() &&
+        isValidId(scopeId) &&
+        scopeId in ['internacionales', 'nacionales'] &&
+        isValidCompanyDirectory(incoming()) &&
+        incoming().scope == scopeId &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(scopeId) &&
+        scopeId in ['internacionales', 'nacionales'] &&
+        isValidCompanyDirectory(incoming()) &&
+        incoming().scope == existing().scope &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'entities',
+          'entitiesCount',
+          'updatedBy',
+          'updatedByName',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+  }
+}
