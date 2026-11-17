@@ -67,7 +67,9 @@ const activeDatabaseId = hasCustomEnvConfig
 export const activeFirebaseInfo = {
   projectId: String(firebaseConfig.projectId || ''),
   apiKey: String(firebaseConfig.apiKey || ''),
+  authDomain: String(firebaseConfig.authDomain || ''),
   databaseId: activeDatabaseId || '(default)',
+  configSource: hasCustomEnvConfig ? 'env' : 'applet-config',
 };
 
 // Initialize Firebase only once

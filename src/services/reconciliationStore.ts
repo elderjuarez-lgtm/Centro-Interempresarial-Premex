@@ -301,7 +301,7 @@ const saveReconciliationViaRest = async (params: {
   let targetDocId = params.docId;
   const existingDoc = await fetchReconciliationViaRest(targetDocId);
 
-  const isUpdate = Boolean(existingDoc && existingDoc.ownerId === params.uid && !params.forceNewCopy);
+  const isUpdate = Boolean(existingDoc && !params.forceNewCopy);
   if (existingDoc && !isUpdate) {
     targetDocId = createScopedCopyId(scope);
   }
@@ -385,7 +385,7 @@ const saveReconciliationViaRest = async (params: {
     id: targetDocId,
     url: getShareableUrl(targetDocId, scope),
     updatedAtIso: new Date().toISOString(),
-    ownerId: params.uid,
+    ownerId: isUpdate && existingDoc?.ownerId ? existingDoc.ownerId : params.uid,
   };
 };
 
@@ -626,7 +626,7 @@ export const saveReconciliationToCloud = async (
 
   if (existingSnap && existingSnap.exists()) {
     const existingData = existingSnap.data();
-    if (existingData.ownerId === user.uid && !params.forceNewCopy) {
+    if (!params.forceNewCopy) {
       const existingClosed =
         existingData.closedMonths && typeof existingData.closedMonths === 'object'
           ? (existingData.closedMonths as Record<string, ClosedMonthRecord>)
@@ -674,11 +674,11 @@ export const saveReconciliationToCloud = async (
         id: docId,
         url: getShareableUrl(docId, scope),
         updatedAtIso: new Date().toISOString(),
-        ownerId: user.uid,
+        ownerId: String(existingData.ownerId || user.uid),
       };
     }
 
-    // Owned by someone else or forced new copy -> create new doc ID so user gets their own link
+    // Forced new copy -> create new doc ID so user gets a separate snapshot link
     docId = createScopedCopyId(scope);
   }
 

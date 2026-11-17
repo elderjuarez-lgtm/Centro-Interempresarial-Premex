@@ -1,0 +1,2986 @@
+import React, { useState, useMemo, useRef } from 'react';
+import { User } from 'firebase/auth';
+import * as XLSX from 'xlsx';
+import {
+  Users,
+  ShieldCheck,
+  SlidersHorizontal,
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  Eye,
+  Check,
+  X,
+  ArrowLeft,
+  ChevronRight,
+  Cloud,
+  CheckCircle2,
+  AlertTriangle,
+  Loader2,
+  Building2,
+  LogOut,
+  Menu,
+  Lock,
+  Power,
+  Database,
+  Upload,
+  Download,
+  Copy,
+  Link2,
+  Server,
+} from 'lucide-react';
+import {
+  AccessControlPolicy,
+  ActiveModuleId,
+  CompanyAccessScope,
+  FunctionalModuleId,
+  ModuleCompaniesMap,
+  ModuleCompanyEntry,
+  ModuleCompanyScopeMap,
+  SuiteModuleId,
+  UserPermissionRecord,
+  UserRole,
+} from '../../types';
+import {
+  ALL_FUNCTIONAL_MODULES,
+  ALL_SUITE_MODULES,
+  deriveLegacyCompanyFields,
+  emailToPermissionDocId,
+  getRecordModuleCompanyRule,
+  isValidEmailFormat,
+  normalizeCompanyKey,
+  normalizeEmail,
+  ROLE_METADATA,
+  sanitizeModuleCompanyAccess,
+  SUPER_ADMIN_EMAIL,
+} from '../../utils/permissions';
+import {
+  MODULE_COMPANY_DB_META,
+  sanitizeModuleCompanyEntry,
+  sanitizeModuleCompanyList,
+} from '../../utils/moduleCompanies';
+import { activeFirebaseInfo } from '../../services/auth';
+import { AjustesModuleLogo, ModuleEmblem, PremexBrandLogo } from '../ModuleIcons';
+import { AppSwitcherMenu } from '../AppSwitcherMenu';
+
+export interface ModuleDbSyncState {
+  status: 'idle' | 'saving' | 'saved' | 'pending' | 'error';
+  lastSyncedAtIso?: string;
+  updatedByName?: string;
+  errorMsg?: string;
+}
+
+interface SettingsModuleWorkspaceProps {
+  records: UserPermissionRecord[];
+  policy: AccessControlPolicy;
+  moduleCompanyDatabases: ModuleCompaniesMap;
+  moduleDbSyncStatus: Record<FunctionalModuleId, ModuleDbSyncState>;
+  currentUser: User | null;
+  onSignInWithGoogle: () => void;
+  onSignOut: () => void;
+  onSwitchModule: (moduleId: ActiveModuleId) => void;
+  onUpsertRecord: (record: UserPermissionRecord) => Promise<void>;
+  onDeleteRecord: (email: string) => Promise<void>;
+  onTogglePolicyStrictMode: (strictMode: boolean) => Promise<void>;
+  onSyncAllToCloud: () => Promise<void>;
+  onSaveModuleCompanies: (
+    moduleId: FunctionalModuleId,
+    companies: ModuleCompanyEntry[]
+  ) => Promise<void>;
+  onStartPreviewAs: (email: string) => void;
+  lastCloudSyncIso: string | null;
+  hasPendingCloudSync: boolean;
+}
+
+type SettingsTab = 'usuarios' | 'empresas_modulos' | 'roles' | 'politica';
+
+const ROLE_CAPABILITY_ROWS: {
+  capability: string;
+  admin: string;
+  operador: string;
+  consulta: string;
+}[] = [
+  {
+    capability: 'Ingresar a módulos asignados por correo electrónico',
+    admin: 'Todos los módulos',
+    operador: 'Solo módulos autorizados',
+    consulta: 'Solo módulos autorizados',
+  },
+  {
+    capability: 'Empresas visibles según la base de datos de cada módulo',
+    admin: 'Todas las sociedades',
+    operador: 'Independiente por módulo (Todas o seleccionadas)',
+    consulta: 'Independiente por módulo (Todas o seleccionadas)',
+  },
+  {
+    capability: 'Consultar matrices, movimientos, diferencias, bancos y viáticos',
+    admin: 'Permitido',
+    operador: 'Permitido',
+    consulta: 'Permitido',
+  },
+  {
+    capability: 'Exportar reportes a Excel y PDF',
+    admin: 'Permitido',
+    operador: 'Permitido',
+    consulta: 'Permitido',
+  },
+  {
+    capability: 'Cargar archivos Excel / CSV / facturas y editar movimientos',
+    admin: 'Permitido',
+    operador: 'Permitido',
+    consulta: 'Bloqueado',
+  },
+  {
+    capability: 'Ejecutar cruces bancarios, liquidaciones y editar comentarios',
+    admin: 'Permitido',
+    operador: 'Permitido',
+    consulta: 'Bloqueado',
+  },
+  {
+    capability: 'Guardar cambios compartidos en Firestore y exportar a Google Sheets',
+    admin: 'Permitido',
+    operador: 'Permitido',
+    consulta: 'Bloqueado',
+  },
+  {
+    capability: 'Administrar base de datos independiente de empresas por módulo',
+    admin: 'Permitido (CRUD + Excel)',
+    operador: 'Solo consulta',
+    consulta: 'Bloqueado',
+  },
+  {
+    capability: 'Ejecutar cierre mensual definitivo (inmutable)',
+    admin: 'Permitido',
+    operador: 'Bloqueado',
+    consulta: 'Bloqueado',
+  },
+  {
+    capability: 'Acceso a Ajustes, políticas de Firebase y gestión de correos',
+    admin: 'Permitido',
+    operador: 'Bloqueado',
+    consulta: 'Bloqueado',
+  },
+];
+
+const formatShortDate = (iso?: string | null): string => {
+  if (!iso) return 'Sin sincronizar';
+  try {
+    return new Date(iso).toLocaleString('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+  } catch {
+    return iso;
+  }
+};
+
+export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = ({
+  records,
+  policy,
+  moduleCompanyDatabases,
+  moduleDbSyncStatus,
+  currentUser,
+  onSignInWithGoogle,
+  onSignOut,
+  onSwitchModule,
+  onUpsertRecord,
+  onDeleteRecord,
+  onTogglePolicyStrictMode,
+  onSyncAllToCloud,
+  onSaveModuleCompanies,
+  onStartPreviewAs,
+  lastCloudSyncIso,
+  hasPendingCloudSync,
+}) => {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('usuarios');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'ALL' | UserRole>('ALL');
+  const [isSaving, setIsSaving] = useState(false);
+  const [confirmDeleteEmail, setConfirmDeleteEmail] = useState<string | null>(null);
+  const [copiedShareUrl, setCopiedShareUrl] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'info' | 'error';
+    message: string;
+  } | null>(null);
+
+  // User Permission Editor Modal State
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [isEditingExisting, setIsEditingExisting] = useState(false);
+  const [formEmail, setFormEmail] = useState('');
+  const [formName, setFormName] = useState('');
+  const [formRole, setFormRole] = useState<UserRole>('operador');
+  const [formModules, setFormModules] = useState<SuiteModuleId[]>([
+    'intercompany',
+    'bancos',
+    'viaticos',
+  ]);
+  const [formModuleCompanyAccess, setFormModuleCompanyAccess] =
+    useState<ModuleCompanyScopeMap>({
+      intercompany: { scope: 'all', companies: [] },
+      bancos: { scope: 'all', companies: [] },
+      viaticos: { scope: 'all', companies: [] },
+    });
+  const [activeConfigModule, setActiveConfigModule] =
+    useState<FunctionalModuleId>('intercompany');
+  const [formActive, setFormActive] = useState(true);
+  const [formNotes, setFormNotes] = useState('');
+  const [companySearch, setCompanySearch] = useState('');
+  const [quickAddCompanyInput, setQuickAddCompanyInput] = useState('');
+  const [isQuickAddingCompany, setIsQuickAddingCompany] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Per-Module Company Database Tab State
+  const [selectedDbModule, setSelectedDbModule] =
+    useState<FunctionalModuleId>('intercompany');
+  const [dbSearchQuery, setDbSearchQuery] = useState('');
+  const [isCompanyFormOpen, setIsCompanyFormOpen] = useState(false);
+  const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
+  const [compNombre, setCompNombre] = useState('');
+  const [compCodigo, setCompCodigo] = useState('');
+  const [compNit, setCompNit] = useState('');
+  const [compPais, setCompPais] = useState('');
+  const [compMoneda, setCompMoneda] = useState('USD');
+  const [compActivo, setCompActivo] = useState(true);
+  const [compFormError, setCompFormError] = useState<string | null>(null);
+  const [confirmDeleteCompId, setConfirmDeleteCompId] = useState<string | null>(null);
+  const [copySourceModule, setCopySourceModule] = useState<string>('');
+  const excelInputRef = useRef<HTMLInputElement | null>(null);
+
+  const isEditingSuperAdmin = normalizeEmail(formEmail) === SUPER_ADMIN_EMAIL;
+
+  const stats = useMemo(() => {
+    const active = records.filter((r) => r.active).length;
+    const admins = records.filter((r) => r.role === 'admin' && r.active).length;
+    const operadores = records.filter((r) => r.role === 'operador' && r.active).length;
+    const consulta = records.filter((r) => r.role === 'consulta' && r.active).length;
+    return { total: records.length, active, admins, operadores, consulta };
+  }, [records]);
+
+  const totalCatalogCompanies = useMemo(
+    () =>
+      ALL_FUNCTIONAL_MODULES.reduce(
+        (sum, modId) =>
+          sum + moduleCompanyDatabases[modId].filter((c) => c.activo !== false).length,
+        0
+      ),
+    [moduleCompanyDatabases]
+  );
+
+  const anyModuleDbPending = useMemo(
+    () =>
+      ALL_FUNCTIONAL_MODULES.some(
+        (m) =>
+          moduleDbSyncStatus[m]?.status === 'pending' ||
+          moduleDbSyncStatus[m]?.status === 'error'
+      ),
+    [moduleDbSyncStatus]
+  );
+
+  const filteredRecords = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return records.filter((rec) => {
+      if (roleFilter !== 'ALL' && rec.role !== roleFilter) return false;
+      if (!q) return true;
+      const moduleCompaniesMatch = ALL_FUNCTIONAL_MODULES.some((modId) => {
+        const rule = getRecordModuleCompanyRule(rec, modId);
+        return rule.companies.some((c) => c.toLowerCase().includes(q));
+      });
+      return (
+        rec.email.toLowerCase().includes(q) ||
+        rec.displayName.toLowerCase().includes(q) ||
+        rec.allowedCompanies.some((c) => c.toLowerCase().includes(q)) ||
+        moduleCompaniesMatch
+      );
+    });
+  }, [records, searchQuery, roleFilter]);
+
+  const enabledFunctionalModulesInForm = useMemo(
+    () =>
+      ALL_FUNCTIONAL_MODULES.filter(
+        (m) => formRole === 'admin' || formModules.includes(m)
+      ),
+    [formRole, formModules]
+  );
+
+  const effectiveActiveConfigModule: FunctionalModuleId = useMemo(() => {
+    if (enabledFunctionalModulesInForm.includes(activeConfigModule)) {
+      return activeConfigModule;
+    }
+    return enabledFunctionalModulesInForm[0] || 'intercompany';
+  }, [enabledFunctionalModulesInForm, activeConfigModule]);
+
+  const activeModuleRule = useMemo(() => {
+    const rule = formModuleCompanyAccess[effectiveActiveConfigModule];
+    return rule || { scope: 'all' as CompanyAccessScope, companies: [] as string[] };
+  }, [formModuleCompanyAccess, effectiveActiveConfigModule]);
+
+  const activeModuleCompanyOptions = useMemo(() => {
+    const dbList = moduleCompanyDatabases[effectiveActiveConfigModule] || [];
+    const map = new Map<string, ModuleCompanyEntry>();
+    dbList.forEach((c) => {
+      if (c.activo !== false) {
+        map.set(normalizeCompanyKey(c.nombre), c);
+      }
+    });
+    activeModuleRule.companies.forEach((name, idx) => {
+      const k = normalizeCompanyKey(name);
+      if (k && !map.has(k)) {
+        map.set(k, {
+          id: `assigned-${idx}-${k}`,
+          nombre: name,
+          codigo: '',
+          nit: '',
+          pais: '',
+          moneda: MODULE_COMPANY_DB_META[effectiveActiveConfigModule].defaultCurrency,
+          activo: true,
+        });
+      }
+    });
+    const q = companySearch.trim().toLowerCase();
+    return Array.from(map.values())
+      .filter(
+        (c) =>
+          !q ||
+          c.nombre.toLowerCase().includes(q) ||
+          (c.codigo || '').toLowerCase().includes(q) ||
+          (c.pais || '').toLowerCase().includes(q)
+      )
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  }, [moduleCompanyDatabases, effectiveActiveConfigModule, activeModuleRule.companies, companySearch]);
+
+  // Selected DB module filtered table rows
+  const selectedDbCompanies = moduleCompanyDatabases[selectedDbModule] || [];
+  const filteredDbCompanies = useMemo(() => {
+    const q = dbSearchQuery.trim().toLowerCase();
+    return selectedDbCompanies.filter((c) => {
+      if (!q) return true;
+      return (
+        c.nombre.toLowerCase().includes(q) ||
+        (c.codigo || '').toLowerCase().includes(q) ||
+        (c.nit || '').toLowerCase().includes(q) ||
+        (c.pais || '').toLowerCase().includes(q)
+      );
+    });
+  }, [selectedDbCompanies, dbSearchQuery]);
+
+  // --- User Permission Modal Handlers ---
+
+  const openNewUserModal = () => {
+    setIsEditingExisting(false);
+    setFormEmail('');
+    setFormName('');
+    setFormRole('operador');
+    setFormModules(['intercompany', 'bancos', 'viaticos']);
+    setFormModuleCompanyAccess({
+      intercompany: { scope: 'all', companies: [] },
+      bancos: { scope: 'all', companies: [] },
+      viaticos: { scope: 'all', companies: [] },
+    });
+    setActiveConfigModule('intercompany');
+    setFormActive(true);
+    setFormNotes('');
+    setCompanySearch('');
+    setQuickAddCompanyInput('');
+    setFormError(null);
+    setIsEditorOpen(true);
+  };
+
+  const openEditUserModal = (rec: UserPermissionRecord) => {
+    setIsEditingExisting(true);
+    setFormEmail(rec.email);
+    setFormName(rec.displayName);
+    setFormRole(rec.role);
+    const nextModules: SuiteModuleId[] =
+      rec.role === 'admin' ? [...ALL_SUITE_MODULES] : [...rec.allowedModules];
+    setFormModules(nextModules);
+
+    const sanitizedPerMod =
+      rec.role === 'admin'
+        ? {}
+        : sanitizeModuleCompanyAccess(
+            rec.moduleCompanyAccess,
+            nextModules,
+            rec.companyScope,
+            rec.allowedCompanies
+          );
+    setFormModuleCompanyAccess(sanitizedPerMod);
+    const firstFunctional =
+      ALL_FUNCTIONAL_MODULES.find((m) => nextModules.includes(m)) || 'intercompany';
+    setActiveConfigModule(firstFunctional);
+    setFormActive(rec.active);
+    setFormNotes(rec.notes || '');
+    setCompanySearch('');
+    setQuickAddCompanyInput('');
+    setFormError(null);
+    setIsEditorOpen(true);
+  };
+
+  const handleToggleModule = (modId: FunctionalModuleId) => {
+    if (formRole === 'admin') return;
+    setFormModules((prev) => {
+      const exists = prev.includes(modId);
+      if (exists) {
+        return prev.filter((m) => m !== modId);
+      }
+      setFormModuleCompanyAccess((prevMap) => ({
+        ...prevMap,
+        [modId]: prevMap[modId] || { scope: 'all', companies: [] },
+      }));
+      setActiveConfigModule(modId);
+      return [...prev, modId];
+    });
+  };
+
+  const setModuleScopeInForm = (
+    modId: FunctionalModuleId,
+    scope: CompanyAccessScope
+  ) => {
+    setFormModuleCompanyAccess((prev) => ({
+      ...prev,
+      [modId]: {
+        scope,
+        companies: prev[modId]?.companies || [],
+      },
+    }));
+  };
+
+  const handleToggleCompanyForActiveModule = (companyName: string) => {
+    const modId = effectiveActiveConfigModule;
+    const targetKey = normalizeCompanyKey(companyName);
+    setFormModuleCompanyAccess((prev) => {
+      const cur = prev[modId] || { scope: 'selected', companies: [] };
+      const exists = cur.companies.some((c) => normalizeCompanyKey(c) === targetKey);
+      const nextCompanies = exists
+        ? cur.companies.filter((c) => normalizeCompanyKey(c) !== targetKey)
+        : [...cur.companies, companyName];
+      return {
+        ...prev,
+        [modId]: {
+          scope: 'selected',
+          companies: nextCompanies,
+        },
+      };
+    });
+  };
+
+  const handleSelectAllCompaniesInActiveModule = () => {
+    const modId = effectiveActiveConfigModule;
+    const allNames = activeModuleCompanyOptions.map((c) => c.nombre);
+    setFormModuleCompanyAccess((prev) => ({
+      ...prev,
+      [modId]: {
+        scope: 'selected',
+        companies: allNames,
+      },
+    }));
+  };
+
+  const handleClearCompaniesInActiveModule = () => {
+    const modId = effectiveActiveConfigModule;
+    setFormModuleCompanyAccess((prev) => ({
+      ...prev,
+      [modId]: {
+        scope: 'selected',
+        companies: [],
+      },
+    }));
+  };
+
+  const handleQuickAddCompanyToModuleDb = async () => {
+    const clean = quickAddCompanyInput.trim();
+    if (!clean) return;
+    const modId = effectiveActiveConfigModule;
+    const key = normalizeCompanyKey(clean);
+    const currentDb = moduleCompanyDatabases[modId] || [];
+
+    setIsQuickAddingCompany(true);
+    try {
+      if (!currentDb.some((c) => normalizeCompanyKey(c.nombre) === key)) {
+        const newEntry = sanitizeModuleCompanyEntry(
+          {
+            id: `${modId}-comp-${Date.now()}`,
+            nombre: clean,
+            moneda: MODULE_COMPANY_DB_META[modId].defaultCurrency,
+            activo: true,
+          },
+          currentDb.length
+        );
+        await onSaveModuleCompanies(modId, [...currentDb, newEntry]);
+      }
+
+      setFormModuleCompanyAccess((prev) => {
+        const cur = prev[modId] || { scope: 'selected', companies: [] };
+        const alreadyChecked = cur.companies.some(
+          (c) => normalizeCompanyKey(c) === key
+        );
+        return {
+          ...prev,
+          [modId]: {
+            scope: 'selected',
+            companies: alreadyChecked ? cur.companies : [...cur.companies, clean],
+          },
+        };
+      });
+      setQuickAddCompanyInput('');
+    } catch (err: any) {
+      setFormError(
+        err?.message ||
+          `No se pudo agregar "${clean}" a la base de datos de ${MODULE_COMPANY_DB_META[modId].shortName}.`
+      );
+    } finally {
+      setIsQuickAddingCompany(false);
+    }
+  };
+
+  const handleSubmitForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    const cleanEmail = normalizeEmail(formEmail);
+    if (!isValidEmailFormat(cleanEmail)) {
+      setFormError(
+        'Ingresa un correo electrónico corporativo válido (ej. usuario@premexcorp.com).'
+      );
+      return;
+    }
+
+    if (
+      !isEditingExisting &&
+      records.some((r) => normalizeEmail(r.email) === cleanEmail)
+    ) {
+      setFormError(
+        'Este correo ya tiene permisos registrados. Edita el registro existente.'
+      );
+      return;
+    }
+
+    const effectiveRole: UserRole =
+      cleanEmail === SUPER_ADMIN_EMAIL ? 'admin' : formRole;
+    const cleanedAllowedModules: SuiteModuleId[] =
+      effectiveRole === 'admin'
+        ? [...ALL_SUITE_MODULES]
+        : formModules.filter((m) => m !== 'ajustes');
+
+    if (effectiveRole !== 'admin' && cleanedAllowedModules.length === 0) {
+      setFormError('Selecciona al menos un módulo permitido para este correo.');
+      return;
+    }
+
+    const sanitizedAccess: ModuleCompanyScopeMap =
+      effectiveRole === 'admin'
+        ? {}
+        : sanitizeModuleCompanyAccess(
+            formModuleCompanyAccess,
+            cleanedAllowedModules,
+            'all',
+            []
+          );
+
+    if (effectiveRole !== 'admin') {
+      const invalidMod = ALL_FUNCTIONAL_MODULES.find((modId) => {
+        if (!cleanedAllowedModules.includes(modId)) return false;
+        const rule = sanitizedAccess[modId];
+        return rule && rule.scope === 'selected' && rule.companies.length === 0;
+      });
+      if (invalidMod) {
+        setActiveConfigModule(invalidMod);
+        setFormError(
+          `En el módulo "${MODULE_COMPANY_DB_META[invalidMod].name}" elegiste sociedades específicas pero no marcaste ninguna. Selecciona al menos una sociedad o cambia ese módulo a "Todas".`
+        );
+        return;
+      }
+    }
+
+    const legacy = deriveLegacyCompanyFields(
+      sanitizedAccess,
+      cleanedAllowedModules,
+      effectiveRole
+    );
+
+    const nextRecord: UserPermissionRecord = {
+      id: emailToPermissionDocId(cleanEmail),
+      email: cleanEmail,
+      displayName: formName.trim() || cleanEmail.split('@')[0],
+      role: effectiveRole,
+      allowedModules: cleanedAllowedModules,
+      companyScope: legacy.companyScope,
+      allowedCompanies: legacy.allowedCompanies,
+      moduleCompanyAccess: sanitizedAccess,
+      active: cleanEmail === SUPER_ADMIN_EMAIL ? true : formActive,
+      notes: formNotes.trim() || undefined,
+      updatedAtIso: new Date().toISOString(),
+    };
+
+    setIsSaving(true);
+    try {
+      await onUpsertRecord(nextRecord);
+      setIsEditorOpen(false);
+      setFeedback({
+        type: 'success',
+        message: currentUser
+          ? `Permisos por módulo y sociedades de ${cleanEmail} guardados y sincronizados en Firestore.`
+          : `Permisos de ${cleanEmail} guardados localmente. Inicia sesión con Google para publicarlos en Firestore.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message:
+          err?.message ||
+          'Se guardó localmente, pero ocurrió un error al sincronizar con Firestore.',
+      });
+      setIsEditorOpen(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleQuickToggleActive = async (rec: UserPermissionRecord) => {
+    if (normalizeEmail(rec.email) === SUPER_ADMIN_EMAIL) return;
+    setIsSaving(true);
+    try {
+      await onUpsertRecord({
+        ...rec,
+        active: !rec.active,
+        updatedAtIso: new Date().toISOString(),
+      });
+      setFeedback({
+        type: 'info',
+        message: `Acceso de ${rec.email} ${!rec.active ? 'activado' : 'suspendido'}.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'Error actualizando el estado del usuario.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleConfirmDeleteUser = async (email: string) => {
+    setIsSaving(true);
+    try {
+      await onDeleteRecord(email);
+      setConfirmDeleteEmail(null);
+      setFeedback({
+        type: 'info',
+        message: `Regla de permisos para ${email} eliminada.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'No se pudo eliminar el registro en la nube.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // --- Per-Module Company Database Handlers ---
+
+  const openAddCompanyForm = () => {
+    setEditingCompanyId(null);
+    setCompNombre('');
+    setCompCodigo('');
+    setCompNit('');
+    setCompPais('');
+    setCompMoneda(MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency);
+    setCompActivo(true);
+    setCompFormError(null);
+    setIsCompanyFormOpen(true);
+  };
+
+  const openEditCompanyForm = (comp: ModuleCompanyEntry) => {
+    setEditingCompanyId(comp.id);
+    setCompNombre(comp.nombre);
+    setCompCodigo(comp.codigo || '');
+    setCompNit(comp.nit || '');
+    setCompPais(comp.pais || '');
+    setCompMoneda(
+      comp.moneda || MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency
+    );
+    setCompActivo(comp.activo !== false);
+    setCompFormError(null);
+    setIsCompanyFormOpen(true);
+  };
+
+  const handleSaveCompanyEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCompFormError(null);
+    const cleanName = compNombre.trim();
+    if (!cleanName) {
+      setCompFormError('El nombre oficial de la sociedad es obligatorio.');
+      return;
+    }
+
+    const key = normalizeCompanyKey(cleanName);
+    const duplicate = selectedDbCompanies.find(
+      (c) => normalizeCompanyKey(c.nombre) === key && c.id !== editingCompanyId
+    );
+    if (duplicate) {
+      setCompFormError(
+        `Ya existe una sociedad llamada "${duplicate.nombre}" en la base de datos de ${MODULE_COMPANY_DB_META[selectedDbModule].shortName}.`
+      );
+      return;
+    }
+
+    const entry = sanitizeModuleCompanyEntry({
+      id: editingCompanyId || `${selectedDbModule}-comp-${Date.now()}`,
+      nombre: cleanName,
+      codigo: compCodigo,
+      nit: compNit,
+      pais: compPais,
+      moneda: compMoneda || MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+      activo: selectedDbModule === 'intercompany' ? true : compActivo,
+    });
+
+    const nextList = editingCompanyId
+      ? selectedDbCompanies.map((c) => (c.id === editingCompanyId ? entry : c))
+      : [...selectedDbCompanies, entry];
+
+    setIsSaving(true);
+    try {
+      await onSaveModuleCompanies(selectedDbModule, nextList);
+      setIsCompanyFormOpen(false);
+      setEditingCompanyId(null);
+      setFeedback({
+        type: 'success',
+        message: currentUser
+          ? `Sociedad "${entry.nombre}" guardada en la base de datos de ${MODULE_COMPANY_DB_META[selectedDbModule].name} y sincronizada en Firestore.`
+          : `Sociedad "${entry.nombre}" guardada localmente en ${MODULE_COMPANY_DB_META[selectedDbModule].name}. Inicia sesión con Google para sincronizar en Firestore.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message:
+          err?.message ||
+          'No se pudo sincronizar la base de datos de sociedades en Firestore.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleCompanyActive = async (comp: ModuleCompanyEntry) => {
+    if (selectedDbModule === 'intercompany') return;
+    const nextList = selectedDbCompanies.map((c) =>
+      c.id === comp.id ? { ...c, activo: !(c.activo !== false) } : c
+    );
+    setIsSaving(true);
+    try {
+      await onSaveModuleCompanies(selectedDbModule, nextList);
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'Error al actualizar el estado de la sociedad.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteCompanyEntry = async (compId: string) => {
+    const target = selectedDbCompanies.find((c) => c.id === compId);
+    const nextList = selectedDbCompanies.filter((c) => c.id !== compId);
+    setIsSaving(true);
+    try {
+      await onSaveModuleCompanies(selectedDbModule, nextList);
+      setConfirmDeleteCompId(null);
+      setFeedback({
+        type: 'info',
+        message: `Sociedad "${target?.nombre || ''}" eliminada de la base de datos de ${MODULE_COMPANY_DB_META[selectedDbModule].shortName}.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'Error al eliminar la sociedad en Firestore.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCopyFromAnotherModule = async (sourceModId: FunctionalModuleId) => {
+    if (sourceModId === selectedDbModule) return;
+    const sourceList = moduleCompanyDatabases[sourceModId] || [];
+    const existingKeys = new Set(
+      selectedDbCompanies.map((c) => normalizeCompanyKey(c.nombre))
+    );
+    const additions: ModuleCompanyEntry[] = [];
+    sourceList.forEach((src, idx) => {
+      if (src.activo === false) return;
+      const key = normalizeCompanyKey(src.nombre);
+      if (!key || existingKeys.has(key)) return;
+      existingKeys.add(key);
+      additions.push(
+        sanitizeModuleCompanyEntry(
+          {
+            id: `${selectedDbModule}-copy-${Date.now()}-${idx}`,
+            nombre: src.nombre,
+            codigo: src.codigo,
+            nit: src.nit,
+            pais: src.pais,
+            moneda: src.moneda || MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+            activo: true,
+          },
+          idx
+        )
+      );
+    });
+
+    setCopySourceModule('');
+    if (additions.length === 0) {
+      setFeedback({
+        type: 'info',
+        message: `Todas las sociedades activas de ${MODULE_COMPANY_DB_META[sourceModId].shortName} ya existen en ${MODULE_COMPANY_DB_META[selectedDbModule].shortName}.`,
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await onSaveModuleCompanies(selectedDbModule, [
+        ...selectedDbCompanies,
+        ...additions,
+      ]);
+      setFeedback({
+        type: 'success',
+        message: `Se copiaron ${additions.length} sociedad(es) independientes desde ${MODULE_COMPANY_DB_META[sourceModId].shortName} hacia ${MODULE_COMPANY_DB_META[selectedDbModule].shortName}.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'Error al copiar sociedades entre módulos.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleExportModuleCompaniesExcel = () => {
+    const rows = selectedDbCompanies.map((c) => ({
+      Nombre: c.nombre,
+      Codigo: c.codigo || '',
+      NIT: c.nit || '',
+      Pais: c.pais || '',
+      Moneda: c.moneda || MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+      Activo: c.activo !== false ? 'SI' : 'NO',
+    }));
+    const ws = XLSX.utils.json_to_sheet(
+      rows.length > 0
+        ? rows
+        : [
+            {
+              Nombre: 'Ejemplo Sociedad S.A.',
+              Codigo: 'SOC-01',
+              NIT: '900000000-1',
+              Pais: 'Guatemala',
+              Moneda: MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+              Activo: 'SI',
+            },
+          ]
+    );
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      ws,
+      MODULE_COMPANY_DB_META[selectedDbModule].shortName.slice(0, 31)
+    );
+    XLSX.writeFile(wb, `BD_Sociedades_${selectedDbModule}.xlsx`);
+  };
+
+  const handleImportModuleCompaniesExcel = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const firstSheet = wb.SheetNames[0];
+      if (!firstSheet) throw new Error('El archivo Excel no contiene hojas.');
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+        wb.Sheets[firstSheet],
+        { defval: '' }
+      );
+      if (rawRows.length === 0) {
+        throw new Error('No se encontraron filas de sociedades en el archivo.');
+      }
+
+      const pickCol = (row: Record<string, unknown>, candidates: string[]): string => {
+        const entries = Object.entries(row);
+        for (const cand of candidates) {
+          const hit = entries.find(([k]) =>
+            normalizeCompanyKey(k).includes(cand)
+          );
+          if (hit && String(hit[1] ?? '').trim()) {
+            return String(hit[1]).trim();
+          }
+        }
+        return '';
+      };
+
+      const existingKeys = new Set(
+        selectedDbCompanies.map((c) => normalizeCompanyKey(c.nombre))
+      );
+      const imported: ModuleCompanyEntry[] = [];
+
+      rawRows.forEach((row, idx) => {
+        const nombre = pickCol(row, [
+          'nombre',
+          'sociedad',
+          'empresa',
+          'razon social',
+          'compania',
+        ]);
+        const key = normalizeCompanyKey(nombre);
+        if (!key || existingKeys.has(key)) return;
+        existingKeys.add(key);
+
+        const activeRaw = pickCol(row, ['activo', 'estado']).toLowerCase();
+        const activo =
+          activeRaw === 'no' || activeRaw === 'false' || activeRaw === 'inactivo'
+            ? false
+            : true;
+
+        imported.push(
+          sanitizeModuleCompanyEntry(
+            {
+              id: `${selectedDbModule}-xls-${Date.now()}-${idx}`,
+              nombre,
+              codigo: pickCol(row, ['codigo', 'cod', 'clave']),
+              nit: pickCol(row, ['nit', 'tax', 'rfc', 'ruc', 'identificacion']),
+              pais: pickCol(row, ['pais', 'country']),
+              moneda:
+                pickCol(row, ['moneda', 'currency', 'divisa']) ||
+                MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+              activo: selectedDbModule === 'intercompany' ? true : activo,
+            },
+            idx
+          )
+        );
+      });
+
+      if (imported.length === 0) {
+        setFeedback({
+          type: 'info',
+          message:
+            'No se importaron sociedades nuevas (todas ya existían o faltaba la columna Nombre/Sociedad).',
+        });
+        return;
+      }
+
+      const merged = sanitizeModuleCompanyList([...selectedDbCompanies, ...imported]);
+      setIsSaving(true);
+      await onSaveModuleCompanies(selectedDbModule, merged);
+      setFeedback({
+        type: 'success',
+        message: `Se importaron ${imported.length} sociedad(es) a la base de datos de ${MODULE_COMPANY_DB_META[selectedDbModule].name}.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message:
+          err?.message ||
+          'No se pudo leer el archivo Excel de sociedades. Verifica las columnas Nombre, Codigo, NIT, Pais, Moneda.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSyncClick = async () => {
+    if (!currentUser) {
+      setFeedback({
+        type: 'info',
+        message:
+          'Inicia sesión con tu cuenta administradora de Google para publicar permisos y bases de empresas en Firestore.',
+      });
+      onSignInWithGoogle();
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSyncAllToCloud();
+      setFeedback({
+        type: 'success',
+        message:
+          'Permisos de usuarios, políticas y las 6 bases de datos de empresas por módulo fueron publicados en Firestore.',
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message:
+          err?.message ||
+          'No se pudo sincronizar con Firestore. Verifica que iniciaste sesión como administrador.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const shareableAppUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}`
+      : '';
+
+  const navItems: {
+    id: SettingsTab;
+    label: string;
+    description: string;
+    icon: React.ComponentType<{ className?: string }>;
+    counter?: string;
+  }[] = [
+    {
+      id: 'usuarios',
+      label: 'Usuarios y Permisos',
+      description: 'Correos, módulos y empresas',
+      icon: Users,
+      counter: String(stats.total),
+    },
+    {
+      id: 'empresas_modulos',
+      label: 'BD Empresas por Módulo',
+      description: 'Catálogo independiente (6 mód.)',
+      icon: Database,
+      counter: String(totalCatalogCompanies),
+    },
+    {
+      id: 'roles',
+      label: 'Matriz de Roles',
+      description: 'Admin, Operador y Consulta',
+      icon: ShieldCheck,
+    },
+    {
+      id: 'politica',
+      label: 'Política y Firebase Cloud',
+      description: 'Seguridad y enlace compartido',
+      icon: SlidersHorizontal,
+    },
+  ];
+
+  const selectedDbMeta = MODULE_COMPANY_DB_META[selectedDbModule];
+  const selectedDbSync = moduleDbSyncStatus[selectedDbModule] || { status: 'idle' };
+
+  return (
+    <div className="min-h-screen bg-[#F5F8FC] flex flex-col font-sans text-slate-800 antialiased">
+      {/* Mobile Backdrop */}
+      {isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 z-40 lg:hidden backdrop-blur-xs"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Left Sidebar */}
+      <aside
+        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-gradient-to-b from-[#0E224D] via-[#132E66] to-[#0B1C3F] text-white flex flex-col border-r border-blue-900/40 shadow-xl transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="px-4 py-3.5 flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
+          <button
+            type="button"
+            onClick={() => onSwitchModule('launcher')}
+            title="Volver al Portal de Módulos Premex"
+            className="bg-white rounded-xl px-2.5 py-1.5 flex items-center shadow-xs hover:opacity-95 transition-opacity cursor-pointer"
+          >
+            <PremexBrandLogo className="h-7 w-auto" />
+          </button>
+
+          <div className="flex items-center gap-1">
+            <AppSwitcherMenu
+              currentModule="ajustes"
+              onSelectModule={(mod) => {
+                setIsMobileMenuOpen(false);
+                onSwitchModule(mod);
+              }}
+              canAccessModule={() => true}
+              variant="dark"
+            />
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="lg:hidden p-1.5 text-blue-200 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer"
+              aria-label="Cerrar menú"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="px-5 py-4 border-b border-white/10 flex items-center gap-3">
+          <AjustesModuleLogo className="w-10 h-10 shrink-0" />
+          <div className="min-w-0">
+            <h1 className="font-bold text-sm tracking-tight text-white truncate">
+              Ajustes y Configuraciones
+            </h1>
+            <p className="text-[11px] text-sky-200/80 truncate">
+              RBAC y BD por Módulo
+            </p>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 text-[11px] font-semibold tracking-wider text-sky-200/60 uppercase">
+          Administración
+        </div>
+
+        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(item.id);
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full text-left px-3.5 py-2.5 rounded-xl flex items-center justify-between transition-all cursor-pointer ${
+                  active
+                    ? 'bg-[#1E60A8] text-white font-semibold shadow-sm'
+                    : 'text-blue-100/90 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      active ? 'bg-white/20 text-white' : 'bg-white/8 text-sky-200'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium leading-tight truncate">
+                      {item.label}
+                    </div>
+                    <div
+                      className={`text-[11px] truncate mt-0.5 ${
+                        active ? 'text-sky-100' : 'text-blue-200/60'
+                      }`}
+                    >
+                      {item.description}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                  {item.counter && (
+                    <span className="text-[11px] font-mono font-semibold tabular-nums">
+                      {item.counter}
+                    </span>
+                  )}
+                  {active && <ChevronRight className="w-4 h-4 text-sky-200" />}
+                </div>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="p-3.5 border-t border-white/10 bg-[#0A1838]/70">
+          <button
+            type="button"
+            onClick={() => onSwitchModule('launcher')}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-white/8 hover:bg-white/14 border border-white/12 text-xs font-semibold text-sky-100 transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Volver al Portal de Módulos</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="lg:pl-72 flex flex-col min-h-screen">
+        {/* Top Bar */}
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90">
+          <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsMobileMenuOpen(true)}
+                className="lg:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                aria-label="Abrir menú"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                  <button
+                    type="button"
+                    onClick={() => onSwitchModule('launcher')}
+                    className="hover:text-[#1E60A8] transition-colors cursor-pointer"
+                  >
+                    Premex
+                  </button>
+                  <ChevronRight className="w-3 h-3 text-slate-400" />
+                  <span className="text-[#19377B]">Ajustes y Configuraciones</span>
+                </div>
+                <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+                  {activeTab === 'usuarios'
+                    ? 'Permisos por Correo, Módulos y Sociedades'
+                    : activeTab === 'empresas_modulos'
+                    ? 'Base de Datos Independiente de Empresas por Módulo'
+                    : activeTab === 'roles'
+                    ? 'Matriz de Permisos por Rol'
+                    : 'Política de Seguridad y Conexión Firebase / Google Cloud'}
+                </h2>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleSyncClick}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                {isSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Cloud className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {isSaving
+                    ? 'Publicando...'
+                    : hasPendingCloudSync || anyModuleDbPending
+                    ? 'Publicar Todo en Nube'
+                    : 'Sincronizar Nube'}
+                </span>
+              </button>
+
+              {currentUser ? (
+                <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200">
+                  {currentUser.photoURL ? (
+                    <img
+                      src={currentUser.photoURL}
+                      alt={currentUser.displayName || 'Admin'}
+                      className="w-7 h-7 rounded-full border border-slate-200"
+                      title={currentUser.email || 'Administrador'}
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-[#19377B]/10 text-[#19377B] flex items-center justify-center font-bold text-xs">
+                      {currentUser.displayName ? currentUser.displayName[0] : 'A'}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    title="Cerrar sesión"
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onSignInWithGoogle}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Iniciar Sesión Google
+                </button>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {/* Feedback Banner */}
+        {feedback && (
+          <div className="px-4 sm:px-6 lg:px-8 pt-4 max-w-7xl mx-auto w-full">
+            <div
+              className={`px-4 py-2.5 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+                feedback.type === 'success'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : feedback.type === 'error'
+                  ? 'bg-rose-50 border-rose-200 text-rose-900'
+                  : 'bg-blue-50 border-blue-200 text-blue-900'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {feedback.type === 'error' ? (
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                )}
+                <span className="font-medium">{feedback.message}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFeedback(null)}
+                className="p-1 opacity-70 hover:opacity-100 cursor-pointer"
+                aria-label="Cerrar aviso"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
+          {/* TAB 1: Usuarios y Permisos */}
+          {activeTab === 'usuarios' && (
+            <>
+              {/* Clean Single-Elevation Stat Strip */}
+              <section className="bg-white rounded-2xl border border-slate-200/90 grid grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+                <div className="p-5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Correos Configurados
+                  </div>
+                  <div className="mt-1.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+                    {stats.total}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
+                    {stats.active} activos · {stats.total - stats.active} suspendidos
+                  </div>
+                </div>
+
+                <div className="p-5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Administradores
+                  </div>
+                  <div className="mt-1.5 text-2xl font-bold text-[#19377B] font-mono tabular-nums">
+                    {stats.admins}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    Control total de módulos y BD
+                  </div>
+                </div>
+
+                <div className="p-5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Operadores
+                  </div>
+                  <div className="mt-1.5 text-2xl font-bold text-teal-700 font-mono tabular-nums">
+                    {stats.operadores}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    Operación por módulo y sociedad
+                  </div>
+                </div>
+
+                <div className="p-5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Solo Consulta
+                  </div>
+                  <div className="mt-1.5 text-2xl font-bold text-slate-700 font-mono tabular-nums">
+                    {stats.consulta}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    Lectura y reportes por módulo
+                  </div>
+                </div>
+              </section>
+
+              {/* Toolbar */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={openNewUserModal}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Agregar Correo con Permisos</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('empresas_modulos')}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#19377B] bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    <span>Administrar BD de Empresas ({totalCatalogCompanies})</span>
+                  </button>
+
+                  <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70">
+                    {(
+                      [
+                        { id: 'ALL', label: 'Todos' },
+                        { id: 'admin', label: 'Admins' },
+                        { id: 'operador', label: 'Operadores' },
+                        { id: 'consulta', label: 'Consulta' },
+                      ] as const
+                    ).map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setRoleFilter(tab.id)}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                          roleFilter === tab.id
+                            ? 'bg-white text-[#19377B] shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="relative w-full lg:w-72">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Buscar por correo, nombre o sociedad..."
+                    className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                      aria-label="Limpiar búsqueda"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Directory Table */}
+              <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Directorio de Permisos por Correo Electrónico
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Cada correo define los módulos autorizados y las sociedades permitidas dentro de la base de datos de cada módulo
+                    </p>
+                  </div>
+                  <span className="text-xs text-slate-500 tabular-nums">
+                    {filteredRecords.length} de {records.length} usuarios
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        <th className="py-3 px-5">Usuario y Correo</th>
+                        <th className="py-3 px-4">Rol</th>
+                        <th className="py-3 px-4">
+                          Módulos y Sociedades Autorizadas (Independiente por Módulo)
+                        </th>
+                        <th className="py-3 px-5 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      {filteredRecords.map((rec) => {
+                        const isSuper = normalizeEmail(rec.email) === SUPER_ADMIN_EMAIL;
+                        const roleColor =
+                          rec.role === 'admin'
+                            ? 'text-[#19377B]'
+                            : rec.role === 'operador'
+                            ? 'text-teal-700'
+                            : 'text-slate-600';
+
+                        const functionalAssigned = ALL_FUNCTIONAL_MODULES.filter((m) =>
+                          rec.allowedModules.includes(m)
+                        );
+
+                        return (
+                          <tr
+                            key={rec.id}
+                            className={`transition-colors align-top ${
+                              rec.active
+                                ? 'hover:bg-slate-50/70'
+                                : 'bg-slate-50/80 opacity-65'
+                            }`}
+                          >
+                            <td className="py-3.5 px-5">
+                              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                <span>{rec.displayName}</span>
+                                {!rec.active && (
+                                  <span className="text-[11px] font-semibold text-rose-600">
+                                    · Suspendido
+                                  </span>
+                                )}
+                              </div>
+                              <div className="font-mono text-[11px] text-slate-500 mt-0.5">
+                                {rec.email}
+                              </div>
+                              {rec.notes && (
+                                <div className="text-[11px] text-slate-400 mt-1 max-w-xs truncate">
+                                  {rec.notes}
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="py-3.5 px-4 whitespace-nowrap">
+                              <div className={`font-bold ${roleColor}`}>
+                                {ROLE_METADATA[rec.role].label}
+                              </div>
+                              {isSuper && (
+                                <div className="text-[10px] text-slate-400">
+                                  Principal protegido
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="py-3.5 px-4 max-w-[440px]">
+                              {rec.role === 'admin' ? (
+                                <div className="text-slate-700 font-medium">
+                                  Todos los módulos y todas las bases de sociedades · Incluye
+                                  Ajustes
+                                </div>
+                              ) : functionalAssigned.length === 0 ? (
+                                <span className="text-rose-600 font-medium">
+                                  Sin módulos asignados
+                                </span>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {functionalAssigned.map((modId) => {
+                                    const rule = getRecordModuleCompanyRule(rec, modId);
+                                    const modMeta = MODULE_COMPANY_DB_META[modId];
+                                    return (
+                                      <div
+                                        key={modId}
+                                        className="flex items-start gap-2 text-xs leading-snug"
+                                      >
+                                        <ModuleEmblem
+                                          moduleId={modId}
+                                          className="w-4 h-4 shrink-0 mt-0.5"
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                          <span className="font-semibold text-slate-800">
+                                            {modMeta.shortName}:
+                                          </span>{' '}
+                                          {rule.scope === 'all' ? (
+                                            <span className="text-slate-600">
+                                              Todas las sociedades ({moduleCompanyDatabases[modId].filter((c) => c.activo !== false).length})
+                                            </span>
+                                          ) : (
+                                            <span className="text-[#19377B]">
+                                              <strong className="tabular-nums">
+                                                {rule.companies.length}
+                                              </strong>{' '}
+                                              —{' '}
+                                              <span className="text-slate-600">
+                                                {rule.companies.join(', ') || 'Ninguna'}
+                                              </span>
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center gap-1">
+                                {!isSuper && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onStartPreviewAs(rec.email)}
+                                    title={`Previsualizar la plataforma con los permisos de ${rec.email}`}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[#1E60A8] hover:bg-[#1E60A8]/10 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>Previsualizar</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => openEditUserModal(rec)}
+                                  title="Editar permisos"
+                                  className="p-1.5 text-slate-500 hover:text-[#19377B] hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+
+                                {!isSuper && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleQuickToggleActive(rec)}
+                                    title={
+                                      rec.active ? 'Suspender acceso' : 'Reactivar acceso'
+                                    }
+                                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                      rec.active
+                                        ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
+                                        : 'text-emerald-600 hover:bg-emerald-50'
+                                    }`}
+                                  >
+                                    <Power className="w-4 h-4" />
+                                  </button>
+                                )}
+
+                                {!isSuper &&
+                                  (confirmDeleteEmail === rec.email ? (
+                                    <div className="inline-flex items-center gap-1 ml-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleConfirmDeleteUser(rec.email)}
+                                        className="px-2 py-1 text-[11px] font-semibold bg-rose-600 text-white rounded-lg cursor-pointer"
+                                      >
+                                        Eliminar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteEmail(null)}
+                                        className="px-2 py-1 text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-lg cursor-pointer"
+                                      >
+                                        No
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteEmail(rec.email)}
+                                      title="Eliminar regla"
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  ))}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          )}
+
+          {/* TAB 2: Base de Datos de Empresas por Módulo */}
+          {activeTab === 'empresas_modulos' && (
+            <div className="space-y-6">
+              {/* 6-Module Independent Database Selector */}
+              <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {ALL_FUNCTIONAL_MODULES.map((modId) => {
+                  const meta = MODULE_COMPANY_DB_META[modId];
+                  const list = moduleCompanyDatabases[modId] || [];
+                  const activeCount = list.filter((c) => c.activo !== false).length;
+                  const sync = moduleDbSyncStatus[modId] || { status: 'idle' };
+                  const isSelected = selectedDbModule === modId;
+
+                  return (
+                    <button
+                      key={modId}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDbModule(modId);
+                        setDbSearchQuery('');
+                        setIsCompanyFormOpen(false);
+                        setConfirmDeleteCompId(null);
+                      }}
+                      className={`text-left p-4 rounded-2xl border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-white border-[#1E60A8] ring-2 ring-[#1E60A8]/20 shadow-xs'
+                          : 'bg-white border-slate-200/90 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <ModuleEmblem moduleId={modId} className="w-9 h-9 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-slate-900 truncate">
+                              {meta.name}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5">
+                              <span>{meta.status}</span>
+                              <span className="text-slate-300">·</span>
+                              <span
+                                className={
+                                  sync.status === 'saved'
+                                    ? 'text-emerald-700 font-medium'
+                                    : sync.status === 'pending'
+                                    ? 'text-amber-700 font-medium'
+                                    : sync.status === 'error'
+                                    ? 'text-rose-600 font-medium'
+                                    : 'text-slate-400'
+                                }
+                              >
+                                {sync.status === 'saved'
+                                  ? 'En Firestore'
+                                  : sync.status === 'saving'
+                                  ? 'Guardando...'
+                                  : sync.status === 'pending'
+                                  ? 'Pendiente nube'
+                                  : sync.status === 'error'
+                                  ? 'Error nube'
+                                  : 'Catálogo listo'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div className="text-lg font-bold font-mono tabular-nums text-[#132B63]">
+                            {activeCount}
+                          </div>
+                          <div className="text-[10px] text-slate-400">activas</div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </section>
+
+              {/* Selected Module Company Database Manager */}
+              <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5 min-w-0">
+                    <ModuleEmblem
+                      moduleId={selectedDbModule}
+                      className="w-11 h-11 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-base font-bold text-[#132B63]">
+                          Base de Datos de Empresas — {selectedDbMeta.name}
+                        </h3>
+                        <span className="font-mono text-[11px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                          /{selectedDbMeta.firestorePath}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1">
+                        {selectedDbMeta.description}
+                      </p>
+                      <div className="text-[11px] text-slate-400 mt-1">
+                        {selectedDbSync.lastSyncedAtIso
+                          ? `Última sincronización en Firestore: ${formatShortDate(
+                              selectedDbSync.lastSyncedAtIso
+                            )}${
+                              selectedDbSync.updatedByName
+                                ? ` · ${selectedDbSync.updatedByName}`
+                                : ''
+                            }`
+                          : 'Los cambios se sincronizan automáticamente en Firestore cuando estás autenticado como Administrador.'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={openAddCompanyForm}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Agregar Sociedad</span>
+                    </button>
+
+                    <select
+                      aria-label="Copiar sociedades desde otro módulo"
+                      value={copySourceModule}
+                      onChange={(e) => {
+                        const val = e.target.value as FunctionalModuleId | '';
+                        setCopySourceModule(val);
+                        if (val) void handleCopyFromAnotherModule(val);
+                      }}
+                      className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl cursor-pointer focus:outline-hidden focus:border-[#1E60A8]"
+                    >
+                      <option value="">Copiar desde otro módulo...</option>
+                      {ALL_FUNCTIONAL_MODULES.filter((m) => m !== selectedDbModule).map(
+                        (m) => (
+                          <option key={m} value={m}>
+                            Copiar desde {MODULE_COMPANY_DB_META[m].shortName} (
+                            {moduleCompanyDatabases[m].length})
+                          </option>
+                        )
+                      )}
+                    </select>
+
+                    <input
+                      ref={excelInputRef}
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleImportModuleCompaniesExcel}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => excelInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Importar Excel</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleExportModuleCompaniesExcel}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Exportar Excel</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={async () => {
+                        if (!currentUser) {
+                          onSignInWithGoogle();
+                          return;
+                        }
+                        setIsSaving(true);
+                        try {
+                          await onSaveModuleCompanies(
+                            selectedDbModule,
+                            selectedDbCompanies
+                          );
+                          setFeedback({
+                            type: 'success',
+                            message: `Catálogo de ${selectedDbMeta.name} publicado en Firestore.`,
+                          });
+                        } catch (err: any) {
+                          setFeedback({
+                            type: 'error',
+                            message:
+                              err?.message ||
+                              'No se pudo publicar el catálogo en Firestore.',
+                          });
+                        } finally {
+                          setIsSaving(false);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#19377B] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Cloud className="w-3.5 h-3.5" />
+                      <span>Guardar Nube</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Inline Add / Edit Society Form */}
+                {isCompanyFormOpen && (
+                  <form
+                    onSubmit={handleSaveCompanyEntry}
+                    className="p-5 bg-slate-50/90 border-b border-slate-200 space-y-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
+                        {editingCompanyId
+                          ? `Editar Sociedad en ${selectedDbMeta.shortName}`
+                          : `Nueva Sociedad para ${selectedDbMeta.name}`}
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => setIsCompanyFormOpen(false)}
+                        className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {compFormError && (
+                      <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>{compFormError}</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+                      <div className="lg:col-span-2">
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Nombre Oficial / Sociedad *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={compNombre}
+                          onChange={(e) => setCompNombre(e.target.value)}
+                          placeholder="Ej. Premex S.A.S."
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white focus:outline-hidden focus:border-[#1E60A8]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Código Interno
+                        </label>
+                        <input
+                          type="text"
+                          value={compCodigo}
+                          onChange={(e) => setCompCodigo(e.target.value)}
+                          placeholder="Ej. SOC-100"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono focus:outline-hidden focus:border-[#1E60A8]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          NIT / Tax ID
+                        </label>
+                        <input
+                          type="text"
+                          value={compNit}
+                          onChange={(e) => setCompNit(e.target.value)}
+                          placeholder="Ej. 890900148-1"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono focus:outline-hidden focus:border-[#1E60A8]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          País / Moneda
+                        </label>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <input
+                            type="text"
+                            value={compPais}
+                            onChange={(e) => setCompPais(e.target.value)}
+                            placeholder="País"
+                            className="col-span-2 px-2.5 py-2 rounded-xl border border-slate-300 bg-white focus:outline-hidden focus:border-[#1E60A8]"
+                          />
+                          <input
+                            type="text"
+                            value={compMoneda}
+                            onChange={(e) => setCompMoneda(e.target.value.toUpperCase())}
+                            placeholder="USD"
+                            maxLength={10}
+                            className="px-2 py-2 rounded-xl border border-slate-300 bg-white font-mono uppercase focus:outline-hidden focus:border-[#1E60A8]"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                      {selectedDbModule !== 'intercompany' ? (
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={compActivo}
+                            onChange={(e) => setCompActivo(e.target.checked)}
+                            className="rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
+                          />
+                          <span>Sociedad activa disponible para asignar permisos</span>
+                        </label>
+                      ) : (
+                        <span className="text-[11px] text-slate-500">
+                          Las sociedades de Intercompany se sincronizan directamente con la vista Empresas de Anitox.
+                        </span>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsCompanyFormOpen(false)}
+                          className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-xl cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSaving}
+                          className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-60 rounded-xl cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>
+                            {editingCompanyId ? 'Actualizar Sociedad' : 'Guardar Sociedad'}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                )}
+
+                {/* Search & Count Strip */}
+                <div className="px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50/40">
+                  <div className="relative w-full sm:w-80">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={dbSearchQuery}
+                      onChange={(e) => setDbSearchQuery(e.target.value)}
+                      placeholder={`Buscar en BD de ${selectedDbMeta.shortName}...`}
+                      className="w-full pl-8 pr-8 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#1E60A8]"
+                    />
+                    {dbSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setDbSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 tabular-nums">
+                    {filteredDbCompanies.length} de {selectedDbCompanies.length} sociedades en{' '}
+                    <strong className="text-slate-700">{selectedDbMeta.shortName}</strong>
+                  </div>
+                </div>
+
+                {/* Societies Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        <th className="py-3 px-5">Sociedad / Razón Social</th>
+                        <th className="py-3 px-4">Código</th>
+                        <th className="py-3 px-4">NIT / Tax ID</th>
+                        <th className="py-3 px-4">País</th>
+                        <th className="py-3 px-4">Moneda</th>
+                        <th className="py-3 px-4">Estado</th>
+                        <th className="py-3 px-5 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredDbCompanies.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="py-10 px-5 text-center text-slate-500"
+                          >
+                            No hay sociedades registradas en este filtro. Agrega una sociedad
+                            manualmente, importa desde Excel o copia desde otro módulo.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredDbCompanies.map((comp) => {
+                          const isActive = comp.activo !== false;
+                          return (
+                            <tr
+                              key={comp.id}
+                              className={`transition-colors ${
+                                isActive
+                                  ? 'hover:bg-slate-50/70'
+                                  : 'bg-slate-50/80 opacity-60'
+                              }`}
+                            >
+                              <td className="py-3 px-5 font-semibold text-slate-900">
+                                {comp.nombre}
+                              </td>
+                              <td className="py-3 px-4 font-mono text-slate-600">
+                                {comp.codigo || '—'}
+                              </td>
+                              <td className="py-3 px-4 font-mono text-slate-600">
+                                {comp.nit || '—'}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600">
+                                {comp.pais || '—'}
+                              </td>
+                              <td className="py-3 px-4 font-mono font-semibold text-slate-700">
+                                {comp.moneda || selectedDbMeta.defaultCurrency}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`font-semibold ${
+                                    isActive ? 'text-emerald-700' : 'text-slate-400'
+                                  }`}
+                                >
+                                  {isActive ? 'Activa' : 'Inactiva'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-5 text-right whitespace-nowrap">
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditCompanyForm(comp)}
+                                    title="Editar sociedad"
+                                    className="p-1.5 text-slate-500 hover:text-[#19377B] hover:bg-slate-100 rounded-lg cursor-pointer"
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
+
+                                  {selectedDbModule !== 'intercompany' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleCompanyActive(comp)}
+                                      title={
+                                        isActive
+                                          ? 'Desactivar sociedad'
+                                          : 'Activar sociedad'
+                                      }
+                                      className={`p-1.5 rounded-lg cursor-pointer ${
+                                        isActive
+                                          ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
+                                          : 'text-emerald-600 hover:bg-emerald-50'
+                                      }`}
+                                    >
+                                      <Power className="w-4 h-4" />
+                                    </button>
+                                  )}
+
+                                  {confirmDeleteCompId === comp.id ? (
+                                    <div className="inline-flex items-center gap-1 ml-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteCompanyEntry(comp.id)}
+                                        className="px-2 py-1 text-[11px] font-semibold bg-rose-600 text-white rounded-lg cursor-pointer"
+                                      >
+                                        Eliminar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteCompId(null)}
+                                        className="px-2 py-1 text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-lg cursor-pointer"
+                                      >
+                                        No
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteCompId(comp.id)}
+                                      title="Eliminar sociedad"
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* TAB 3: Matriz de Roles */}
+          {activeTab === 'roles' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                {(['admin', 'operador', 'consulta'] as UserRole[]).map((role) => {
+                  const meta = ROLE_METADATA[role];
+                  return (
+                    <div
+                      key={role}
+                      className="bg-white rounded-2xl border border-slate-200/90 p-6 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Nivel de Acceso
+                        </div>
+                        <h3 className="text-lg font-bold text-[#132B63] mt-1">
+                          {meta.label}
+                        </h3>
+                        <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                          {meta.description}
+                        </p>
+                        <ul className="mt-4 pt-4 border-t border-slate-100 space-y-2 text-xs text-slate-700">
+                          {meta.capabilities.map((cap, idx) => (
+                            <li key={idx} className="flex items-start gap-2">
+                              <Check className="w-3.5 h-3.5 text-[#1E60A8] shrink-0 mt-0.5" />
+                              <span>{cap}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-100">
+                  <h4 className="text-sm font-bold text-slate-900">
+                    Comparativa Detallada de Permisos Aplicados en Frontend y Firestore
+                  </h4>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        <th className="py-3 px-5">Acción / Funcionalidad</th>
+                        <th className="py-3 px-4 text-[#19377B]">Administrador</th>
+                        <th className="py-3 px-4 text-teal-800">Operador</th>
+                        <th className="py-3 px-5 text-slate-700">Solo Consulta</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {ROLE_CAPABILITY_ROWS.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/60">
+                          <td className="py-3 px-5 font-medium text-slate-800">
+                            {row.capability}
+                          </td>
+                          <td className="py-3 px-4 font-semibold text-emerald-700">
+                            {row.admin}
+                          </td>
+                          <td
+                            className={`py-3 px-4 font-medium ${
+                              row.operador === 'Bloqueado'
+                                ? 'text-rose-600'
+                                : 'text-slate-700'
+                            }`}
+                          >
+                            {row.operador}
+                          </td>
+                          <td
+                            className={`py-3 px-5 font-medium ${
+                              row.consulta === 'Bloqueado'
+                                ? 'text-rose-600'
+                                : 'text-slate-700'
+                            }`}
+                          >
+                            {row.consulta}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* TAB 4: Política de Seguridad y Firebase / Google Cloud */}
+          {activeTab === 'politica' && (
+            <div className="space-y-6 max-w-4xl">
+              {/* Strict Mode Policy Card */}
+              <section className="bg-white rounded-2xl border border-slate-200/90 p-6 space-y-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <Lock className="w-5 h-5 text-[#19377B] shrink-0 mt-0.5" />
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Modo Estricto por Lista Autorizada
+                      </h3>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        Cuando está activado, cualquier usuario que inicie sesión con un
+                        correo de Google que <strong>no esté registrado</strong> en el
+                        Directorio de Permisos verá una pantalla de acceso restringido hasta
+                        que un administrador lo autorice. Si está desactivado, los correos
+                        no listados entran en modo <strong>Solo Consulta</strong> (sin
+                        capacidad de edición).
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={policy.strictMode}
+                    onClick={async () => {
+                      setIsSaving(true);
+                      try {
+                        await onTogglePolicyStrictMode(!policy.strictMode);
+                        setFeedback({
+                          type: 'success',
+                          message: !policy.strictMode
+                            ? 'Modo Estricto activado: solo correos registrados podrán ingresar.'
+                            : 'Modo Estricto desactivado: correos no listados ingresan como Solo Consulta.',
+                        });
+                      } catch (err: any) {
+                        setFeedback({
+                          type: 'error',
+                          message: err?.message || 'Error al actualizar la política.',
+                        });
+                      } finally {
+                        setIsSaving(false);
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer ${
+                      policy.strictMode ? 'bg-[#1E60A8]' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transform transition-transform ${
+                        policy.strictMode ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 text-xs text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-800">
+                      Administrador Principal Protegido
+                    </div>
+                    <div className="font-mono text-[11px] text-slate-500 mt-0.5">
+                      {SUPER_ADMIN_EMAIL} · Nunca pierde privilegios de administrador
+                    </div>
+                  </div>
+
+                  <div className="sm:text-right">
+                    <div className="font-semibold text-slate-800">
+                      Última Sincronización RBAC
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      {lastCloudSyncIso
+                        ? formatShortDate(lastCloudSyncIso)
+                        : 'Pendiente de sincronización en la nube'}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Firebase & Google Cloud Sharing Connection Card (Read-only Metadata, Zero API Key UI) */}
+              <section className="bg-white rounded-2xl border border-slate-200/90 p-6 space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <Server className="w-5 h-5 text-[#1E60A8] shrink-0 mt-0.5" />
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Conexión Activa con Firebase y Google Cloud
+                      </h3>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Configuración de solo lectura utilizada para compartir en tiempo real
+                        conciliaciones, permisos por correo y bases de sociedades por módulo.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSyncClick}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-60 rounded-xl transition-colors shrink-0 cursor-pointer"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Cloud className="w-3.5 h-3.5" />
+                    )}
+                    <span>Publicar Todo en Firestore</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Proyecto Firebase / Google Cloud
+                    </div>
+                    <div className="font-mono font-semibold text-slate-900 mt-1 truncate">
+                      {activeFirebaseInfo.projectId || 'No configurado'}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Base de Datos Firestore
+                    </div>
+                    <div className="font-mono font-semibold text-slate-900 mt-1 truncate">
+                      {activeFirebaseInfo.databaseId}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Dominio de Autenticación Google
+                    </div>
+                    <div className="font-mono text-slate-800 mt-1 truncate">
+                      {activeFirebaseInfo.authDomain || 'Dominio predeterminado'}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Origen de Credenciales
+                    </div>
+                    <div className="font-semibold text-slate-800 mt-1">
+                      {activeFirebaseInfo.configSource === 'env'
+                        ? 'Variables de entorno (.env personalizado)'
+                        : 'Configuración integrada del proyecto Firebase'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Shareable App URL */}
+                {shareableAppUrl && (
+                  <div className="p-4 rounded-xl bg-[#F5F8FC] border border-blue-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Link2 className="w-4 h-4 text-[#1E60A8] shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-bold text-[#132B63]">
+                          Enlace para compartir la Suite con tu equipo
+                        </div>
+                        <div className="font-mono text-[11px] text-slate-600 truncate">
+                          {shareableAppUrl}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(shareableAppUrl);
+                        setCopiedShareUrl(true);
+                        setTimeout(() => setCopiedShareUrl(false), 2000);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-white hover:bg-blue-50 border border-blue-200 rounded-lg shrink-0 cursor-pointer"
+                    >
+                      {copiedShareUrl ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Enlace Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-[#1E60A8]" />
+                          <span>Copiar Enlace</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {/* Per-Module Firestore Sync Matrix */}
+                <div className="pt-2">
+                  <div className="text-xs font-bold text-slate-800 mb-2.5">
+                    Estado en Firestore de las Bases de Datos de Sociedades por Módulo
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
+                    {ALL_FUNCTIONAL_MODULES.map((modId) => {
+                      const meta = MODULE_COMPANY_DB_META[modId];
+                      const sync = moduleDbSyncStatus[modId] || { status: 'idle' };
+                      const count = moduleCompanyDatabases[modId].filter(
+                        (c) => c.activo !== false
+                      ).length;
+                      return (
+                        <div
+                          key={modId}
+                          className="p-3 rounded-xl border border-slate-200/80 flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <ModuleEmblem
+                              moduleId={modId}
+                              className="w-6 h-6 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900 truncate">
+                                {meta.shortName}
+                              </div>
+                              <div className="text-[10px] text-slate-500 tabular-nums">
+                                {count} soc. ·{' '}
+                                {sync.status === 'saved'
+                                  ? 'Sincronizado'
+                                  : sync.status === 'pending'
+                                  ? 'Pendiente'
+                                  : sync.status === 'error'
+                                  ? 'Error'
+                                  : 'Local / listo'}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedDbModule(modId);
+                              setActiveTab('empresas_modulos');
+                            }}
+                            className="text-[11px] font-semibold text-[#1E60A8] hover:underline shrink-0 cursor-pointer"
+                          >
+                            Ver BD
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Team Sharing Checklist */}
+                <div className="pt-4 border-t border-slate-100 space-y-2 text-xs text-slate-600">
+                  <div className="font-bold text-slate-800">
+                    Pasos recomendados al compartir la plataforma en Firebase / Google Cloud
+                  </div>
+                  <ol className="list-decimal list-inside space-y-1 text-[11px] leading-relaxed">
+                    <li>
+                      Inicia sesión con la cuenta administradora ({SUPER_ADMIN_EMAIL}) y
+                      verifica las sociedades de cada módulo en{' '}
+                      <strong>BD Empresas por Módulo</strong>.
+                    </li>
+                    <li>
+                      Registra cada correo corporativo en{' '}
+                      <strong>Usuarios y Permisos</strong> asignando su rol, módulos y las
+                      sociedades permitidas en cada módulo.
+                    </li>
+                    <li>
+                      Presiona <strong>Publicar Todo en Firestore</strong> para sincronizar
+                      reglas y catálogos antes de compartir el enlace con tu equipo.
+                    </li>
+                    <li>
+                      Si desplegas en un dominio propio en Google Cloud / Firebase Hosting,
+                      agrega ese dominio en{' '}
+                      <em>Firebase Console → Authentication → Authorized domains</em> y
+                      activa el <strong>Modo Estricto</strong> cuando todos los correos
+                      estén registrados.
+                    </li>
+                  </ol>
+                </div>
+              </section>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* Add / Edit User Permission Modal */}
+      {isEditorOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setIsEditorOpen(false)}
+        >
+          <form
+            onSubmit={handleSubmitForm}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl border border-slate-200 max-w-3xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
+          >
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-[#132B63]">
+                  {isEditingExisting
+                    ? 'Editar Permisos de Usuario'
+                    : 'Asignar Permisos por Correo Electrónico'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Asigna el rol, habilita los módulos permitidos y selecciona qué sociedades
+                  de cada módulo puede consultar este correo
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditorOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer"
+                aria-label="Cerrar editor"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto text-xs">
+              {formError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              {/* Identity */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Correo Electrónico Corporativo *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    disabled={isEditingExisting}
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    placeholder="nombre.apellido@premexcorp.com"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono text-xs disabled:bg-slate-100 disabled:text-slate-500 focus:outline-hidden focus:border-[#1E60A8]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Nombre Completo / Cargo
+                  </label>
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder="Ej. María Gómez — Analista Contable"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-hidden focus:border-[#1E60A8]"
+                  />
+                </div>
+              </div>
+
+              {/* Role Selection */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-2">
+                  Rol de Acceso en la Plataforma *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {(['admin', 'operador', 'consulta'] as UserRole[]).map((role) => {
+                    const selected = formRole === role;
+                    const disabled = isEditingSuperAdmin && role !== 'admin';
+                    return (
+                      <button
+                        key={role}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          setFormRole(role);
+                          if (role === 'admin') {
+                            setFormModules([...ALL_SUITE_MODULES]);
+                          } else {
+                            setFormModules((prev) => {
+                              const cleaned = prev.filter((m) => m !== 'ajustes');
+                              const next =
+                                cleaned.length > 0
+                                  ? cleaned
+                                  : (['intercompany', 'bancos'] as SuiteModuleId[]);
+                              setFormModuleCompanyAccess((prevMap) =>
+                                sanitizeModuleCompanyAccess(prevMap, next, 'all', [])
+                              );
+                              return next;
+                            });
+                          }
+                        }}
+                        className={`text-left p-3.5 rounded-xl border transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                          selected
+                            ? 'border-[#1E60A8] bg-[#1E60A8]/8 ring-1 ring-[#1E60A8]/30'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="font-bold text-slate-900">
+                          {ROLE_METADATA[role].label}
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-1 leading-snug">
+                          {role === 'admin'
+                            ? 'Control total de módulos, BD de empresas y permisos.'
+                            : role === 'operador'
+                            ? 'Opera y guarda en sus módulos y sociedades asignadas.'
+                            : 'Solo lectura y exportación en sus módulos asignados.'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Step 1: Enable Modules */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="font-semibold text-slate-700">
+                    1. Módulos Habilitados para este Correo
+                  </label>
+                  {formRole === 'admin' && (
+                    <span className="text-[11px] text-[#1E60A8] font-medium">
+                      Administradores acceden a todos los módulos y a todas las sociedades
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {ALL_FUNCTIONAL_MODULES.map((modId) => {
+                    const meta = MODULE_COMPANY_DB_META[modId];
+                    const checked = formRole === 'admin' || formModules.includes(modId);
+                    const dbCount = moduleCompanyDatabases[modId].filter(
+                      (c) => c.activo !== false
+                    ).length;
+                    return (
+                      <label
+                        key={modId}
+                        className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-colors ${
+                          formRole === 'admin'
+                            ? 'bg-slate-50 border-slate-200 cursor-default'
+                            : checked
+                            ? 'bg-[#1E60A8]/6 border-[#1E60A8]/45 cursor-pointer'
+                            : 'bg-white border-slate-200 hover:bg-slate-50 cursor-pointer'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={formRole === 'admin'}
+                          onChange={() => handleToggleModule(modId)}
+                          className="rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
+                        />
+                        <ModuleEmblem moduleId={modId} className="w-7 h-7 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900 truncate">
+                            {meta.shortName}
+                          </div>
+                          <div className="text-[10px] text-slate-500 tabular-nums">
+                            {dbCount} soc. en BD · {meta.status}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Step 2: Independent Per-Module Company Access */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="font-semibold text-slate-700 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-[#1E60A8]" />
+                    <span>
+                      2. Sociedades Permitidas por Módulo (cada módulo usa su propia BD)
+                    </span>
+                  </label>
+                </div>
+
+                {formRole === 'admin' ? (
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-600">
+                    El rol Administrador consulta y administra todas las bases de datos de
+                    sociedades de todos los módulos.
+                  </div>
+                ) : enabledFunctionalModulesInForm.length === 0 ? (
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800">
+                    Activa al menos un módulo arriba para asignar sus sociedades permitidas.
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-50/40">
+                    {/* Enabled Module Sub-Tabs */}
+                    <div className="flex flex-wrap gap-1 p-2 bg-slate-100/90 border-b border-slate-200">
+                      {enabledFunctionalModulesInForm.map((modId) => {
+                        const meta = MODULE_COMPANY_DB_META[modId];
+                        const rule = formModuleCompanyAccess[modId] || {
+                          scope: 'all' as CompanyAccessScope,
+                          companies: [] as string[],
+                        };
+                        const isActiveTab = effectiveActiveConfigModule === modId;
+                        const missingCompanies =
+                          rule.scope === 'selected' && rule.companies.length === 0;
+
+                        return (
+                          <button
+                            key={modId}
+                            type="button"
+                            onClick={() => {
+                              setActiveConfigModule(modId);
+                              setCompanySearch('');
+                              setQuickAddCompanyInput('');
+                            }}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              isActiveTab
+                                ? 'bg-white text-[#132B63] shadow-2xs ring-1 ring-[#1E60A8]/30'
+                                : 'text-slate-600 hover:bg-white/60 hover:text-slate-900'
+                            }`}
+                          >
+                            <ModuleEmblem moduleId={modId} className="w-4 h-4 shrink-0" />
+                            <span>{meta.shortName}</span>
+                            <span
+                              className={`text-[10px] font-mono tabular-nums ${
+                                missingCompanies
+                                  ? 'text-rose-600 font-bold'
+                                  : rule.scope === 'selected'
+                                  ? 'text-[#1E60A8]'
+                                  : 'text-slate-400'
+                              }`}
+                            >
+                              {rule.scope === 'all'
+                                ? '(Todas)'
+                                : `(${rule.companies.length})`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Selected Module's Company Picker */}
+                    <div className="p-4 space-y-3 bg-white">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="text-[11px] text-slate-600">
+                          Configurando alcance para{' '}
+                          <strong className="text-[#132B63]">
+                            {MODULE_COMPANY_DB_META[effectiveActiveConfigModule].name}
+                          </strong>{' '}
+                          <span className="font-mono text-[10px] text-slate-400">
+                            (/{MODULE_COMPANY_DB_META[effectiveActiveConfigModule].firestorePath})
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="inline-flex bg-slate-100 p-1 rounded-xl border border-slate-200/70 w-full">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setModuleScopeInForm(effectiveActiveConfigModule, 'all')
+                          }
+                          className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                            activeModuleRule.scope === 'all'
+                              ? 'bg-white text-[#19377B] shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Todas las de{' '}
+                          {MODULE_COMPANY_DB_META[effectiveActiveConfigModule].shortName} (
+                          {
+                            moduleCompanyDatabases[effectiveActiveConfigModule].filter(
+                              (c) => c.activo !== false
+                            ).length
+                          }
+                          )
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setModuleScopeInForm(effectiveActiveConfigModule, 'selected')
+                          }
+                          className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                            activeModuleRule.scope === 'selected'
+                              ? 'bg-white text-[#19377B] shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Solo sociedades seleccionadas ({activeModuleRule.companies.length})
+                        </button>
+                      </div>
+
+                      {activeModuleRule.scope === 'selected' && (
+                        <div className="space-y-3 pt-1">
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <div className="relative flex-1">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                              <input
+                                type="text"
+                                value={companySearch}
+                                onChange={(e) => setCompanySearch(e.target.value)}
+                                placeholder={`Filtrar sociedades de ${MODULE_COMPANY_DB_META[effectiveActiveConfigModule].shortName}...`}
+                                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 focus:bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:border-[#1E60A8]"
+                              />
+                            </div>
+                            <div className="flex gap-1.5">
+                              <input
+                                type="text"
+                                value={quickAddCompanyInput}
+                                onChange={(e) => setQuickAddCompanyInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    void handleQuickAddCompanyToModuleDb();
+                                  }
+                                }}
+                                placeholder={`Nueva en BD ${MODULE_COMPANY_DB_META[effectiveActiveConfigModule].shortName}...`}
+                                className="px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg w-44 focus:outline-hidden focus:border-[#1E60A8]"
+                              />
+                              <button
+                                type="button"
+                                disabled={
+                                  isQuickAddingCompany || !quickAddCompanyInput.trim()
+                                }
+                                onClick={() => void handleQuickAddCompanyToModuleDb()}
+                                className="px-2.5 py-1.5 text-xs font-semibold text-[#19377B] bg-white hover:bg-slate-100 disabled:opacity-50 border border-slate-300 rounded-lg cursor-pointer whitespace-nowrap"
+                              >
+                                {isQuickAddingCompany ? 'Añadiendo...' : '+ Añadir a BD'}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span>
+                              Marca las sociedades autorizadas exclusivamente para{' '}
+                              <strong className="text-slate-700">
+                                {MODULE_COMPANY_DB_META[effectiveActiveConfigModule].shortName}
+                              </strong>
+                            </span>
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={handleSelectAllCompaniesInActiveModule}
+                                className="text-[#1E60A8] font-semibold hover:underline cursor-pointer"
+                              >
+                                Marcar todas
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleClearCompaniesInActiveModule}
+                                className="text-slate-500 hover:text-slate-800 hover:underline cursor-pointer"
+                              >
+                                Limpiar
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+                            {activeModuleCompanyOptions.length === 0 ? (
+                              <div className="col-span-2 py-4 text-center text-slate-400">
+                                No se encontraron sociedades en la BD de este módulo. Usa
+                                &ldquo;+ Añadir a BD&rdquo; para crear una.
+                              </div>
+                            ) : (
+                              activeModuleCompanyOptions.map((opt) => {
+                                const checked = activeModuleRule.companies.some(
+                                  (c) =>
+                                    normalizeCompanyKey(c) ===
+                                    normalizeCompanyKey(opt.nombre)
+                                );
+                                return (
+                                  <label
+                                    key={opt.id}
+                                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                                      checked
+                                        ? 'bg-[#1E60A8]/8 border-[#1E60A8]/40 text-[#132B63] font-semibold'
+                                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() =>
+                                        handleToggleCompanyForActiveModule(opt.nombre)
+                                      }
+                                      className="rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
+                                    />
+                                    <span className="truncate flex-1">{opt.nombre}</span>
+                                    {(opt.codigo || opt.pais) && (
+                                      <span className="text-[10px] font-normal text-slate-400 shrink-0 font-mono">
+                                        {opt.codigo || opt.pais}
+                                      </span>
+                                    )}
+                                  </label>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Status & Notes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Notas Administrativas (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={formNotes}
+                    onChange={(e) => setFormNotes(e.target.value)}
+                    placeholder="Ej. Acceso temporal cierre Q3"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-hidden focus:border-[#1E60A8]"
+                  />
+                </div>
+
+                <div className="pt-5">
+                  <label className="inline-flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isEditingSuperAdmin ? true : formActive}
+                      disabled={isEditingSuperAdmin}
+                      onChange={(e) => setFormActive(e.target.checked)}
+                      className="rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
+                    />
+                    <span className="font-semibold text-slate-700">
+                      Acceso habilitado (activo)
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200/80 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsEditorOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200/60 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-60 rounded-xl cursor-pointer"
+              >
+                {isSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                <span>{isEditingExisting ? 'Guardar Permisos' : 'Crear Permisos'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+};

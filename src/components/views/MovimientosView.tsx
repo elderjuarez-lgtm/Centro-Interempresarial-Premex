@@ -31,6 +31,7 @@ interface MovimientosViewProps {
   closedMonths?: Record<string, ClosedMonthRecord>;
   navigationPreset?: MovimientosNavigationPreset | null;
   onConsumeNavigationPreset?: () => void;
+  readOnly?: boolean;
 }
 
 type DocStatusFilter = 'ALL' | 'CONCILIADOS' | 'NO_CONCILIADOS';
@@ -42,6 +43,7 @@ export const MovimientosView: React.FC<MovimientosViewProps> = ({
   closedMonths = {},
   navigationPreset,
   onConsumeNavigationPreset,
+  readOnly = false,
 }) => {
   const [viewMode, setViewMode] = useState<'documentos' | 'lista'>('documentos');
   const [searchTerm, setSearchTerm] = useState('');
@@ -286,6 +288,7 @@ export const MovimientosView: React.FC<MovimientosViewProps> = ({
   const totalFilteredValue = filteredMovements.reduce((sum, m) => sum + m.valor, 0);
 
   const handleDelete = (m: Movement) => {
+    if (readOnly) return;
     const mes = m.mes || 'Septiembre 2026';
     if (closedMonths[mes]) return;
     if (window.confirm('¿Deseas eliminar este movimiento de la conciliación?')) {
@@ -1110,13 +1113,13 @@ export const MovimientosView: React.FC<MovimientosViewProps> = ({
                     </th>
                     <th className="px-4 py-3">Estado Doc</th>
                     <th className="px-4 py-3">Notas</th>
-                    <th className="px-4 py-3 text-right">Acción</th>
+                    {!readOnly && <th className="px-4 py-3 text-right">Acción</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {paginatedMovements.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="py-8 text-center text-slate-400 text-xs">
+                      <td colSpan={readOnly ? 9 : 10} className="py-8 text-center text-slate-400 text-xs">
                         No se encontraron movimientos con los filtros seleccionados.
                       </td>
                     </tr>
@@ -1169,24 +1172,26 @@ export const MovimientosView: React.FC<MovimientosViewProps> = ({
                           <td className="px-4 py-3 text-slate-500 text-[11px] max-w-xs truncate">
                             {m.notas || '—'}
                           </td>
-                          <td className="px-4 py-3 text-right">
-                            {isRowClosed ? (
-                              <span
-                                title={`Mes ${rowMonth} cerrado: protegido contra eliminación`}
-                                className="inline-flex items-center justify-center p-1 text-slate-400"
-                              >
-                                <Lock className="w-3.5 h-3.5" />
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => handleDelete(m)}
-                                title="Eliminar partida"
-                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </td>
+                          {!readOnly && (
+                            <td className="px-4 py-3 text-right">
+                              {isRowClosed ? (
+                                <span
+                                  title={`Mes ${rowMonth} cerrado: protegido contra eliminación`}
+                                  className="inline-flex items-center justify-center p-1 text-slate-400"
+                                >
+                                  <Lock className="w-3.5 h-3.5" />
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleDelete(m)}
+                                  title="Eliminar partida"
+                                  className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       );
                     })

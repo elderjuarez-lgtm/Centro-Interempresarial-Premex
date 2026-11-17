@@ -24,7 +24,87 @@ service cloud.firestore {
     }
 
     function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        'email' in request.auth.token &&
+        request.auth.token.email is string;
+    }
+
+    function myEmailLower() {
+      return request.auth.token.email.lower();
+    }
+
+    function emailToDocId(email) {
+      return email.lower().replace('[^a-z0-9]', '_');
+    }
+
+    function myEmailDocId() {
+      return emailToDocId(request.auth.token.email);
+    }
+
+    // Bootstrapped Super Admin (strictly requires email_verified == true)
+    function isSuperAdmin() {
+      return isVerifiedUser() && myEmailLower() == 'elder.juarez@premexcorp.com';
+    }
+
+    function hasMyPermissionDoc() {
+      return isVerifiedUser() &&
+        exists(/databases/$(database)/documents/user_permissions/$(myEmailDocId()));
+    }
+
+    function myPermissionData() {
+      return get(/databases/$(database)/documents/user_permissions/$(myEmailDocId())).data;
+    }
+
+    function isAdmin() {
+      return isSuperAdmin() || (
+        hasMyPermissionDoc() &&
+        myPermissionData().active == true &&
+        myPermissionData().role == 'admin'
+      );
+    }
+
+    function isStrictModeEnabled() {
+      return exists(/databases/$(database)/documents/app_settings/policy) &&
+        get(/databases/$(database)/documents/app_settings/policy).data.strictMode == true;
+    }
+
+    // Only verified Admins or explicitly registered active Operadores for the target module can write operational data.
+    // Unregistered users, 'consulta' (read-only) users, and inactive users are strictly denied writes.
+    function canOperateModule(moduleId) {
+      return isAdmin() || (
+        hasMyPermissionDoc() &&
+        myPermissionData().active == true &&
+        myPermissionData().role == 'operador' &&
+        moduleId in myPermissionData().allowedModules
+      );
+    }
+
+    // Verified users authorized for Viáticos (admin, registered active user with viaticos module,
+    // or non-strict mode read-only verified user)
+    function canAccessViaticos() {
+      return isAdmin() || (
+        isVerifiedUser() && (
+          (!hasMyPermissionDoc() && !isStrictModeEnabled()) || (
+            hasMyPermissionDoc() &&
+            myPermissionData().active == true &&
+            'viaticos' in myPermissionData().allowedModules
+          )
+        )
+      );
+    }
+
+    // Verified users permitted to read module company catalogs (admin, active registered user,
+    // or non-strict mode verified user)
+    function canReadCompanyCatalogs() {
+      return isAdmin() || (
+        isVerifiedUser() && (
+          (!hasMyPermissionDoc() && !isStrictModeEnabled()) || (
+            hasMyPermissionDoc() &&
+            myPermissionData().active == true
+          )
+        )
+      );
     }
 
     function isValidReconciliation(data) {
@@ -145,6 +225,212 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidModuleCompanyDirectory(data) {
+      return data.keys().hasAll([
+          'moduleId',
+          'companies',
+          'companiesCount',
+          'updatedBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'moduleId',
+          'companies',
+          'companiesCount',
+          'updatedBy',
+          'updatedByName',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.moduleId is string && data.moduleId in ['bancos', 'viaticos', 'anticipos', 'cxc', 'cxp'] &&
+        data.companies is list && data.companies.size() <= 300 &&
+        (data.companies.size() == 0 || data.companies[0] is map) &&
+        data.companiesCount is int && data.companiesCount >= 0 && data.companiesCount <= 300 &&
+        data.companiesCount == data.companies.size() &&
+        data.updatedBy is string && isValidId(data.updatedBy) &&
+        (!('updatedByName' in data) || (data.updatedByName is string && data.updatedByName.size() <= 120)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBankReconciliation(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'title',
+          'selectedMonth',
+          'accounts',
+          'statementItems',
+          'ledgerItems',
+          'matches',
+          'accountsCount',
+          'statementCount',
+          'ledgerCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId',
+          'ownerName',
+          'title',
+          'selectedMonth',
+          'selectedAccountId',
+          'accounts',
+          'statementItems',
+          'ledgerItems',
+          'matches',
+          'accountsCount',
+          'statementCount',
+          'ledgerCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.ownerId is string && isValidId(data.ownerId) &&
+        (!('ownerName' in data) || (data.ownerName is string && data.ownerName.size() <= 120)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        data.selectedMonth is string && data.selectedMonth.size() >= 1 && data.selectedMonth.size() <= 60 &&
+        (!('selectedAccountId' in data) || (data.selectedAccountId is string && data.selectedAccountId.size() <= 128)) &&
+        data.accounts is list && data.accounts.size() <= 100 &&
+        (data.accounts.size() == 0 || data.accounts[0] is map) &&
+        data.statementItems is list && data.statementItems.size() <= 5000 &&
+        (data.statementItems.size() == 0 || data.statementItems[0] is map) &&
+        data.ledgerItems is list && data.ledgerItems.size() <= 5000 &&
+        (data.ledgerItems.size() == 0 || data.ledgerItems[0] is map) &&
+        data.matches is list && data.matches.size() <= 5000 &&
+        (data.matches.size() == 0 || data.matches[0] is map) &&
+        data.accountsCount is int && data.accountsCount >= 0 && data.accountsCount <= 100 &&
+        data.statementCount is int && data.statementCount >= 0 && data.statementCount <= 5000 &&
+        data.ledgerCount is int && data.ledgerCount >= 0 && data.ledgerCount <= 5000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPermission(data) {
+      return data.keys().hasAll([
+          'email',
+          'displayName',
+          'role',
+          'allowedModules',
+          'companyScope',
+          'allowedCompanies',
+          'active',
+          'updatedBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'email',
+          'displayName',
+          'role',
+          'allowedModules',
+          'companyScope',
+          'allowedCompanies',
+          'moduleCompanyAccess',
+          'active',
+          'notes',
+          'updatedBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 160 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.role is string && data.role in ['admin', 'operador', 'consulta'] &&
+        data.allowedModules is list && data.allowedModules.size() <= 10 &&
+        data.allowedModules.hasOnly(['intercompany', 'bancos', 'viaticos', 'anticipos', 'cxc', 'cxp', 'ajustes']) &&
+        data.companyScope is string && data.companyScope in ['all', 'selected'] &&
+        data.allowedCompanies is list && data.allowedCompanies.size() <= 300 &&
+        (data.allowedCompanies.size() == 0 || data.allowedCompanies[0] is string) &&
+        (!('moduleCompanyAccess' in data) || (
+          data.moduleCompanyAccess is map &&
+          data.moduleCompanyAccess.size() <= 10 &&
+          data.moduleCompanyAccess.keys().hasOnly(['intercompany', 'bancos', 'viaticos', 'anticipos', 'cxc', 'cxp'])
+        )) &&
+        data.active is bool &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 300)) &&
+        data.updatedBy is string && isValidId(data.updatedBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAccessControlRegistry(data) {
+      return data.keys().hasAll([
+          'records',
+          'recordsCount',
+          'updatedBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'records',
+          'recordsCount',
+          'updatedBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.records is list && data.records.size() <= 200 &&
+        (data.records.size() == 0 || data.records[0] is map) &&
+        data.recordsCount is int && data.recordsCount >= 0 && data.recordsCount <= 200 &&
+        data.updatedBy is string && isValidId(data.updatedBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAccessPolicy(data) {
+      return data.keys().hasAll([
+          'strictMode',
+          'updatedBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'strictMode',
+          'updatedBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.strictMode is bool &&
+        data.updatedBy is string && isValidId(data.updatedBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidViaticosWorkspace(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'title',
+          'consultores',
+          'liquidaciones',
+          'consultoresCount',
+          'liquidacionesCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId',
+          'ownerName',
+          'title',
+          'activeLiquidationId',
+          'consultores',
+          'liquidaciones',
+          'consultoresCount',
+          'liquidacionesCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.ownerId is string && isValidId(data.ownerId) &&
+        (!('ownerName' in data) || (data.ownerName is string && data.ownerName.size() <= 120)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        (!('activeLiquidationId' in data) || (data.activeLiquidationId is string && data.activeLiquidationId.size() <= 128)) &&
+        data.consultores is list && data.consultores.size() <= 200 &&
+        (data.consultores.size() == 0 || data.consultores[0] is map) &&
+        data.liquidaciones is list && data.liquidaciones.size() <= 500 &&
+        (data.liquidaciones.size() == 0 || data.liquidaciones[0] is map) &&
+        data.consultoresCount is int && data.consultoresCount >= 0 && data.consultoresCount <= 200 &&
+        data.liquidacionesCount is int && data.liquidacionesCount >= 0 && data.liquidacionesCount <= 500 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     match /reconciliations/{reconciliationId} {
       // Shared link viewers can read a specific reconciliation by valid ID (contains no PII)
       allow get: if isValidId(reconciliationId);
@@ -152,19 +438,19 @@ service cloud.firestore {
       // Authenticated users can only list their own reconciliations
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
 
-      // Only verified signed-in users can create a reconciliation owned by themselves
+      // Verified admins or active intercompany operators can create reconciliations owned by themselves
       allow create: if isVerifiedUser() &&
         isValidId(reconciliationId) &&
         isValidReconciliation(incoming()) &&
         incoming().ownerId == request.auth.uid &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time &&
+        canOperateModule('intercompany');
 
-      // Only the verified owner can update allowed fields, preserving ownerId, createdAt, and all previously closed months
+      // Verified admins or authorized intercompany operators can collaboratively update shared reconciliations
       allow update: if isVerifiedUser() &&
         isValidId(reconciliationId) &&
         isValidReconciliation(incoming()) &&
-        existing().ownerId == request.auth.uid &&
         incoming().ownerId == existing().ownerId &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
@@ -181,13 +467,14 @@ service cloud.firestore {
           'movementsCount',
           'entitiesCount',
           'updatedAt'
-        ]);
+        ]) &&
+        (isAdmin() || canOperateModule('intercompany'));
 
-      // Only the verified owner can delete a reconciliation if it has no closed months
+      // Only verified owners (who are admins/operators) or admins can delete if no closed months exist
       allow delete: if isVerifiedUser() &&
         isValidId(reconciliationId) &&
-        existing().ownerId == request.auth.uid &&
-        (!('closedMonths' in existing()) || existing().closedMonths.size() == 0);
+        (!('closedMonths' in existing()) || existing().closedMonths.size() == 0) &&
+        (isAdmin() || (existing().ownerId == request.auth.uid && canOperateModule('intercompany')));
     }
 
     match /closed_periods/{archiveId} {
@@ -197,14 +484,14 @@ service cloud.firestore {
       // Authenticated users can list only their own closed period archives
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
 
-      // Only verified owners can create an immutable closed period archive tied to an existing reconciliation they own
+      // Only verified administrators can permanently close a month
       allow create: if isVerifiedUser() &&
         isValidId(archiveId) &&
         isValidClosedPeriod(incoming()) &&
         incoming().ownerId == request.auth.uid &&
         incoming().createdAt == request.time &&
-        exists(/databases/$(database)/documents/reconciliations/$(incoming().reconciliationId)) &&
-        get(/databases/$(database)/documents/reconciliations/$(incoming().reconciliationId)).data.ownerId == request.auth.uid;
+        isAdmin() &&
+        exists(/databases/$(database)/documents/reconciliations/$(incoming().reconciliationId));
 
       // Permanent immutability: closed period archives can never be updated or deleted
       allow update, delete: if false;
@@ -217,7 +504,7 @@ service cloud.firestore {
       // List is not needed since directories are fetched directly by scopeId
       allow list: if false;
 
-      // Any verified signed-in user can create or update the independent company directory regardless of closed months
+      // Admins or authorized intercompany operators can create or update the independent company directory
       allow create: if isVerifiedUser() &&
         isValidId(scopeId) &&
         scopeId in ['internacionales', 'nacionales'] &&
@@ -225,7 +512,8 @@ service cloud.firestore {
         incoming().scope == scopeId &&
         incoming().updatedBy == request.auth.uid &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time &&
+        canOperateModule('intercompany');
 
       allow update: if isVerifiedUser() &&
         isValidId(scopeId) &&
@@ -241,9 +529,242 @@ service cloud.firestore {
           'updatedBy',
           'updatedByName',
           'updatedAt'
-        ]);
+        ]) &&
+        canOperateModule('intercompany');
 
       allow delete: if false;
+    }
+
+    match /module_company_directories/{moduleId} {
+      // Independent per-module company catalogs (contains no personal PII); readable by verified authorized users
+      allow get: if isVerifiedUser() &&
+        isValidId(moduleId) &&
+        moduleId in ['bancos', 'viaticos', 'anticipos', 'cxc', 'cxp'] &&
+        canReadCompanyCatalogs();
+
+      allow list: if false;
+
+      // Strictly managed by verified Administrators from Ajustes y Configuraciones
+      allow create: if isVerifiedUser() &&
+        isValidId(moduleId) &&
+        moduleId in ['bancos', 'viaticos', 'anticipos', 'cxc', 'cxp'] &&
+        isValidModuleCompanyDirectory(incoming()) &&
+        incoming().moduleId == moduleId &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+
+      allow update: if isVerifiedUser() &&
+        isValidId(moduleId) &&
+        moduleId in ['bancos', 'viaticos', 'anticipos', 'cxc', 'cxp'] &&
+        isValidModuleCompanyDirectory(incoming()) &&
+        incoming().moduleId == existing().moduleId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'companies',
+          'companiesCount',
+          'updatedBy',
+          'updatedByName',
+          'updatedAt'
+        ]) &&
+        isAdmin();
+
+      allow delete: if false;
+    }
+
+    match /bank_reconciliations/{bankRecId} {
+      // Shared link viewers can read a specific bank reconciliation by valid ID
+      allow get: if isValidId(bankRecId);
+
+      // Authenticated users can only list their own bank reconciliations
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      // Verified admins or active bank operators can create a bank reconciliation
+      allow create: if isVerifiedUser() &&
+        isValidId(bankRecId) &&
+        isValidBankReconciliation(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        canOperateModule('bancos');
+
+      // Verified admins or active bank operators can collaboratively update shared bank workspaces
+      allow update: if isVerifiedUser() &&
+        isValidId(bankRecId) &&
+        isValidBankReconciliation(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'ownerName',
+          'title',
+          'selectedMonth',
+          'selectedAccountId',
+          'accounts',
+          'statementItems',
+          'ledgerItems',
+          'matches',
+          'accountsCount',
+          'statementCount',
+          'ledgerCount',
+          'updatedAt'
+        ]) &&
+        (isAdmin() || canOperateModule('bancos'));
+
+      // Only verified admins or active bank owners can delete their bank reconciliation
+      allow delete: if isVerifiedUser() &&
+        isValidId(bankRecId) &&
+        (isAdmin() || (existing().ownerId == request.auth.uid && canOperateModule('bancos')));
+    }
+
+    match /user_permissions/{emailDocId} {
+      // Strict PII isolation: users can only read their own permission doc; admins can read any
+      allow get: if isVerifiedUser() &&
+        isValidId(emailDocId) &&
+        (emailDocId == myEmailDocId() || isAdmin());
+
+      // Never list user_permissions directly (admins read consolidated registry at /app_settings/access_control)
+      allow list: if false;
+
+      // Only verified administrators can create user permission rules
+      allow create: if isVerifiedUser() &&
+        isValidId(emailDocId) &&
+        isValidUserPermission(incoming()) &&
+        emailDocId == emailToDocId(incoming().email) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+
+      // Only verified administrators can update user permission rules; super-admin cannot be demoted or deactivated
+      allow update: if isVerifiedUser() &&
+        isValidId(emailDocId) &&
+        isValidUserPermission(incoming()) &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        (emailDocId != 'elder_juarez_premexcorp_com' || (incoming().role == 'admin' && incoming().active == true)) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName',
+          'role',
+          'allowedModules',
+          'companyScope',
+          'allowedCompanies',
+          'moduleCompanyAccess',
+          'active',
+          'notes',
+          'updatedBy',
+          'updatedAt'
+        ]) &&
+        isAdmin();
+
+      // Only verified administrators can delete non-super-admin rules
+      allow delete: if isVerifiedUser() &&
+        isValidId(emailDocId) &&
+        emailDocId != 'elder_juarez_premexcorp_com' &&
+        isAdmin();
+    }
+
+    match /app_settings/{settingId} {
+      // Split PII Isolation:
+      // - 'policy' contains zero PII (strictMode flag) and can be read by verified signed-in users
+      // - 'access_control' contains user emails and is strictly restricted to verified administrators
+      allow get: if isVerifiedUser() &&
+        isValidId(settingId) &&
+        (
+          settingId == 'policy' ||
+          (settingId == 'access_control' && isAdmin())
+        );
+
+      allow list: if false;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(settingId) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (settingId == 'access_control' && isValidAccessControlRegistry(incoming())) ||
+          (settingId == 'policy' && isValidAccessPolicy(incoming()))
+        ) &&
+        isAdmin();
+
+      allow update: if isVerifiedUser() &&
+        isValidId(settingId) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            settingId == 'access_control' &&
+            isValidAccessControlRegistry(incoming()) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'records',
+              'recordsCount',
+              'updatedBy',
+              'updatedAt'
+            ])
+          ) ||
+          (
+            settingId == 'policy' &&
+            isValidAccessPolicy(incoming()) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'strictMode',
+              'updatedBy',
+              'updatedAt'
+            ])
+          )
+        ) &&
+        isAdmin();
+
+      allow delete: if false;
+    }
+
+    match /viaticos_workspaces/{viaticosId} {
+      // Strictly isolated to verified users authorized for Viáticos (protects consultant emails)
+      allow get: if isVerifiedUser() &&
+        isValidId(viaticosId) &&
+        canAccessViaticos();
+
+      // Authenticated users can list only workspaces they created
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      // Verified admins or active viaticos operators can create workspaces
+      allow create: if isVerifiedUser() &&
+        isValidId(viaticosId) &&
+        isValidViaticosWorkspace(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        canOperateModule('viaticos');
+
+      // Verified admins or active viaticos operators can update allowed workspace fields
+      allow update: if isVerifiedUser() &&
+        isValidId(viaticosId) &&
+        isValidViaticosWorkspace(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'ownerName',
+          'title',
+          'activeLiquidationId',
+          'consultores',
+          'liquidaciones',
+          'consultoresCount',
+          'liquidacionesCount',
+          'updatedAt'
+        ]) &&
+        (isAdmin() || canOperateModule('viaticos'));
+
+      // Only verified admins or owners who can operate viaticos can delete
+      allow delete: if isVerifiedUser() &&
+        isValidId(viaticosId) &&
+        (isAdmin() || (existing().ownerId == request.auth.uid && canOperateModule('viaticos')));
     }
   }
 }

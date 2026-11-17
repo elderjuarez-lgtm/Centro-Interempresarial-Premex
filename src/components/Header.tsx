@@ -8,11 +8,12 @@ import {
   Calendar,
   Save,
   Lock,
-  Layers
+  ChevronRight
 } from 'lucide-react';
 import { User } from 'firebase/auth';
-import { ActiveTab, ClosedMonthRecord, EntityMapping } from '../types';
+import { ActiveModuleId, ActiveTab, ClosedMonthRecord, EffectivePermissions, EntityMapping } from '../types';
 import { downloadExcelTemplate } from '../utils/excel';
+import { ROLE_METADATA } from '../utils/permissions';
 
 interface HeaderProps {
   activeTab: ActiveTab;
@@ -29,6 +30,8 @@ interface HeaderProps {
   availableMonths: string[];
   closedMonths?: Record<string, ClosedMonthRecord>;
   entities?: EntityMapping[];
+  onSwitchModule?: (moduleId: ActiveModuleId) => void;
+  permissions?: EffectivePermissions;
 }
 
 const TAB_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
@@ -73,7 +76,10 @@ export const Header: React.FC<HeaderProps> = ({
   availableMonths,
   closedMonths = {},
   entities = [],
+  onSwitchModule,
+  permissions,
 }) => {
+  const isReadOnly = Boolean(permissions?.isReadOnly);
   const isSelectedMonthClosed = selectedMonth !== 'ALL' && Boolean(closedMonths[selectedMonth]);
   const currentInfo = TAB_TITLES[activeTab] || {
     title: 'Centro Interempresarial',
@@ -81,56 +87,71 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/80 shadow-xs backdrop-blur-md">
-      <div className="px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between gap-4">
-        {/* Left: Mobile Toggle & Page Title */}
+    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90">
+      <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4">
+        {/* Left: Mobile Toggle & Contextual Breadcrumb */}
         <div className="flex items-center gap-3 min-w-0">
           <button
+            type="button"
             onClick={onToggleMobileMenu}
-            className="lg:hidden p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg focus:outline-hidden"
+            className="lg:hidden p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg focus:outline-hidden cursor-pointer"
             aria-label="Abrir menú de navegación"
           >
             <Menu className="w-5 h-5" />
           </button>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight truncate">
-                {currentInfo.title}
-              </h2>
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border shrink-0 bg-blue-50 text-blue-800 border-blue-200">
-                <Layers className="w-3 h-3 text-blue-600" />
-                <span>Anitox</span>
-              </span>
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              {onSwitchModule ? (
+                <button
+                  type="button"
+                  onClick={() => onSwitchModule('launcher')}
+                  className="hover:text-[#1E60A8] transition-colors cursor-pointer"
+                >
+                  Premex
+                </button>
+              ) : (
+                <span>Premex</span>
+              )}
+              <ChevronRight className="w-3 h-3 text-slate-400" />
+              <span className="text-[#19377B]">Intercompany Anitox</span>
+              {permissions && !permissions.isAdmin && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <span className={isReadOnly ? 'text-amber-700' : 'text-teal-700'}>
+                    {ROLE_METADATA[permissions.role].shortLabel}
+                  </span>
+                </>
+              )}
             </div>
-            <p className="text-xs text-slate-500 hidden sm:block truncate">
-              {currentInfo.subtitle}
-            </p>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+              {currentInfo.title}
+            </h2>
           </div>
         </div>
 
         {/* Right: Actions and Google Integration */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           {/* Quick Month / Period Selector Dropdown */}
           <div
-            className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs shadow-2xs border ${
+            className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs border ${
               isSelectedMonthClosed
                 ? 'bg-slate-100 border-slate-300'
-                : 'bg-blue-50/90 border-blue-200/90'
+                : 'bg-[#1E60A8]/8 border-[#1E60A8]/20'
             }`}
             title={isSelectedMonthClosed ? 'Mes cerrado permanentemente (Solo lectura)' : 'Seleccionar mes a conciliar'}
           >
             {isSelectedMonthClosed ? (
               <Lock className="w-3.5 h-3.5 text-slate-700 shrink-0" />
             ) : (
-              <Calendar className="w-4 h-4 text-blue-700 shrink-0" />
+              <Calendar className="w-3.5 h-3.5 text-[#19377B] shrink-0" />
             )}
             <select
               aria-label="Filtrar por mes a conciliar"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
               className={`bg-transparent font-bold focus:outline-hidden cursor-pointer text-xs pr-1 ${
-                isSelectedMonthClosed ? 'text-slate-800' : 'text-blue-900'
+                isSelectedMonthClosed ? 'text-slate-800' : 'text-[#132B63]'
               }`}
             >
               <option value="ALL">Todos los Meses</option>
@@ -142,41 +163,50 @@ export const Header: React.FC<HeaderProps> = ({
             </select>
           </div>
 
-          {/* Download Excel Template */}
-          <button
-            onClick={() => downloadExcelTemplate(entities)}
-            title="Descargar plantilla Excel con hojas CxC y CxP, NIT y columna mes"
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200/60 rounded-lg transition-colors"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Plantilla Excel</span>
-          </button>
+          {/* Download Excel Template (hidden in Solo Consulta) */}
+          {!isReadOnly && (
+            <button
+              type="button"
+              onClick={() => downloadExcelTemplate(entities)}
+              title="Descargar plantilla Excel con hojas CxC y CxP, NIT y columna mes"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#19377B] bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span>Plantilla Excel</span>
+            </button>
+          )}
 
           {/* Primary Action: Guardar Conciliación (Nube + Link) */}
-          <button
-            onClick={onOpenSaveModal}
-            title="Guardar conciliación en la nube y obtener enlace para compartir"
-            className="relative inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-lg shadow-sm shadow-blue-700/20 transition-all cursor-pointer"
-          >
-            <Save className="w-4 h-4 text-blue-100" />
-            <span>Guardar Conciliación</span>
-            {hasUnsavedChanges && (
-              <span
-                className="w-2 h-2 rounded-full bg-amber-300 ring-2 ring-blue-700"
-                title="Hay cambios sin guardar"
-              />
-            )}
-          </button>
+          {!isReadOnly && (
+            <button
+              type="button"
+              onClick={onOpenSaveModal}
+              title="Guardar conciliación en la nube y obtener enlace para compartir"
+              className="relative inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Save className="w-3.5 h-3.5 text-sky-100" />
+              <span>Guardar Conciliación</span>
+              {hasUnsavedChanges && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-amber-300"
+                  title="Hay cambios sin guardar"
+                />
+              )}
+            </button>
+          )}
 
           {/* Secondary Cloud Export: Guardar en Google Sheets */}
-          <button
-            onClick={onOpenGoogleSheetsModal}
-            className="inline-flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-lg shadow-sm shadow-emerald-700/20 transition-all cursor-pointer"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
-            <span className="hidden xl:inline">Google Sheets</span>
-            <span className="xl:hidden">Sheets</span>
-          </button>
+          {!isReadOnly && (
+            <button
+              type="button"
+              onClick={onOpenGoogleSheetsModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-teal-100" />
+              <span className="hidden xl:inline">Google Sheets</span>
+              <span className="xl:hidden">Sheets</span>
+            </button>
+          )}
 
           {/* Google Sign In / Account section */}
           {currentUser ? (

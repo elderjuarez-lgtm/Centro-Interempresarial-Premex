@@ -215,6 +215,364 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "BankReconciliation": {
+      "title": "BankReconciliation",
+      "description": "Saved corporate bank reconciliation workspace containing bank accounts, statement movements, book ledger entries, and match groups.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the bank reconciliation owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of the user who saved the bank reconciliation",
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "description": "Descriptive title of the bank reconciliation workspace",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "selectedMonth": {
+          "type": "string",
+          "description": "Active reconciliation month filter",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "selectedAccountId": {
+          "type": "string",
+          "description": "Selected corporate bank account ID",
+          "maxLength": 128
+        },
+        "accounts": {
+          "type": "array",
+          "description": "List of corporate bank accounts"
+        },
+        "statementItems": {
+          "type": "array",
+          "description": "Bank statement movements (Extracto Bancario)"
+        },
+        "ledgerItems": {
+          "type": "array",
+          "description": "Accounting bank ledger entries (Auxiliar Contable)"
+        },
+        "matches": {
+          "type": "array",
+          "description": "Reconciled match groups linking bank statement and book ledger items"
+        },
+        "accountsCount": {
+          "type": "integer",
+          "description": "Number of configured bank accounts"
+        },
+        "statementCount": {
+          "type": "integer",
+          "description": "Number of bank statement entries"
+        },
+        "ledgerCount": {
+          "type": "integer",
+          "description": "Number of accounting ledger entries"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "selectedMonth",
+        "accounts",
+        "statementItems",
+        "ledgerItems",
+        "matches",
+        "accountsCount",
+        "statementCount",
+        "ledgerCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPermission": {
+      "title": "UserPermission",
+      "description": "Email-keyed RBAC access record defining a user's corporate role (admin, operador, consulta), authorized modules, and permitted companies across all modules.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Normalized lowercase corporate email address",
+          "minLength": 5,
+          "maxLength": 160
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User full name or position label",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "operador", "consulta"],
+          "description": "RBAC privilege tier"
+        },
+        "allowedModules": {
+          "type": "array",
+          "description": "List of suite module identifiers accessible to this user"
+        },
+        "companyScope": {
+          "type": "string",
+          "enum": ["all", "selected"],
+          "description": "Whether the user can view all companies or only selected companies"
+        },
+        "allowedCompanies": {
+          "type": "array",
+          "description": "List of company/society names accessible when companyScope is selected (legacy fallback)"
+        },
+        "moduleCompanyAccess": {
+          "type": "object",
+          "description": "Per-module company access rules mapping functional module IDs (intercompany, bancos, viaticos, anticipos, cxc, cxp) to { scope: 'all' | 'selected', companies: string[] }"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether access is currently active"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional administrative notes",
+          "maxLength": 300
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator who last modified this rule",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "email",
+        "displayName",
+        "role",
+        "allowedModules",
+        "companyScope",
+        "allowedCompanies",
+        "active",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AccessControlRegistry": {
+      "title": "AccessControlRegistry",
+      "description": "Admin-only consolidated directory of all email permission rules stored at /app_settings/access_control.",
+      "type": "object",
+      "properties": {
+        "records": {
+          "type": "array",
+          "description": "Bounded list of UserPermission objects managed by administrators"
+        },
+        "recordsCount": {
+          "type": "integer",
+          "description": "Total number of user permission rules"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator who last updated the registry",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "records",
+        "recordsCount",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AccessPolicy": {
+      "title": "AccessPolicy",
+      "description": "Non-PII global access policy flag (strict allowlist enforcement) stored at /app_settings/policy.",
+      "type": "object",
+      "properties": {
+        "strictMode": {
+          "type": "boolean",
+          "description": "When true, authenticated emails not listed in user_permissions are denied access"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator who last updated policy",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "strictMode",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ViaticosWorkspace": {
+      "title": "ViaticosWorkspace",
+      "description": "Corporate travel expense settlements (Liquidación de Viáticos) workspace containing consultants directory and expense liquidations without raw media binaries.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the workspace creator",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of the last user who saved the workspace",
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "description": "Descriptive title of the Viáticos workspace",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "activeLiquidationId": {
+          "type": "string",
+          "description": "Currently selected liquidation ID",
+          "maxLength": 128
+        },
+        "consultores": {
+          "type": "array",
+          "description": "Bounded catalog of corporate consultants eligible for travel settlements"
+        },
+        "liquidaciones": {
+          "type": "array",
+          "description": "Bounded list of weekly travel expense settlements and line items"
+        },
+        "consultoresCount": {
+          "type": "integer",
+          "description": "Total number of registered consultants"
+        },
+        "liquidacionesCount": {
+          "type": "integer",
+          "description": "Total number of saved liquidations"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "consultores",
+        "liquidaciones",
+        "consultoresCount",
+        "liquidacionesCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ModuleCompanyDirectory": {
+      "title": "ModuleCompanyDirectory",
+      "description": "Independent master database of companies/societies dedicated to a specific functional module (bancos, viaticos, anticipos, cxc, cxp), containing no personal PII.",
+      "type": "object",
+      "properties": {
+        "moduleId": {
+          "type": "string",
+          "enum": ["bancos", "viaticos", "anticipos", "cxc", "cxp"],
+          "description": "Target functional module identifier",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "companies": {
+          "type": "array",
+          "description": "Bounded catalog of corporate societies/companies belonging exclusively to this module"
+        },
+        "companiesCount": {
+          "type": "integer",
+          "description": "Total number of companies registered in this module database"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator who last updated this module database",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByName": {
+          "type": "string",
+          "description": "Display name of the administrator who last updated this module database",
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "moduleId",
+        "companies",
+        "companiesCount",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -222,7 +580,7 @@
       "schema": {
         "$ref": "#/entities/Reconciliation"
       },
-      "description": "Stores saved intercompany reconciliations that can be updated by their owner and viewed via a shared link."
+      "description": "Stores saved intercompany reconciliations that can be updated by their owner, operators, or admins and viewed via a shared link."
     },
     "/closed_periods/{archiveId}": {
       "schema": {
@@ -235,6 +593,36 @@
         "$ref": "#/entities/CompanyDirectory"
       },
       "description": "Stores independent company directories per scope (internacionales, nacionales) editable independently of closed months."
+    },
+    "/bank_reconciliations/{bankRecId}": {
+      "schema": {
+        "$ref": "#/entities/BankReconciliation"
+      },
+      "description": "Stores saved corporate bank reconciliation workspaces including accounts, bank statements, accounting ledgers, and match records."
+    },
+    "/user_permissions/{emailDocId}": {
+      "schema": {
+        "$ref": "#/entities/UserPermission"
+      },
+      "description": "Stores per-email RBAC permissions (role, allowed modules, allowed companies). Readable only by the matching verified user or an administrator; writable only by administrators."
+    },
+    "/app_settings/{settingId}": {
+      "schema": {
+        "$ref": "#/entities/AccessControlRegistry"
+      },
+      "description": "Split configuration collection: 'policy' stores non-PII strictMode flag readable by signed-in users; 'access_control' stores the admin-only user permission directory."
+    },
+    "/viaticos_workspaces/{viaticosId}": {
+      "schema": {
+        "$ref": "#/entities/ViaticosWorkspace"
+      },
+      "description": "Stores corporate travel expense settlements (Liquidación de Viáticos) and consultants catalog; readable only by verified users authorized for viaticos."
+    },
+    "/module_company_directories/{moduleId}": {
+      "schema": {
+        "$ref": "#/entities/ModuleCompanyDirectory"
+      },
+      "description": "Stores independent master company/society catalogs for each functional module (bancos, viaticos, anticipos, cxc, cxp); readable by verified users and writable strictly by verified administrators."
     }
   }
 }

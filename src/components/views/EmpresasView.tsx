@@ -46,6 +46,8 @@ interface EmpresasViewProps {
   currentUser?: User | null;
   onSaveDirectoryToCloud?: () => Promise<void> | void;
   onSignInWithGoogle?: () => void;
+  readOnly?: boolean;
+  canManageMasterData?: boolean;
 }
 
 export const EmpresasView: React.FC<EmpresasViewProps> = ({
@@ -58,7 +60,10 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
   currentUser,
   onSaveDirectoryToCloud,
   onSignInWithGoogle,
+  readOnly = false,
+  canManageMasterData = true,
 }) => {
+  const isDirectoryLocked = Boolean(readOnly || !canManageMasterData);
   const defaultCountry = activeScope === 'nacionales' ? 'Colombia' : 'Global';
   const defaultCurrency = activeScope === 'nacionales' ? 'COP' : 'USD';
 
@@ -146,6 +151,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
 
   const handleAddCompany = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isDirectoryLocked) return;
     const cleanName = newNombre.trim();
     const cleanNit = newNit.trim();
     const cleanEmail = newEmail.trim();
@@ -210,6 +216,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
   };
 
   const handleStartEdit = (entity: EntityMapping) => {
+    if (isDirectoryLocked) return;
     setEditingId(entity.id);
     setEditNombre(entity.nombreOficial);
     setEditNit(entity.nit || '');
@@ -221,6 +228,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
 
   const handleSaveEdit = (e: React.FormEvent, id: string) => {
     e.preventDefault();
+    if (isDirectoryLocked) return;
     const cleanName = editNombre.trim();
     if (!cleanName) return;
 
@@ -244,6 +252,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
   };
 
   const handleMove = (index: number, direction: -1 | 1) => {
+    if (isDirectoryLocked) return;
     const targetIndex = index + direction;
     if (targetIndex < 0 || targetIndex >= entities.length) return;
     setEntities((prev) => {
@@ -255,6 +264,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
   };
 
   const handleDelete = (id: string, nombre: string) => {
+    if (isDirectoryLocked) return;
     if (window.confirm(`¿Deseas quitar a "${nombre}" del listado de empresas a conciliar?`)) {
       setEntities((prev) => prev.filter((item) => item.id !== id));
     }
@@ -373,28 +383,32 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => downloadEntitiesTemplate(defaultCountry, defaultCurrency)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Plantilla Sociedades</span>
-          </button>
+          {!isDirectoryLocked && (
+            <>
+              <button
+                type="button"
+                onClick={() => downloadEntitiesTemplate(defaultCountry, defaultCurrency)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Plantilla Sociedades</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setBulkResult(null);
-              setBulkFileName(null);
-              setBulkSuccessMsg(null);
-              setShowBulkModal(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
-          >
-            <UploadCloud className="w-4 h-4" />
-            <span>Carga Masiva</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBulkResult(null);
+                  setBulkFileName(null);
+                  setBulkSuccessMsg(null);
+                  setShowBulkModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <UploadCloud className="w-4 h-4" />
+                <span>Carga Masiva</span>
+              </button>
+            </>
+          )}
 
           {onGoToConciliacion && (
             <button
@@ -410,87 +424,99 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
       </div>
 
       {/* Independent Company Directory Cloud Sync Strip */}
-      <div
-        className={`px-4 py-3 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-          directorySync?.status === 'error'
-            ? 'bg-rose-50 border-rose-200 text-rose-900'
-            : directorySync?.status === 'pending'
-            ? 'bg-amber-50 border-amber-200 text-amber-900'
-            : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
-        }`}
-      >
-        <div className="flex items-start gap-2.5 min-w-0">
-          {directorySync?.status === 'saving' ? (
-            <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0 mt-0.5" />
-          ) : directorySync?.status === 'error' ? (
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-          ) : directorySync?.status === 'pending' ? (
-            <Cloud className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          ) : (
-            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          )}
-          <div className="min-w-0">
-            <div className="font-bold">
-              {directorySync?.status === 'saving'
-                ? 'Guardando cambios de empresas en la nube...'
-                : directorySync?.status === 'error'
-                ? 'No se pudo guardar el directorio de empresas en la nube'
-                : directorySync?.status === 'pending'
-                ? 'Cambios de empresas guardados localmente — pendientes por sincronizar en la nube'
-                : directorySync?.status === 'saved'
-                ? 'Directorio de empresas sincronizado en la nube (independiente de cierres de mes)'
-                : 'Catálogo de empresas independiente de cierres de mes'}
+      {isDirectoryLocked ? (
+        <div className="px-4 py-3 rounded-2xl border border-slate-200 bg-white text-slate-600 text-xs flex items-center gap-2.5">
+          <ShieldCheck className="w-4 h-4 text-[#1E60A8] shrink-0" />
+          <span>
+            <strong className="font-semibold text-slate-800">Directorio maestro en modo consulta:</strong>{' '}
+            {readOnly
+              ? 'Tu perfil Solo Consulta permite revisar las sociedades autorizadas sin modificar el catálogo.'
+              : 'La edición del catálogo maestro de sociedades está reservada al perfil Administrador.'}
+          </span>
+        </div>
+      ) : (
+        <div
+          className={`px-4 py-3 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            directorySync?.status === 'error'
+              ? 'bg-rose-50 border-rose-200 text-rose-900'
+              : directorySync?.status === 'pending'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+          }`}
+        >
+          <div className="flex items-start gap-2.5 min-w-0">
+            {directorySync?.status === 'saving' ? (
+              <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0 mt-0.5" />
+            ) : directorySync?.status === 'error' ? (
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            ) : directorySync?.status === 'pending' ? (
+              <Cloud className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            ) : (
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            )}
+            <div className="min-w-0">
+              <div className="font-bold">
+                {directorySync?.status === 'saving'
+                  ? 'Guardando cambios de empresas en la nube...'
+                  : directorySync?.status === 'error'
+                  ? 'No se pudo guardar el directorio de empresas en la nube'
+                  : directorySync?.status === 'pending'
+                  ? 'Cambios de empresas guardados localmente — pendientes por sincronizar en la nube'
+                  : directorySync?.status === 'saved'
+                  ? 'Directorio de empresas sincronizado en la nube (independiente de cierres de mes)'
+                  : 'Catálogo de empresas independiente de cierres de mes'}
+              </div>
+              <p className="text-[11px] opacity-85 mt-0.5">
+                {directorySync?.status === 'error' && directorySync.errorMsg
+                  ? directorySync.errorMsg
+                  : directorySync?.status === 'saved' && directorySync.lastSyncedAtIso
+                  ? `Puedes editar correos, NIT u orden en cualquier momento aunque existan meses cerrados. Último guardado: ${new Date(
+                      directorySync.lastSyncedAtIso
+                    ).toLocaleString('es-CO', {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                    })}${directorySync.updatedByName ? ` por ${directorySync.updatedByName}` : ''}.`
+                  : 'Puedes editar correos, NIT, nombres u orden libremente sin afectar ni quedar bloqueado por los cierres de mes.'}
+              </p>
             </div>
-            <p className="text-[11px] opacity-85 mt-0.5">
-              {directorySync?.status === 'error' && directorySync.errorMsg
-                ? directorySync.errorMsg
-                : directorySync?.status === 'saved' && directorySync.lastSyncedAtIso
-                ? `Puedes editar correos, NIT u orden en cualquier momento aunque existan meses cerrados. Último guardado: ${new Date(
-                    directorySync.lastSyncedAtIso
-                  ).toLocaleString('es-CO', {
-                    dateStyle: 'short',
-                    timeStyle: 'short',
-                  })}${directorySync.updatedByName ? ` por ${directorySync.updatedByName}` : ''}.`
-                : 'Puedes editar correos, NIT, nombres u orden libremente sin afectar ni quedar bloqueado por los cierres de mes.'}
-            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {!currentUser ? (
+              onSignInWithGoogle && (
+                <button
+                  type="button"
+                  onClick={onSignInWithGoogle}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition-colors cursor-pointer"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Conectar Google para Guardar</span>
+                </button>
+              )
+            ) : (
+              onSaveDirectoryToCloud && (
+                <button
+                  type="button"
+                  disabled={directorySync?.status === 'saving'}
+                  onClick={() => void onSaveDirectoryToCloud()}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  {directorySync?.status === 'saving' ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Cloud className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {directorySync?.status === 'saving'
+                      ? 'Guardando...'
+                      : 'Guardar Empresas en la Nube'}
+                  </span>
+                </button>
+              )
+            )}
           </div>
         </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {!currentUser ? (
-            onSignInWithGoogle && (
-              <button
-                type="button"
-                onClick={onSignInWithGoogle}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition-colors cursor-pointer"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Conectar Google para Guardar</span>
-              </button>
-            )
-          ) : (
-            onSaveDirectoryToCloud && (
-              <button
-                type="button"
-                disabled={directorySync?.status === 'saving'}
-                onClick={() => void onSaveDirectoryToCloud()}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
-              >
-                {directorySync?.status === 'saving' ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Cloud className="w-3.5 h-3.5" />
-                )}
-                <span>
-                  {directorySync?.status === 'saving'
-                    ? 'Guardando...'
-                    : 'Guardar Empresas en la Nube'}
-                </span>
-              </button>
-            )
-          )}
-        </div>
-      </div>
+      )}
 
       {bulkSuccessMsg && (
         <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between gap-2">
@@ -518,7 +544,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
       )}
 
       {/* Missing companies detected in current movements */}
-      {missingInMovements.length > 0 && (
+      {!isDirectoryLocked && missingInMovements.length > 0 && (
         <div className="p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs space-y-3 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-2.5">
@@ -559,6 +585,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
       )}
 
       {/* Manual Add Company Form */}
+      {!isDirectoryLocked && (
       <form
         onSubmit={handleAddCompany}
         className="bg-white p-5 rounded-2xl border border-blue-200/90 shadow-xs space-y-4"
@@ -679,6 +706,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
           </div>
         )}
       </form>
+      )}
 
       {/* Search & Ordered Matrix Companies Table */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -712,23 +740,25 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
                 <th className="px-4 py-3">Código</th>
                 <th className="px-4 py-3">País</th>
                 <th className="px-4 py-3">Moneda</th>
-                <th className="px-4 py-3 text-right">Acciones</th>
+                {!isDirectoryLocked && <th className="px-4 py-3 text-right">Acciones</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredEntities.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-400">
+                  <td colSpan={isDirectoryLocked ? 7 : 8} className="py-10 text-center text-slate-400">
                     {entities.length === 0
-                      ? 'No hay sociedades registradas. Usa "Carga Masiva" o agrega una empresa arriba para alimentar la matriz.'
+                      ? isDirectoryLocked
+                        ? 'No hay sociedades asignadas visibles para tu usuario.'
+                        : 'No hay sociedades registradas. Usa "Carga Masiva" o agrega una empresa arriba para alimentar la matriz.'
                       : 'No se encontraron empresas con ese criterio de búsqueda.'}
                   </td>
                 </tr>
               ) : (
                 filteredEntities.map((ent) => {
                   const realIndex = entities.findIndex((item) => item.id === ent.id);
-                  const isItemEditing = editingId === ent.id;
-                  const canReorder = !searchTerm.trim();
+                  const isItemEditing = !isDirectoryLocked && editingId === ent.id;
+                  const canReorder = !isDirectoryLocked && !searchTerm.trim();
 
                   if (isItemEditing) {
                     return (
@@ -867,26 +897,28 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
                           {ent.moneda}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleStartEdit(ent)}
-                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                            title="Editar empresa y NIT"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(ent.id, ent.nombreOficial)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                            title="Quitar de la matriz"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      {!isDirectoryLocked && (
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(ent)}
+                              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                              title="Editar empresa y NIT"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(ent.id, ent.nombreOficial)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              title="Quitar de la matriz"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })

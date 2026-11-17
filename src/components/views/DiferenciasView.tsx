@@ -47,6 +47,7 @@ interface DiferenciasViewProps {
   selectedMonth?: string;
   closedMonths?: Record<string, ClosedMonthRecord>;
   activeScope?: ReconciliationScope;
+  readOnly?: boolean;
 }
 
 export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
@@ -65,9 +66,11 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
   selectedMonth = 'Septiembre 2026',
   closedMonths = {},
   activeScope = 'internacionales',
+  readOnly = false,
 }) => {
   const scopeLabel = 'Anitox';
   const isMonthClosed = selectedMonth !== 'ALL' && Boolean(closedMonths[selectedMonth]);
+  const isEditingLocked = isMonthClosed || readOnly;
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'DIFERENCIA' | 'CONCILIADO'>('ALL');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -83,13 +86,13 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
   ];
 
   const handleStartEdit = (row: DifferenceRow) => {
-    if (isMonthClosed) return;
+    if (isEditingLocked) return;
     setEditingId(row.id);
     setTempComment(row.comentario || '');
   };
 
   const handleSaveComment = (rowId: string) => {
-    if (isMonthClosed) return;
+    if (isEditingLocked) return;
     onUpdateComment(rowId, tempComment);
     setEditingId(null);
     setJustSavedId(rowId);
@@ -552,7 +555,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
   ]);
 
   const recordEmailNotificationNotes = () => {
-    if (isMonthClosed || activeEmailRows.length === 0) return;
+    if (isEditingLocked || activeEmailRows.length === 0) return;
     const now = new Date();
     const fechaHora = now.toLocaleString('es-CO', {
       day: '2-digit',
@@ -664,13 +667,15 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
             )
           )}
 
-          <button
-            onClick={onOpenGoogleSheets}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-colors cursor-pointer"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
-            <span>Guardar en Google Sheets</span>
-          </button>
+          {!readOnly && (
+            <button
+              onClick={onOpenGoogleSheets}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
+              <span>Guardar en Google Sheets</span>
+            </button>
+          )}
 
           {onInspectDocuments && (
             <button
@@ -800,7 +805,11 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                 <th className="px-4 py-3.5 text-right min-w-[120px]">Diferencia</th>
                 <th className="px-4 py-3.5 min-w-[155px]">Estado</th>
                 <th className="px-4 py-3.5 min-w-[250px]">
-                  {isMonthClosed ? 'Comentario (Cerrado)' : 'Comentario Editable'}
+                  {isMonthClosed
+                    ? 'Comentario (Cerrado)'
+                    : readOnly
+                    ? 'Comentario (Solo Consulta)'
+                    : 'Comentario Editable'}
                 </th>
               </tr>
             </thead>
@@ -936,7 +945,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
 
                       {/* Comentario Editable */}
                       <td className="px-4 py-3">
-                        {isRowEditing && !isMonthClosed ? (
+                        {isRowEditing && !isEditingLocked ? (
                           <div className="space-y-2">
                             <textarea
                               rows={2}
@@ -982,12 +991,16 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                               </button>
                             </div>
                           </div>
-                        ) : isMonthClosed ? (
+                        ) : isEditingLocked ? (
                           <div className="p-1.5 text-xs text-slate-600">
                             {row.comentario ? (
                               <p className="italic">"{row.comentario}"</p>
                             ) : (
-                              <p className="text-slate-400 italic">Sin comentario (Mes cerrado)</p>
+                              <p className="text-slate-400 italic">
+                                {isMonthClosed
+                                  ? 'Sin comentario (Mes cerrado)'
+                                  : 'Sin comentario (Solo Consulta)'}
+                              </p>
                             )}
                           </div>
                         ) : (

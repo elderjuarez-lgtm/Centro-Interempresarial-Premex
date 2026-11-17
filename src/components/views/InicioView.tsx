@@ -27,6 +27,7 @@ interface InicioViewProps {
   onOpenGoogleSheets: () => void;
   onOpenSaveModal?: () => void;
   activeScope?: ReconciliationScope;
+  readOnly?: boolean;
 }
 
 export const InicioView: React.FC<InicioViewProps> = ({
@@ -38,6 +39,7 @@ export const InicioView: React.FC<InicioViewProps> = ({
   onOpenGoogleSheets,
   onOpenSaveModal,
   activeScope = 'internacionales',
+  readOnly = false,
 }) => {
   const totalCxc = matrizCxc.grandTotal;
   const totalCxp = matrizCxp.grandTotal;
@@ -68,13 +70,15 @@ export const InicioView: React.FC<InicioViewProps> = ({
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => setActiveTab('carga')}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md transition-all cursor-pointer"
-            >
-              <UploadCloud className="w-4 h-4" />
-              <span>Cargar Archivo Excel</span>
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => setActiveTab('carga')}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md transition-all cursor-pointer"
+              >
+                <UploadCloud className="w-4 h-4" />
+                <span>Cargar Archivo Excel</span>
+              </button>
+            )}
 
             <button
               onClick={() => setActiveTab('diferencias')}
@@ -84,7 +88,7 @@ export const InicioView: React.FC<InicioViewProps> = ({
               <span>Ver {discrepantPairs.length} Diferencias</span>
             </button>
 
-            {onOpenSaveModal && (
+            {!readOnly && onOpenSaveModal && (
               <button
                 onClick={onOpenSaveModal}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md transition-all cursor-pointer"
@@ -94,13 +98,15 @@ export const InicioView: React.FC<InicioViewProps> = ({
               </button>
             )}
 
-            <button
-              onClick={onOpenGoogleSheets}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md transition-all cursor-pointer"
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              <span>Exportar a Google Sheets</span>
-            </button>
+            {!readOnly && (
+              <button
+                onClick={onOpenGoogleSheets}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md transition-all cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Exportar a Google Sheets</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -337,18 +343,20 @@ export const InicioView: React.FC<InicioViewProps> = ({
               </div>
             </div>
 
-            <div 
-              onClick={onOpenGoogleSheets}
-              className="p-3 rounded-xl bg-emerald-50 hover:bg-emerald-100/70 border border-emerald-200 cursor-pointer transition-colors flex items-start gap-3"
-            >
-              <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
-                5
+            {!readOnly && (
+              <div
+                onClick={onOpenGoogleSheets}
+                className="p-3 rounded-xl bg-emerald-50 hover:bg-emerald-100/70 border border-emerald-200 cursor-pointer transition-colors flex items-start gap-3"
+              >
+                <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                  5
+                </div>
+                <div>
+                  <p className="font-semibold text-emerald-900">Guardar en Google Sheets</p>
+                  <p className="text-emerald-700 mt-0.5">Sube el reporte final a la nube para los auditores y la gerencia.</p>
+                </div>
               </div>
-              <div>
-                <p className="font-semibold text-emerald-900">Guardar en Google Sheets</p>
-                <p className="text-emerald-700 mt-0.5">Sube el reporte final a la nube para los auditores y la gerencia.</p>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

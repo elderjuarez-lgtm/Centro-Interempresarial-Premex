@@ -149,3 +149,286 @@ export interface DirectorySyncState {
   errorMsg?: string;
 }
 
+// ============================================================================
+// Modular Platform & Bank Reconciliation Types
+// ============================================================================
+
+export type ActiveModuleId = 'launcher' | 'intercompany' | 'bancos' | 'viaticos' | 'ajustes';
+
+export type FunctionalModuleId =
+  | 'intercompany'
+  | 'bancos'
+  | 'viaticos'
+  | 'anticipos'
+  | 'cxc'
+  | 'cxp';
+
+export type StandaloneCompanyDbModuleId = Exclude<FunctionalModuleId, 'intercompany'>;
+
+export type SuiteModuleId = FunctionalModuleId | 'ajustes';
+
+export type UserRole = 'admin' | 'operador' | 'consulta';
+
+export type CompanyAccessScope = 'all' | 'selected';
+
+export interface ModuleCompanyEntry {
+  id: string;
+  nombre: string;
+  codigo?: string;
+  nit?: string;
+  pais?: string;
+  moneda?: string;
+  activo: boolean;
+}
+
+export type ModuleCompaniesMap = Record<FunctionalModuleId, ModuleCompanyEntry[]>;
+
+export interface ModuleCompanyPermission {
+  scope: CompanyAccessScope;
+  companies: string[];
+}
+
+export type ModuleCompanyScopeMap = Partial<Record<FunctionalModuleId, ModuleCompanyPermission>>;
+
+export interface UserPermissionRecord {
+  id: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  allowedModules: SuiteModuleId[];
+  /** Legacy/fallback global company scope (derived automatically from moduleCompanyAccess) */
+  companyScope: CompanyAccessScope;
+  /** Legacy/fallback flattened company names */
+  allowedCompanies: string[];
+  /** Independent per-module company access rules (each module pulls from its own company DB) */
+  moduleCompanyAccess?: ModuleCompanyScopeMap;
+  active: boolean;
+  notes?: string;
+  updatedBy?: string;
+  updatedAtIso?: string;
+}
+
+export interface AccessControlPolicy {
+  strictMode: boolean;
+  updatedBy?: string;
+  updatedAtIso?: string;
+}
+
+export interface EffectivePermissions {
+  email: string | null;
+  displayName: string;
+  role: UserRole;
+  isAuthorized: boolean;
+  isSuperAdmin: boolean;
+  isAdmin: boolean;
+  canOperate: boolean;
+  isReadOnly: boolean;
+  canCloseMonth: boolean;
+  canManageMasterData: boolean;
+  allowedModules: SuiteModuleId[];
+  companyScope: CompanyAccessScope;
+  allowedCompanies: string[];
+  moduleCompanyAccess: ModuleCompanyScopeMap;
+  canAccessModule: (moduleId: SuiteModuleId) => boolean;
+  isCompanyAllowed: (companyName: string, moduleId?: FunctionalModuleId) => boolean;
+  getModuleCompanyScope: (moduleId: FunctionalModuleId) => CompanyAccessScope;
+  getAllowedCompaniesForModule: (moduleId: FunctionalModuleId) => string[];
+  isPreviewing: boolean;
+  previewEmail: string | null;
+}
+
+export type BankTab = 'resumen' | 'cruce' | 'pendientes' | 'cuentas' | 'carga';
+
+export type BankCurrency = 'USD' | 'COP' | 'GTQ' | 'MXN' | 'EUR';
+
+export type BankAccountType = 'Corriente' | 'Ahorros' | 'Recaudadora';
+
+export interface BankAccount {
+  id: string;
+  banco: string;
+  numeroCuenta: string;
+  sociedad: string;
+  pais: string;
+  moneda: BankCurrency;
+  tipoCuenta: BankAccountType;
+  saldoInicialLibros: number;
+  saldoFinalExtracto: number;
+  saldoFinalLibros: number;
+}
+
+export type BankPendingCategory =
+  | 'deposito_transito'
+  | 'cheque_transito'
+  | 'nota_debito'
+  | 'nota_credito'
+  | 'por_identificar';
+
+export interface BankStatementItem {
+  id: string;
+  cuentaId: string;
+  fecha: string;
+  referencia: string;
+  descripcion: string;
+  /** En extracto bancario: CREDITO = abono/entrada de dinero (+), DEBITO = cargo/salida de dinero (-) */
+  tipo: 'CREDITO' | 'DEBITO';
+  valor: number;
+  mes: string;
+  categoriaPendiente?: BankPendingCategory;
+  comentario?: string;
+}
+
+export interface BookLedgerItem {
+  id: string;
+  cuentaId: string;
+  fecha: string;
+  comprobante: string;
+  tercero: string;
+  descripcion: string;
+  /** En auxiliar contable de bancos: DEBITO = entrada a bancos (+), CREDITO = salida de bancos (-) */
+  tipo: 'DEBITO' | 'CREDITO';
+  valor: number;
+  mes: string;
+  categoriaPendiente?: BankPendingCategory;
+  comentario?: string;
+}
+
+export type BankMatchMethod = 'automatico_ref' | 'automatico_valor' | 'manual';
+
+export interface BankMatchGroup {
+  id: string;
+  cuentaId: string;
+  mes: string;
+  bankItemIds: string[];
+  ledgerItemIds: string[];
+  method: BankMatchMethod;
+  matchedAt: string;
+  note?: string;
+}
+
+export interface BankReconciliationSummary {
+  account: BankAccount | null;
+  saldoExtracto: number;
+  depositosEnTransito: number;
+  chequesEnTransito: number;
+  saldoConciliadoExtracto: number;
+  saldoLibros: number;
+  notasCreditoNoContabilizadas: number;
+  notasDebitoNoContabilizadas: number;
+  saldoConciliadoLibros: number;
+  diferenciaNeta: number;
+  totalBankItems: number;
+  matchedBankItemsCount: number;
+  unmatchedBankItemsCount: number;
+  totalLedgerItems: number;
+  matchedLedgerItemsCount: number;
+  unmatchedLedgerItemsCount: number;
+  reconciledPct: number;
+  unmatchedBankItems: BankStatementItem[];
+  unmatchedLedgerItems: BookLedgerItem[];
+  matchedBankIds: Set<string>;
+  matchedLedgerIds: Set<string>;
+}
+
+// ============================================================================
+// Liquidación de Viáticos Types
+// ============================================================================
+
+export type ViaticosTab = 'liquidador' | 'historial';
+
+export type ViaticoCurrency =
+  | 'Quetzales'
+  | 'Dólares'
+  | 'Pesos Colombianos'
+  | 'Lempiras'
+  | 'Pesos Mexicanos'
+  | 'Euros'
+  | 'Colones';
+
+export type ViaticoCategory =
+  | 'Alimentación'
+  | 'Combustible / Lub'
+  | 'Taxis / Buses'
+  | 'Hospedaje'
+  | 'Peajes / Parqueo'
+  | 'Boletos Aéreos'
+  | 'Atención a Clientes'
+  | 'Otros Gastos';
+
+export type ViaticoLiquidationStatus = 'borrador' | 'cerrada' | 'enviada';
+
+export interface ViaticoConsultor {
+  id: string;
+  nombreCompleto: string;
+  email: string;
+  empresa: string;
+  cargo?: string;
+  monedaBase: ViaticoCurrency;
+  activo: boolean;
+}
+
+export interface ViaticoExpenseItem {
+  id: string;
+  fechaDoc: string; // DD/MM/YYYY
+  serieDoc: string;
+  noDoc: string;
+  nit: string;
+  proveedor: string;
+  moneda: ViaticoCurrency;
+  valorFactura: number;
+  tipoCambio: number;
+  valorReintegrar: number;
+  categoria: ViaticoCategory;
+  clienteContacto: string;
+  objetivoComercial: string;
+  descripcionGasto: string;
+  kilometraje: string;
+  // Fiscal/tax flags for auditing & future accounting export
+  aplicaImpuestos: boolean;
+  porcentajeImpuesto: number;
+  montoImpuesto: number;
+  valorSinImpuesto: number;
+  // Lightweight receipt reference (bytes stored in IndexedDB, never in Firestore)
+  attachmentId?: string;
+  attachmentName?: string;
+  attachmentMimeType?: string;
+  attachmentSize?: number;
+  extractedByAi?: boolean;
+  extractionConfidence?: 'alta' | 'media' | 'baja';
+  extractionNotes?: string;
+}
+
+export interface ViaticoLiquidation {
+  id: string;
+  lineaLiquidacion: string;
+  semana: string;
+  consultorId: string;
+  consultorNombre: string;
+  consultorEmail: string;
+  empresa: string;
+  monedaBase: ViaticoCurrency;
+  estado: ViaticoLiquidationStatus;
+  items: ViaticoExpenseItem[];
+  totalLiquidacion: number;
+  totalConImpuestos: number;
+  totalSinImpuestos: number;
+  totalImpuestos: number;
+  createdAtIso: string;
+  updatedAtIso: string;
+  closedAtIso?: string;
+  closedBy?: string;
+  sentAtIso?: string;
+  sentToEmail?: string;
+  notas?: string;
+}
+
+export interface ViaticosWorkspaceData {
+  docId: string;
+  consultores: ViaticoConsultor[];
+  liquidaciones: ViaticoLiquidation[];
+  activeLiquidationId: string;
+  lastSavedAtIso: string | null;
+  hasUnsavedChanges: boolean;
+}
+
+
+

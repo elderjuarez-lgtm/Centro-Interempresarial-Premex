@@ -29,6 +29,7 @@ interface ConciliacionViewProps {
   availableMonths?: string[];
   closedMonths?: Record<string, ClosedMonthRecord>;
   activeScope?: ReconciliationScope;
+  readOnly?: boolean;
 }
 
 export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
@@ -46,6 +47,7 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
   availableMonths = ['Septiembre 2026'],
   closedMonths = {},
   activeScope = 'internacionales',
+  readOnly = false,
 }) => {
   const scopeLabel = 'Anitox';
   const isSelectedMonthClosed = selectedMonth !== 'ALL' && Boolean(closedMonths[selectedMonth]);
@@ -301,14 +303,16 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
             )
           )}
 
-          {/* Google Sheets Sync Button */}
-          <button
-            onClick={onOpenGoogleSheets}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-colors cursor-pointer"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
-            <span>Guardar en Sheets</span>
-          </button>
+          {/* Google Sheets Sync Button (hidden in Solo Consulta) */}
+          {!readOnly && (
+            <button
+              onClick={onOpenGoogleSheets}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
+              <span>Guardar en Sheets</span>
+            </button>
+          )}
         </div>
       </div>
 

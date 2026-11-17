@@ -25,6 +25,7 @@ interface CargaArchivosViewProps {
   onAddMissingEntities: (names: string[]) => void;
   onGoToEmpresas: () => void;
   closedMonths?: Record<string, ClosedMonthRecord>;
+  readOnly?: boolean;
 }
 
 export const CargaArchivosView: React.FC<CargaArchivosViewProps> = ({
@@ -36,6 +37,7 @@ export const CargaArchivosView: React.FC<CargaArchivosViewProps> = ({
   onAddMissingEntities,
   onGoToEmpresas,
   closedMonths = {},
+  readOnly = false,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -266,6 +268,21 @@ export const CargaArchivosView: React.FC<CargaArchivosViewProps> = ({
   };
 
   const totalParsedValue = parsedData?.movements.reduce((sum, m) => sum + m.valor, 0) || 0;
+
+  if (readOnly) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200/90 p-10 text-center max-w-2xl mx-auto">
+        <Lock className="w-9 h-9 text-amber-600 mx-auto mb-3" />
+        <h3 className="text-base font-bold text-slate-900">
+          Carga de archivos restringida (Solo Consulta)
+        </h3>
+        <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+          Tu perfil tiene permisos de Solo Consulta. La importación de libros Excel y el registro
+          manual de movimientos están habilitados para Operadores y Administradores.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
