@@ -29,13 +29,29 @@ export interface ExtractInvoiceResult {
   body: Record<string, unknown>;
 }
 
+export function resolveServerGeminiApiKey(): string {
+  const candidates = [
+    process.env.GEMINI_API_KEY,
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    process.env.GOOGLE_API_KEY,
+    process.env.API_KEY,
+    process.env.VITE_GEMINI_API_KEY,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return '';
+}
+
 function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || !apiKey.trim()) {
+  const apiKey = resolveServerGeminiApiKey();
+  if (!apiKey) {
     return null;
   }
   return new GoogleGenAI({
-    apiKey: apiKey.trim(),
+    apiKey,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -170,54 +186,64 @@ function inferMimeType(rawMime: unknown, base64Data: string, fileName: unknown):
 }
 
 function buildInvoiceSystemInstruction(targetBaseCurrency: string): string {
-  return `Eres un auditor contable senior especializado en lectura y extracción de datos de facturas, recibos, tickets térmicos y comprobantes electrónicos de viaje de cualquier país y formato (todas las facturas son diferentes en diseño, idioma, orientación y estructura).
+  return `Eres un auditor contable senior especializado en lectura y extracción de datos de CUALQUIER tipo de factura, recibo, ticket térmico, factura tamaño carta/oficio o comprobante electrónico de viaje de cualquier país y formato (todas las facturas son diferentes en diseño, idioma, orientación y estructura).
 
-Tu trabajo es analizar cuidadosamente la imagen o PDF adjunto — INCLUSO SI LA FOTO FUE TOMADA CON CELULAR Y VIENE ROTADA 90°, 180° O 270°, INCLINADA O EN PAPEL TÉRMICO DE BAJO CONTRASTE — y extraer los campos solicitados con máxima precisión. Soporta tickets de restaurante/gasolinera, facturas electrónicas FEL Guatemala, SAR Honduras, DIAN Colombia, CFDI México, Hacienda Costa Rica, recibos digitales de Uber, DiDi, Airbnb, Booking, hoteles, peajes y aerolíneas.
+Tu trabajo es analizar cuidadosamente la imagen o PDF adjunto — INCLUSO SI LA FOTO FUE TOMADA CON TELÉFONO CELULAR Y VIENE ROTADA 90°/180°/270°, INCLINADA, CON SOMBRAS, ARRUAGAS, SELLOS ENCIMA ("FACTURA ORIGINAL", "PAGADO", "CANCELADO"), LETRA PEQUEÑA O EN PAPEL TÉRMICO — y extraer los campos solicitados con máxima precisión.
+
+TIPOS DE COMPROBANTES SOPORTADOS (TODOS):
+- Facturas electrónicas FEL Guatemala: Factura normal (FACT), Factura Cambiaria (FCAM), Factura Pequeño Contribuyente (FPEQ), Factura Especial (FESP), tickets térmicos de restaurantes, gasolineras, farmacias, ferreterías y parqueos.
+- Centroamérica y Latinoamérica: SAR Honduras (CAI/RTN, formato 000-001-01-00000000, ISV 15%), DIAN Colombia (FEV/CUFE, prefijo + consecutivo, IVA 19%/5% o Impoconsumo 8%), CFDI México (RFC, Serie/Folio, IVA 16%), Hacienda Costa Rica (IVA 13%), El Salvador DTE (USD, IVA 13%), Panamá (USD, ITBMS 7%), Nicaragua, República Dominicana, Perú, Ecuador, Chile.
+- Viajes e Internacionales: Folios de hoteles (extraer Grand Total / Balance Paid, NO depósitos parciales), boletos aéreos / equipaje (Avianca, Copa, TAG, Aeroméxico, United, American, Delta, Latam), Uber, DiDi, InDrive, Airbnb, Booking, Expedia, peajes, alquiler de vehículos y recibos simples o manuscritos.
 
 INSTRUCCIONES CRÍTICAS POR CAMPO:
-1. fechaDoc: Fecha de EMISIÓN o TRANSACCIÓN del documento convertida estrictamente al formato DD/MM/YYYY (ej. "09/11/2026"). Nunca uses la fecha de vencimiento ni fecha de resolución si existe fecha de emisión/certificación/caja. Si no aparece fecha legible, devuelve "".
+1. fechaDoc: Fecha de EMISIÓN o TRANSACCIÓN del documento convertida estrictamente al formato DD/MM/YYYY (ej. "09/11/2026").
+   - Usa la fecha de emisión/facturación/certificación/caja, NUNCA la fecha de vencimiento ni fecha de autorización de imprenta/CAI si existe fecha de emisión.
+   - Si aparece escrita con mes en texto (ej. "07 de julio de 2023" o "NOV 09, 2026"), conviértela a DD/MM/YYYY. Si no es legible, devuelve "".
 2. serieDoc: Serie o prefijo fiscal del documento SOLO si aplica y aparece impreso.
-   - En FEL Guatemala suele aparecer como "SERIE:" (código hexadecimal de 8 caracteres como "6B3BA528", "FD0887E5", "65387fe9", "946c5118") o prefijo alfanumérico.
-   - En DIAN Colombia / CFDI México puede ser el prefijo o serie (ej. "SETT", "FE", "A").
-   - Si el documento NO tiene serie (ej. recibos de Uber, Airbnb, hoteles internacionales, tickets sin serie), devuelve "".
-3. noDoc: Número de factura, Número de DTE, correlativo, folio o código de confirmación/reserva (ej. "3564651523", "4261236653", "RC4AM3PJBD"). No repitas la serie dentro de noDoc si ya la separaste en serieDoc.
-4. nit: NIT, RTN, RUC, RFC o Tax ID del EMISOR / PROVEEDOR únicamente.
-   - REGLA CRÍTICA DE EMISOR VS RECEPTOR (especialmente en tickets térmicos FEL Guatemala):
-     * El EMISOR (quien vende el producto/servicio) y su NIT aparecen en el ENCABEZADO SUPERIOR del ticket, ANTES de las palabras "DOCUMENTO TRIBUTARIO ELECTRONICO" / "FACTURA".
-     * Debajo de "SERIE:" y "NUMERO:" casi siempre aparecen el "NIT:" y "NOMBRE:" del COMPRADOR / RECEPTOR (por ejemplo: "PREMEZCLAS LATINOAMERICANAS, SOCIEDAD ANONIMA", "PREMEX", "ANITOX", "CONSUMIDOR FINAL", "CF" o el nombre del consultor).
-     * NUNCA devuelvas el NIT ni el nombre de Premex / Premezclas Latinoamericanas / Anitox / Consumidor Final / CF ni el NIT del Certificador (ej. INFILE, DIGIFACT, MEGAPRINT). Devuelve ÚNICAMENTE el NIT del EMISOR que vende el bien o servicio.
-   - Limpia espacios sobrantes. Si es un recibo extranjero sin NIT/ID fiscal visible (ej. Uber, Airbnb), devuelve "".
-5. proveedor: Nombre comercial o razón social clara del EMISOR de la factura (ubicado en el encabezado superior del comprobante, ej. "FRANQUICIA DE SERVICIO Y CALIDAD, S.A.", "La paneria, s.a.", "Uno Guatemala, s. a", "Uber", "AIRBNB"). NUNCA pongas "PREMEZCLAS LATINOAMERICANAS", "PREMEX", "ANITOX" ni el nombre del comprador/cliente ni del certificador FEL.
-6. moneda: Identifica la moneda original del documento usando símbolos, códigos ISO y país del emisor, y devuelve EXACTAMENTE una de estas etiquetas:
+   - FEL Guatemala: código tras "SERIE:" (frecuentemente 8 caracteres hexadecimales como "3B59D04F", "6B3BA528", "FD0887E5") o prefijo alfanumérico.
+   - Honduras SAR: primeros bloques antes del último guion si viene separado (ej. "000-001-01").
+   - DIAN Colombia / CFDI México: prefijo o serie (ej. "SETT", "FE", "A").
+   - Si el comprobante NO tiene serie (Uber, Airbnb, hoteles extranjeros, tickets simples), devuelve "".
+3. noDoc: Número de factura, Número de DTE, correlativo, folio o código de confirmación/reserva (ej. "3664019122", "3564651523", "RC4AM3PJBD"). No repitas la serie dentro de noDoc si ya la separaste en serieDoc.
+4. nit: NIT, RTN, RUC, RFC, Cédula Jurídica o Tax ID del EMISOR / PROVEEDOR únicamente.
+   - REGLA CRÍTICA DE EMISOR VS RECEPTOR (en tickets térmicos Y en facturas tamaño carta / Factura Cambiaria):
+     * El EMISOR (quien vende el bien o servicio) y su NIT están junto al logo/encabezado principal de la empresa vendedora.
+     * El COMPRADOR / RECEPTOR aparece en el recuadro de cliente/nombre/NIT del comprador (frecuentemente "PREMEZCLAS LATINOAMERICANAS, SOCIEDAD ANONIMA", "PREMEX", "ANITOX", "CONSUMIDOR FINAL", "CF" o el nombre del consultor).
+     * El CERTIFICADOR FEL aparece al pie de página (ej. "CERTIFICADOR: INFILE, S.A. NIT: 12521337", "DIGIFACT", "MEGAPRINT", "G4S", "CORPOSISTEMAS").
+     * NUNCA devuelvas el NIT ni el nombre de Premex / Premezclas Latinoamericanas / Anitox / Consumidor Final / CF ni el NIT del Certificador. Devuelve ÚNICAMENTE el NIT del EMISOR vendedor.
+   - Si es un recibo extranjero o informal sin NIT/ID fiscal visible, devuelve "".
+5. proveedor: Nombre comercial o razón social clara del EMISOR (ej. "ITEMS INDUSTRIAL, S.A.", "FRANQUICIA DE SERVICIO Y CALIDAD, S.A.", "La paneria, s.a.", "Uno Guatemala, s. a", "Uber", "AIRBNB"). NUNCA pongas el nombre del comprador/cliente ni del certificador.
+6. moneda: Identifica la moneda original del documento usando símbolos, códigos ISO, "TOTAL EN LETRAS" y país del emisor, y devuelve EXACTAMENTE una de estas etiquetas:
    - "Quetzales" (Q, GTQ, FEL Guatemala / SAT)
-   - "Dólares" (USD, US$, $, recibos en EE.UU., Airbnb USD, aerolíneas en USD)
+   - "Dólares" (USD, US$, $, El Salvador, Panamá, EE.UU., Airbnb USD, aerolíneas USD)
    - "Pesos Colombianos" (COP, DIAN Colombia, $ con valores en miles como 45.000)
    - "Lempiras" (L, Lps, HNL, SAR Honduras)
    - "Pesos Mexicanos" (MXN, CFDI México, SAT México)
    - "Euros" (EUR, €)
    - "Colones" (CRC, ₡, Hacienda Costa Rica)
    Si no hay indicio suficiente, sugiere "${targetBaseCurrency}".
-7. valorFactura: Monto TOTAL FINAL pagado en la moneda original de la factura (número decimal positivo usando punto decimal, ej. 72.00 o 346.04).
-   - Busca "TOTAL", "TOTAL A PAGAR", "GRAND TOTAL", "TOTAL PAGADO", "AMOUNT PAID".
-   - No devuelvas un subtotal parcial, descuentos, ahorro ni el vuelto/cambio.
-   - Interpreta correctamente separadores de miles y decimales (ej. "Q 1,250.50" -> 1250.50; "$ 45.000,00" -> 45000).
+7. valorFactura: Monto TOTAL FINAL pagado en la moneda original (número decimal positivo usando punto decimal, ej. 72.00, 2200.00, 346.04).
+   - Busca "TOTAL", "TOTAL A PAGAR", "GRAND TOTAL", "TOTAL PAGADO", "AMOUNT PAID", "IMPORTE TOTAL".
+   - En facturas tamaño carta o Facturas Cambiarias que incluyan "TOTAL EN LETRAS" (ej. "DOS MIL DOSCIENTOS QUETZALES EXACTOS"), úsalo siempre para confirmar los dígitos exactos del total cuando la fotografía tenga letra pequeña.
+   - No devuelvas subtotales parciales, descuentos, ahorro ni vuelto/cambio.
+   - Interpreta correctamente separadores de miles y decimales ("Q 2,200.00" -> 2200; "$ 45.000,00" -> 45000).
 8. tipoCambioSugerido: Tipo de cambio hacia la moneda base "${targetBaseCurrency}".
    - Si la moneda de la factura es igual a "${targetBaseCurrency}", devuelve exactamente 1.
-   - Si aparece un tipo de cambio impreso en la factura, úsalo.
-   - Si es "Dólares" hacia "Quetzales", sugiere 7.80 (o el valor impreso). Si no conoces la tasa exacta, devuelve 1 y menciónalo en notasExtraccion.
+   - Si aparece un tipo de cambio impreso, úsalo.
+   - Si es "Dólares" hacia "Quetzales", sugiere 7.80 (o el impreso). Si no conoces la tasa exacta, devuelve 1 y menciónalo en notasExtraccion.
 9. aplicaImpuestos: booleano (true/false) indicando si la factura aplica impuestos fiscales recuperables/gravados:
-   - true si muestra IVA, ISV, ITBMS, VAT, Sales Tax, Impoconsumo, o si es una Factura FEL Régimen General en Guatemala (que por ley incluye 12% IVA en el precio total aunque no venga en línea separada).
-   - false si dice "Pequeño Contribuyente", "No genera derecho a crédito fiscal", "Exento", "No responsable de IVA", recibo simple sin valor fiscal, o plataforma extranjera sin desglose fiscal local (ej. Uber/Airbnb extranjero sin impuesto fiscal local).
-10. porcentajeImpuesto: porcentaje numérico aplicable (ej. 12 para FEL Guatemala régimen general, 15 para Honduras ISV, 19 para Colombia IVA, 16 para México IVA, 13 para Costa Rica, o el % impreso en el documento). Devuelve 0 si aplicaImpuestos es false.
+   - true si muestra IVA, ISV, ITBMS, VAT, Sales Tax, Impoconsumo, o si es una Factura / Factura Cambiaria FEL Régimen General en Guatemala (que incluye 12% IVA en el total aunque no venga desglosado).
+   - false si dice "Pequeño Contribuyente" (FPEQ), "No genera derecho a crédito fiscal", "Exento", "No responsable de IVA", recibo simple/manuscrito sin valor fiscal, o plataforma extranjera sin impuesto fiscal local.
+10. porcentajeImpuesto: porcentaje numérico aplicable (12 FEL Guatemala general, 15 Honduras ISV, 19 Colombia IVA, 16 México IVA, 13 Costa Rica/El Salvador, 7 Panamá ITBMS, o el % impreso). Devuelve 0 si aplicaImpuestos es false.
 11. montoImpuesto: monto numérico de impuesto en la moneda de la factura.
-   - Si la factura imprime explícitamente el valor del impuesto (IVA/ISV/VAT/Tax), extrae exactamente ese valor.
-   - Si aplicaImpuestos es true y el impuesto está incluido en el total sin línea separada (típico en FEL Guatemala IVA 12%), calcula: round(valorFactura - (valorFactura / (1 + porcentajeImpuesto / 100)), 2). En combustible de Guatemala, si aparece IDP separado, calcula el IVA sobre (Total - IDP) si es visible.
+   - Si la factura imprime explícitamente el impuesto (IVA/ISV/VAT/Tax), extrae ese valor exacto.
+   - Si aplicaImpuestos es true y el impuesto está incluido en el total sin línea separada (FEL Guatemala IVA 12%), calcula: round(valorFactura - (valorFactura / (1 + porcentajeImpuesto / 100)), 2). En combustible de Guatemala, si aparece IDP separado, calcula el IVA sobre (Total - IDP).
    - Si aplicaImpuestos es false, devuelve 0.
 12. categoriaSugerida: clasifica estrictamente en una de estas opciones:
    "Alimentación", "Combustible / Lub", "Taxis / Buses", "Hospedaje", "Peajes / Parqueo", "Boletos Aéreos", "Atención a Clientes", "Otros Gastos".
-13. descripcionSugerida: resumen breve y útil en español basado en los ítems/conceptos leídos (ej. "Desayuno y café", "Combustible gasolina súper", "Viaje Uber", "Hospedaje 3 noches").
+13. descripcionSugerida: resumen breve y útil en español basado en los ítems/conceptos leídos (ej. "Desayuno y café", "Combustible gasolina súper", "Servicio de mantenimiento", "Hospedaje 3 noches").
 14. confianza: "alta" si todos los campos clave se leyeron claramente, "media" si algún campo tuvo ligera ambigüedad o falta dato menor, "baja" si la imagen es borrosa o incompleta.
-15. notasExtraccion: frase breve y útil en español (máx. 140 caracteres) explicando el tipo de comprobante detectado (ej. "Factura FEL Guatemala régimen general con IVA 12% incluido").`;
+15. notasExtraccion: frase breve y útil en español (máx. 140 caracteres) explicando el tipo de comprobante detectado (ej. "Factura Cambiaria FEL Guatemala régimen general con IVA 12% incluido").`;
 }
 
 const INVOICE_RESPONSE_SCHEMA = {
@@ -340,24 +366,24 @@ async function runInvoiceExtractionWithFailover(params: {
 
   const baseAttempts: ExtractionAttemptSpec[] = liteInCooldown
     ? [
-        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 0, timeoutMs: 16_000 },
-        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 400, timeoutMs: 14_000 },
-        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 900, timeoutMs: 16_000 },
+        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 0, timeoutMs: 22_000 },
+        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 400, timeoutMs: 20_000 },
+        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 800, timeoutMs: 20_000 },
       ]
     : [
-        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 0, timeoutMs: 14_000 },
-        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 400, timeoutMs: 16_000 },
-        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 900, timeoutMs: 16_000 },
+        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 0, timeoutMs: 20_000 },
+        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 400, timeoutMs: 22_000 },
+        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 800, timeoutMs: 20_000 },
       ];
 
   const attempts: ExtractionAttemptSpec[] = customModel
     ? [
-        { model: customModel, useLowThinking: false, delayBeforeMs: 0, timeoutMs: 16_000 },
+        { model: customModel, useLowThinking: false, delayBeforeMs: 0, timeoutMs: 22_000 },
         ...baseAttempts.filter((a) => a.model !== customModel),
       ]
     : baseAttempts;
 
-  const deadlineAt = Date.now() + 50_000;
+  const deadlineAt = Date.now() + 52_000;
   let lastError: unknown = null;
   const skipped404Models = new Set<string>();
 
@@ -461,7 +487,7 @@ export async function processExtractInvoiceBody(
         status: 503,
         body: {
           error:
-            'Falta configurar GEMINI_API_KEY en el servidor (Vercel Environment Variables o Settings > Secrets). Tu comprobante quedó adjunto y puedes ingresar los datos manualmente.',
+            'La lectura automática con IA no está activada todavía en este servidor: falta agregar la variable GEMINI_API_KEY en Vercel (Settings > Environment Variables) y ejecutar Redeploy. Tu comprobante ya quedó adjunto y puedes ingresar los datos manualmente.',
         },
       };
     }
@@ -546,11 +572,13 @@ export async function processExtractInvoiceBody(
 
     if (
       code === 503 ||
+      code === 504 ||
       statusText.includes('UNAVAILABLE') ||
-      statusText.includes('HIGH DEMAND')
+      statusText.includes('HIGH DEMAND') ||
+      statusText.includes('DEADLINE_EXCEEDED')
     ) {
       return {
-        status: 503,
+        status: code === 504 || statusText.includes('DEADLINE_EXCEEDED') ? 504 : 503,
         body: {
           error:
             'El servicio de lectura IA presenta alta demanda temporal en este instante. Tu comprobante ya quedó adjunto: presiona "Reintentar lectura IA" en unos segundos o completa los campos manualmente.',

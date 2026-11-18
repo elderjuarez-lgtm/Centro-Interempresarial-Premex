@@ -63,12 +63,27 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
   const statusInfo = (() => {
     if (!activeLiquidation) return null;
     if (activeLiquidation.estado === 'enviada') {
-      return { dot: 'bg-emerald-500', text: 'Cerrada y enviada', color: 'text-emerald-700' };
+      return {
+        dot: 'bg-emerald-500',
+        text: 'Cerrada y enviada',
+        shortText: 'Enviada',
+        color: 'text-emerald-700',
+      };
     }
     if (activeLiquidation.estado === 'cerrada') {
-      return { dot: 'bg-sky-600', text: 'Liquidación cerrada', color: 'text-sky-700' };
+      return {
+        dot: 'bg-sky-600',
+        text: 'Liquidación cerrada',
+        shortText: 'Cerrada',
+        color: 'text-sky-700',
+      };
     }
-    return { dot: 'bg-amber-500', text: 'Abierta · Editable', color: 'text-amber-700' };
+    return {
+      dot: 'bg-amber-500',
+      text: 'Abierta · Editable',
+      shortText: 'Abierta',
+      color: 'text-amber-700',
+    };
   })();
 
   const canCloseActive = Boolean(
@@ -81,9 +96,9 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90">
-      <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3">
+      <div className="px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
         {/* Left: Mobile toggle + Breadcrumb + Active Title */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 overflow-hidden">
           <button
             type="button"
             onClick={onToggleMobileMenu}
@@ -93,32 +108,39 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
             <Menu className="w-5 h-5" />
           </button>
 
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 min-w-0 overflow-hidden">
               <button
                 type="button"
                 onClick={() => onSwitchModule('launcher')}
-                className="hover:text-[#1E60A8] transition-colors cursor-pointer whitespace-nowrap"
+                className="hover:text-[#1E60A8] transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 Premex
               </button>
-              <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
-              <span className="text-[#19377B] truncate">Liquidación de Viáticos</span>
+              <ChevronRight className="hidden sm:block w-3 h-3 text-slate-400 shrink-0" />
+              <span className="hidden sm:inline text-[#19377B] truncate">
+                Liquidación de Viáticos
+              </span>
               {activeTab === 'liquidador' && statusInfo && (
                 <>
-                  <span className="text-slate-300">·</span>
-                  <span className={`inline-flex items-center gap-1.5 whitespace-nowrap ${statusInfo.color}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
-                    <span>{statusInfo.text}</span>
+                  <span className="text-slate-300 shrink-0">·</span>
+                  <span
+                    className={`inline-flex items-center gap-1 min-w-0 truncate ${statusInfo.color}`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusInfo.dot}`} />
+                    <span className="sm:hidden truncate">{statusInfo.shortText}</span>
+                    <span className="hidden sm:inline whitespace-nowrap">
+                      {statusInfo.text}
+                    </span>
                   </span>
                 </>
               )}
             </div>
 
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+            <h2 className="text-sm sm:text-lg font-bold text-slate-900 tracking-tight truncate">
               {activeTab === 'liquidador'
                 ? activeLiquidation
-                  ? `${activeLiquidation.lineaLiquidacion || 'Sin título'} · Semana #${activeLiquidation.semana || '-'} · ${activeLiquidation.monedaBase}`
+                  ? `${activeLiquidation.lineaLiquidacion || 'Sin título'} · Sem #${activeLiquidation.semana || '-'} · ${activeLiquidation.monedaBase}`
                   : 'Panel de Liquidadores'
                 : activeTab === 'cerradas'
                 ? 'Consulta de Liquidaciones Cerradas'
@@ -180,7 +202,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               type="button"
               onClick={onSaveToCloud}
               disabled={isSavingCloud}
-              className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
+              className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
                 hasUnsavedChanges
                   ? 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
                   : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
@@ -188,9 +210,9 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               title="Guardar cambios en la nube (Firestore)"
             >
               {isSavingCloud ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1E60A8]" />
+                <Loader2 className="w-4 h-4 sm:w-3.5 sm:h-3.5 animate-spin text-[#1E60A8]" />
               ) : (
-                <Cloud className="w-3.5 h-3.5 text-[#1E60A8]" />
+                <Cloud className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-[#1E60A8]" />
               )}
               <span className="hidden xl:inline">
                 {isSavingCloud
@@ -207,11 +229,12 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               type="button"
               onClick={onOpenCloseConfirmModal}
               disabled={!hasItems}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               title="Cerrar esta liquidación sin necesidad de enviarla por correo"
             >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Cerrar Liquidación</span>
+              <Lock className="w-3.5 h-3.5 shrink-0" />
+              <span className="sm:hidden">Cerrar</span>
+              <span className="hidden sm:inline">Cerrar Liquidación</span>
             </button>
           )}
 
@@ -220,14 +243,14 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               type="button"
               onClick={onOpenCloseEmailModal}
               disabled={!hasItems}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 ${
+              className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 ${
                 canCloseActive
                   ? 'text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200'
                   : 'text-white bg-[#1E60A8] hover:bg-[#132B63]'
               }`}
               title="Preparar envío por correo electrónico con Excel y PDF"
             >
-              <Send className="w-3.5 h-3.5" />
+              <Send className="w-3.5 h-3.5 shrink-0" />
               <span className="hidden sm:inline">Enviar Correo</span>
             </button>
           )}

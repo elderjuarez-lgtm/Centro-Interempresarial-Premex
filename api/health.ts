@@ -6,10 +6,17 @@ type VercelLikeRes = ServerResponse & {
 };
 
 export default function handler(_req: IncomingMessage, res: VercelLikeRes) {
+  const hasGeminiKey = Boolean(
+    process.env.GEMINI_API_KEY?.trim() ||
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() ||
+      process.env.GOOGLE_API_KEY?.trim() ||
+      process.env.API_KEY?.trim() ||
+      process.env.VITE_GEMINI_API_KEY?.trim()
+  );
   const payload = {
     ok: true,
     service: 'premex-suite-api',
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+    geminiConfigured: hasGeminiKey,
   };
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   if (typeof res.status === 'function') {

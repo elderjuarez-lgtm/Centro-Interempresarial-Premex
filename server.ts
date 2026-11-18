@@ -2,7 +2,10 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { processExtractInvoiceBody } from './api/viaticos/extract-invoice.ts';
+import {
+  processExtractInvoiceBody,
+  resolveServerGeminiApiKey,
+} from './api/viaticos/extract-invoice.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,7 +24,7 @@ async function startServer() {
     res.json({
       ok: true,
       service: 'premex-suite-server',
-      geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+      geminiConfigured: Boolean(resolveServerGeminiApiKey()),
     });
   });
 

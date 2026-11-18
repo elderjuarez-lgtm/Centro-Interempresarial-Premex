@@ -73,10 +73,11 @@ function encodeSourceToAdaptiveJpeg(
   naturalHeight: number
 ): string | null {
   const attempts: { maxDim: number; quality: number }[] = [
-    { maxDim: 1650, quality: 0.86 },
-    { maxDim: 1400, quality: 0.78 },
-    { maxDim: 1150, quality: 0.7 },
-    { maxDim: 960, quality: 0.62 },
+    { maxDim: 2400, quality: 0.88 },
+    { maxDim: 2000, quality: 0.84 },
+    { maxDim: 1650, quality: 0.78 },
+    { maxDim: 1350, quality: 0.7 },
+    { maxDim: 1080, quality: 0.62 },
   ];
 
   let lastDataUrl: string | null = null;
@@ -220,7 +221,7 @@ export async function rotateImageDataUrl90(
   const srcW = img.naturalWidth || img.width;
   const srcH = img.naturalHeight || img.height;
 
-  const maxDim = 1650;
+  const maxDim = 2200;
   let drawW = srcW;
   let drawH = srcH;
   if (drawW > maxDim || drawH > maxDim) {
@@ -243,7 +244,10 @@ export async function rotateImageDataUrl90(
   ctx.rotate(Math.PI / 2);
   ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
 
-  const rotated = canvas.toDataURL('image/jpeg', 0.86);
+  let rotated = canvas.toDataURL('image/jpeg', 0.86);
+  if (rotated.length > MAX_SAFE_IMAGE_DATAURL_CHARS) {
+    rotated = canvas.toDataURL('image/jpeg', 0.74);
+  }
   return { dataUrl: rotated, mimeType: 'image/jpeg' };
 }
 
