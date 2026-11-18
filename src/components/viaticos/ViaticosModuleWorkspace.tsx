@@ -19,7 +19,6 @@ import {
 } from '../../services/viaticosMediaStore';
 import {
   filterLiquidacionesByPermissions,
-  getCurrentIsoWeekNumber,
   recalculateLiquidationTotals,
   resolveViaticosConsultantScope,
   roundMoney,
@@ -33,6 +32,11 @@ import { ViaticosHeader } from './ViaticosHeader';
 import { ViaticosLiquidadorView } from './ViaticosLiquidadorView';
 import { ViaticosHistorialView } from './ViaticosHistorialView';
 import { ViaticosCloseEmailModal } from './ViaticosCloseEmailModal';
+import {
+  NewLiquidationPayload,
+  ViaticosNewLiquidationModal,
+} from './ViaticosNewLiquidationModal';
+import { ViaticosCloseConfirmModal } from './ViaticosCloseConfirmModal';
 
 interface ViaticosModuleWorkspaceProps {
   data: ViaticosWorkspaceData;
@@ -63,7 +67,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   const [activeTab, setActiveTab] = useState<ViaticosTab>('liquidador');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSavingCloud, setIsSavingCloud] = useState(false);
+  const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [mediaMap, setMediaMap] = useState<Record<string, StoredReceiptMedia>>({});
+  const [isNewModalOpen, setIsNewModalOpen] = useState(false);
+  const [closeConfirmLiqId, setCloseConfirmLiqId] = useState<string | null>(null);
   const [closeModalLiqId, setCloseModalLiqId] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     type: 'success' | 'info' | 'error';
@@ -94,11 +102,28 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     [data.liquidaciones, permissions, scope.matchedConsultor]
   );
 
+  const openLiquidacionesCount = useMemo(
+    () => visibleLiquidaciones.filter((l) => l.estado === 'borrador').length,
+    [visibleLiquidaciones]
+  );
+
+  const closedLiquidacionesCount = useMemo(
+    () => visibleLiquidaciones.filter((l) => l.estado !== 'borrador').length,
+    [visibleLiquidaciones]
+  );
+
   const activeLiquidation = useMemo(() => {
     if (visibleLiquidaciones.length === 0) return null;
     const found = visibleLiquidaciones.find((l) => l.id === data.activeLiquidationId);
     return found || visibleLiquidaciones[0];
   }, [visibleLiquidaciones, data.activeLiquidationId]);
+
+  const closeConfirmLiquidation = useMemo(() => {
+    if (!closeConfirmLiqId) return null;
+    return (
+      visibleLiquidaciones.find((l) => l.id === closeConfirmLiqId) || activeLiquidation
+    );
+  }, [closeConfirmLiqId, visibleLiquidaciones, activeLiquidation]);
 
   const modalLiquidation = useMemo(() => {
     if (!closeModalLiqId) return null;
@@ -107,10 +132,13 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     );
   }, [closeModalLiqId, visibleLiquidaciones, activeLiquidation]);
 
-  // Load IndexedDB receipt media for active & modal liquidations
+  // Load IndexedDB receipt media for active, close-confirm & email-modal liquidations
   useEffect(() => {
     const ids: string[] = [];
     activeLiquidation?.items.forEach((it) => {
+      if (it.attachmentId) ids.push(it.attachmentId);
+    });
+    closeConfirmLiquidation?.items.forEach((it) => {
       if (it.attachmentId) ids.push(it.attachmentId);
     });
     modalLiquidation?.items.forEach((it) => {
@@ -126,26 +154,34 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     return () => {
       cancelled = true;
     };
-  }, [activeLiquidation, modalLiquidation]);
+  }, [activeLiquidation, closeConfirmLiquidation, modalLiquidation]);
 
   const showToast = (type: 'success' | 'info' | 'error', message: string) => {
     setToast({ type, message });
   };
 
-  const handleCreateNewLiquidation = () => {
+  const handleOpenNewLiquidationModal = () => {
     if (!permissions.canOperate) return;
-    const defaultConsultor =
-      scope.matchedConsultor || scope.availableConsultores[0] || data.consultores[0];
+    setIsNewModalOpen(true);
+  };
+
+  const handleCreateNewLiquidation = (payload: NewLiquidationPayload) => {
+    if (!permissions.canOperate) return;
+    const chosenConsultor =
+      scope.availableConsultores.find((c) => c.id === payload.consultorId) ||
+      scope.matchedConsultor ||
+      scope.availableConsultores[0] ||
+      data.consultores[0];
     const nowIso = new Date().toISOString();
     const newLiq: ViaticoLiquidation = {
       id: `liq-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-      lineaLiquidacion: 'Nueva Liquidación de Viáticos',
-      semana: getCurrentIsoWeekNumber(),
-      consultorId: defaultConsultor?.id || 'cons-default',
-      consultorNombre: defaultConsultor?.nombreCompleto || 'Consultor Premex',
-      consultorEmail: defaultConsultor?.email || permissions.email || '',
-      empresa: defaultConsultor?.empresa || 'Premex Corp',
-      monedaBase: defaultConsultor?.monedaBase || 'Quetzales',
+      lineaLiquidacion: payload.lineaLiquidacion,
+      semana: payload.semana,
+      consultorId: chosenConsultor?.id || 'cons-default',
+      consultorNombre: chosenConsultor?.nombreCompleto || 'Consultor Premex',
+      consultorEmail: chosenConsultor?.email || permissions.email || '',
+      empresa: payload.empresa || chosenConsultor?.empresa || 'Premex Corp',
+      monedaBase: payload.monedaBase,
       estado: 'borrador',
       items: [],
       totalLiquidacion: 0,
@@ -165,7 +201,10 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       true
     );
     setActiveTab('liquidador');
-    showToast('info', `Nueva liquidación creada para ${newLiq.consultorNombre} (Semana #${newLiq.semana}).`);
+    showToast(
+      'success',
+      `Nueva liquidación abierta: "${newLiq.lineaLiquidacion}" (Semana #${newLiq.semana} · ${newLiq.monedaBase}). Las liquidaciones abiertas anteriores siguen disponibles.`
+    );
   };
 
   const handleSelectLiquidation = (id: string) => {
@@ -322,16 +361,23 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     }
   };
 
-  const handleConfirmCloseLiquidation = async () => {
-    if (!modalLiquidation || !permissions.canOperate) return;
+  const handleConfirmCloseLiquidation = async (targetLiqId?: string) => {
+    const resolvedId = targetLiqId || closeConfirmLiqId || modalLiquidation?.id;
+    if (!resolvedId || !permissions.canOperate) return;
+    const target = data.liquidaciones.find((l) => l.id === resolvedId);
+    if (!target) return;
     const nowIso = new Date().toISOString();
-    await updateLiquidationStatusAndSync(modalLiquidation.id, (liq) => ({
+    await updateLiquidationStatusAndSync(resolvedId, (liq) => ({
       ...liq,
       estado: 'cerrada',
       closedAtIso: nowIso,
       closedBy: currentUser?.email || permissions.email || liq.consultorNombre,
       updatedAtIso: nowIso,
     }));
+    showToast(
+      'success',
+      `Liquidación "${target.lineaLiquidacion}" (Semana #${target.semana}) cerrada correctamente. Disponible en Liquidaciones Cerradas.`
+    );
   };
 
   const handleMarkAsSent = async (sentToEmail: string) => {
@@ -348,10 +394,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     }));
   };
 
-  const handleReopenLiquidation = async () => {
-    if (!modalLiquidation || !permissions.isAdmin) return;
+  const handleReopenLiquidation = async (targetLiqId?: string) => {
+    const resolvedId = targetLiqId || modalLiquidation?.id;
+    if (!resolvedId || !permissions.isAdmin) return;
     const nowIso = new Date().toISOString();
-    await updateLiquidationStatusAndSync(modalLiquidation.id, (liq) => ({
+    await updateLiquidationStatusAndSync(resolvedId, (liq) => ({
       ...liq,
       estado: 'borrador',
       updatedAtIso: nowIso,
@@ -385,27 +432,38 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
 
   const handleQuickDownloadExcel = async (target?: ViaticoLiquidation | null) => {
     const liq = target || activeLiquidation;
-    if (!liq) return;
+    if (!liq || liq.items.length === 0) return;
+    setIsDownloadingExcel(true);
     try {
       const filename = await exportViaticosExcel(liq);
       showToast('success', `Excel descargado: ${filename}`);
     } catch (err: any) {
       showToast('error', err?.message || 'Error al generar el Excel.');
+    } finally {
+      setIsDownloadingExcel(false);
     }
   };
 
-  const handleQuickDownloadPdf = async (target: ViaticoLiquidation) => {
+  const handleQuickDownloadPdf = async (target?: ViaticoLiquidation | null) => {
+    const liq = target || activeLiquidation;
+    if (!liq || liq.items.length === 0) return;
+    setIsDownloadingPdf(true);
     try {
-      const ids = target.items.map((it) => it.attachmentId || '').filter(Boolean);
+      const ids = liq.items.map((it) => it.attachmentId || '').filter(Boolean);
       const loaded = await getReceiptMediaBatch(ids);
       const merged = { ...mediaMap, ...loaded };
-      const res = await exportViaticosReceiptsPdf(target, merged);
+      if (Object.keys(loaded).length > 0) {
+        setMediaMap((prev) => ({ ...prev, ...loaded }));
+      }
+      const res = await exportViaticosReceiptsPdf(liq, merged);
       showToast(
         'success',
         `PDF descargado: ${res.filename} (${res.embeddedCount} soporte(s) visual(es) incluidos).`
       );
     } catch (err: any) {
       showToast('error', err?.message || 'Error al compilar el PDF de comprobantes.');
+    } finally {
+      setIsDownloadingPdf(false);
     }
   };
 
@@ -426,7 +484,8 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         onCloseMobile={() => setIsMobileMenuOpen(false)}
         onSwitchModule={onSwitchModule}
         permissions={permissions}
-        activeItemsCount={activeLiquidation?.items.length || 0}
+        openLiquidacionesCount={openLiquidacionesCount}
+        closedLiquidacionesCount={closedLiquidacionesCount}
         liquidacionesCount={visibleLiquidaciones.length}
         consultorScopeLabel={sidebarScopeLabel}
       />
@@ -437,14 +496,22 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
           activeLiquidation={activeLiquidation}
           onToggleMobileMenu={() => setIsMobileMenuOpen(true)}
           onSwitchModule={onSwitchModule}
-          onCreateNewLiquidation={handleCreateNewLiquidation}
+          onCreateNewLiquidation={handleOpenNewLiquidationModal}
           onSaveToCloud={handleSaveCloudClick}
+          onOpenCloseConfirmModal={() => {
+            if (activeLiquidation) setCloseConfirmLiqId(activeLiquidation.id);
+          }}
           onOpenCloseEmailModal={() => {
             if (activeLiquidation) setCloseModalLiqId(activeLiquidation.id);
           }}
           onQuickDownloadExcel={() => {
             void handleQuickDownloadExcel(activeLiquidation);
           }}
+          onQuickDownloadPdf={() => {
+            void handleQuickDownloadPdf(activeLiquidation);
+          }}
+          isDownloadingExcel={isDownloadingExcel}
+          isDownloadingPdf={isDownloadingPdf}
           isSavingCloud={isSavingCloud}
           hasUnsavedChanges={data.hasUnsavedChanges}
           currentUser={currentUser}
@@ -516,19 +583,29 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               }
               permissions={permissions}
               onSelectLiquidation={handleSelectLiquidation}
-              onCreateNewLiquidation={handleCreateNewLiquidation}
+              onCreateNewLiquidation={handleOpenNewLiquidationModal}
               onUpdateHeader={handleUpdateHeader}
               onAddOrUpdateItem={handleAddOrUpdateItem}
               onDeleteItem={handleDeleteItem}
+              onOpenCloseConfirmModal={() => {
+                if (activeLiquidation) setCloseConfirmLiqId(activeLiquidation.id);
+              }}
               onOpenCloseEmailModal={() => {
                 if (activeLiquidation) setCloseModalLiqId(activeLiquidation.id);
               }}
               onQuickDownloadExcel={() => {
                 void handleQuickDownloadExcel(activeLiquidation);
               }}
+              onQuickDownloadPdf={() => {
+                void handleQuickDownloadPdf(activeLiquidation);
+              }}
+              isDownloadingExcel={isDownloadingExcel}
+              isDownloadingPdf={isDownloadingPdf}
+              onOpenClosedArchive={() => setActiveTab('cerradas')}
             />
           ) : (
             <ViaticosHistorialView
+              viewMode={activeTab === 'cerradas' ? 'cerradas' : 'historial'}
               liquidaciones={visibleLiquidaciones}
               consultores={scope.availableConsultores}
               moduleCompanies={visibleModuleCompanies}
@@ -539,7 +616,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
                 handleSelectLiquidation(id);
                 setActiveTab('liquidador');
               }}
-              onCreateNewLiquidation={handleCreateNewLiquidation}
+              onCreateNewLiquidation={handleOpenNewLiquidationModal}
               onDeleteLiquidation={handleDeleteLiquidation}
               onDownloadExcel={(liq) => {
                 void handleQuickDownloadExcel(liq);
@@ -547,7 +624,15 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               onDownloadPdf={(liq) => {
                 void handleQuickDownloadPdf(liq);
               }}
+              onOpenCloseConfirmFor={(liq) => setCloseConfirmLiqId(liq.id)}
               onOpenCloseEmailFor={(liq) => setCloseModalLiqId(liq.id)}
+              onReopenLiquidation={
+                permissions.isAdmin
+                  ? (liqId) => {
+                      void handleReopenLiquidation(liqId);
+                    }
+                  : undefined
+              }
               onUpsertConsultor={handleUpsertConsultor}
               onDeleteConsultor={handleDeleteConsultor}
             />
@@ -555,16 +640,48 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         </main>
       </div>
 
-      {/* Close Liquidation & Send Email (Excel + Compiled Receipts PDF) Modal */}
+      {/* Start New Liquidation Modal (supports parallel open liquidations by Week & Currency) */}
+      <ViaticosNewLiquidationModal
+        isOpen={isNewModalOpen}
+        onClose={() => setIsNewModalOpen(false)}
+        availableConsultores={scope.availableConsultores}
+        defaultConsultor={scope.matchedConsultor || scope.availableConsultores[0] || null}
+        moduleCompanies={visibleModuleCompanies}
+        isLockedToOwnConsultor={scope.isLockedToOwnConsultor}
+        openLiquidacionesCount={openLiquidacionesCount}
+        onCreate={handleCreateNewLiquidation}
+      />
+
+      {/* Standalone Close Liquidation Modal (no mandatory email dispatch + instant Excel/PDF + Closed Archive) */}
+      <ViaticosCloseConfirmModal
+        isOpen={Boolean(closeConfirmLiqId && closeConfirmLiquidation)}
+        onClose={() => setCloseConfirmLiqId(null)}
+        liquidation={closeConfirmLiquidation}
+        mediaMap={mediaMap}
+        onConfirmClose={(liqId) => handleConfirmCloseLiquidation(liqId)}
+        onDownloadExcel={(liq) => handleQuickDownloadExcel(liq)}
+        onDownloadPdf={(liq) => handleQuickDownloadPdf(liq)}
+        onOpenEmailModal={(liqId) => setCloseModalLiqId(liqId)}
+        onGoToClosedArchive={() => setActiveTab('cerradas')}
+        onStartNewLiquidation={() => setIsNewModalOpen(true)}
+      />
+
+      {/* Optional Email Dispatch & Package Export Modal */}
       <ViaticosCloseEmailModal
         isOpen={Boolean(closeModalLiqId && modalLiquidation)}
         onClose={() => setCloseModalLiqId(null)}
         liquidation={modalLiquidation}
         mediaMap={mediaMap}
         permissions={permissions}
-        onConfirmCloseLiquidation={handleConfirmCloseLiquidation}
+        onConfirmCloseLiquidation={() =>
+          handleConfirmCloseLiquidation(modalLiquidation?.id)
+        }
         onMarkAsSent={handleMarkAsSent}
-        onReopenLiquidation={permissions.isAdmin ? handleReopenLiquidation : undefined}
+        onReopenLiquidation={
+          permissions.isAdmin
+            ? () => handleReopenLiquidation(modalLiquidation?.id)
+            : undefined
+        }
       />
     </div>
   );

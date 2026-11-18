@@ -2,6 +2,7 @@ import React from 'react';
 import {
   FileText,
   FolderClock,
+  Archive,
   ChevronRight,
   X,
   ArrowLeft,
@@ -19,7 +20,8 @@ interface ViaticosSidebarProps {
   onCloseMobile: () => void;
   onSwitchModule: (moduleId: ActiveModuleId) => void;
   permissions: EffectivePermissions;
-  activeItemsCount: number;
+  openLiquidacionesCount: number;
+  closedLiquidacionesCount: number;
   liquidacionesCount: number;
   consultorScopeLabel: string;
 }
@@ -31,7 +33,8 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
   onCloseMobile,
   onSwitchModule,
   permissions,
-  activeItemsCount,
+  openLiquidacionesCount,
+  closedLiquidacionesCount,
   liquidacionesCount,
   consultorScopeLabel,
 }) => {
@@ -45,14 +48,21 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
     {
       id: 'liquidador',
       label: 'Liquidadores',
-      description: 'Facturas IA, datos y planilla',
+      description: 'Abiertas, facturas y planilla',
       icon: FileText,
-      counter: String(activeItemsCount),
+      counter: String(openLiquidacionesCount),
+    },
+    {
+      id: 'cerradas',
+      label: 'Liquidaciones Cerradas',
+      description: 'Consulta, Excel y PDF cerrados',
+      icon: Archive,
+      counter: String(closedLiquidacionesCount),
     },
     {
       id: 'historial',
       label: 'Historial y Consultores',
-      description: 'Cierres, envíos y catálogo',
+      description: 'Todas las semanas y catálogo',
       icon: FolderClock,
       counter: String(liquidacionesCount),
     },

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Search,
   Plus,
@@ -14,6 +14,10 @@ import {
   UserCheck,
   Mail,
   Lock,
+  Unlock,
+  Calendar,
+  Coins,
+  Archive,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -24,12 +28,14 @@ import {
   ViaticoLiquidationStatus,
 } from '../../types';
 import {
+  CURRENCY_SYMBOLS,
   VIATICO_CURRENCIES,
   formatViaticoAmount,
 } from '../../utils/viaticos';
 import { normalizeEmail } from '../../utils/permissions';
 
 interface ViaticosHistorialViewProps {
+  viewMode: 'cerradas' | 'historial';
   liquidaciones: ViaticoLiquidation[];
   consultores: ViaticoConsultor[];
   moduleCompanies?: ModuleCompanyEntry[];
@@ -41,12 +47,15 @@ interface ViaticosHistorialViewProps {
   onDeleteLiquidation: (id: string) => void;
   onDownloadExcel: (liq: ViaticoLiquidation) => void;
   onDownloadPdf: (liq: ViaticoLiquidation) => void;
+  onOpenCloseConfirmFor: (liq: ViaticoLiquidation) => void;
   onOpenCloseEmailFor: (liq: ViaticoLiquidation) => void;
+  onReopenLiquidation?: (liqId: string) => void;
   onUpsertConsultor: (consultor: ViaticoConsultor) => void;
   onDeleteConsultor: (consultorId: string) => void;
 }
 
 export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
+  viewMode,
   liquidaciones,
   consultores,
   moduleCompanies = [],
@@ -58,14 +67,29 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   onDeleteLiquidation,
   onDownloadExcel,
   onDownloadPdf,
+  onOpenCloseConfirmFor,
   onOpenCloseEmailFor,
+  onReopenLiquidation,
   onUpsertConsultor,
   onDeleteConsultor,
 }) => {
+  const isClosedMode = viewMode === 'cerradas';
   const [subTab, setSubTab] = useState<'liquidaciones' | 'consultores'>('liquidaciones');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | ViaticoLiquidationStatus>('ALL');
+  const [weekFilter, setWeekFilter] = useState<string>('ALL');
+  const [currencyFilter, setCurrencyFilter] = useState<'ALL' | ViaticoCurrency>('ALL');
   const [confirmDeleteLiqId, setConfirmDeleteLiqId] = useState<string | null>(null);
+
+  // Reset filters cleanly when toggling between Cerradas and Historial tabs
+  useEffect(() => {
+    setSubTab('liquidaciones');
+    setStatusFilter('ALL');
+    setWeekFilter('ALL');
+    setCurrencyFilter('ALL');
+    setSearchQuery('');
+    setConfirmDeleteLiqId(null);
+  }, [viewMode]);
 
   // Consultant CRUD modal state (Admins only)
   const [isConsultorModalOpen, setIsConsultorModalOpen] = useState(false);
@@ -78,34 +102,83 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   const [cActivo, setCActivo] = useState(true);
   const [cError, setCError] = useState<string | null>(null);
 
+  // Base list scoped to closed/sent in 'cerradas' mode, or all liquidaciones in 'historial' mode
+  const scopedLiquidaciones = useMemo(
+    () =>
+      isClosedMode
+        ? liquidaciones.filter((l) => l.estado !== 'borrador')
+        : liquidaciones,
+    [liquidaciones, isClosedMode]
+  );
+
+  const availableWeeks = useMemo(() => {
+    const set = new Set<string>();
+    scopedLiquidaciones.forEach((l) => {
+      const w = (l.semana || '').trim();
+      if (w) set.add(w);
+    });
+    return Array.from(set).sort((a, b) => {
+      const na = Number(a);
+      const nb = Number(b);
+      if (Number.isFinite(na) && Number.isFinite(nb)) return nb - na;
+      return b.localeCompare(a);
+    });
+  }, [scopedLiquidaciones]);
+
+  const availableCurrencies = useMemo(() => {
+    const set = new Set<ViaticoCurrency>();
+    scopedLiquidaciones.forEach((l) => {
+      if (l.monedaBase) set.add(l.monedaBase);
+    });
+    return Array.from(set);
+  }, [scopedLiquidaciones]);
+
   const stats = useMemo(() => {
     const borradores = liquidaciones.filter((l) => l.estado === 'borrador').length;
-    const cerradas = liquidaciones.filter((l) => l.estado === 'cerrada').length;
-    const enviadas = liquidaciones.filter((l) => l.estado === 'enviada').length;
-    const totalFacturas = liquidaciones.reduce((sum, l) => sum + l.items.length, 0);
+    const cerradas = scopedLiquidaciones.filter((l) => l.estado === 'cerrada').length;
+    const enviadas = scopedLiquidaciones.filter((l) => l.estado === 'enviada').length;
+    const totalFacturas = scopedLiquidaciones.reduce((sum, l) => sum + l.items.length, 0);
+
+    const totalsByCurrency: Partial<Record<ViaticoCurrency, number>> = {};
+    scopedLiquidaciones.forEach((l) => {
+      totalsByCurrency[l.monedaBase] =
+        (totalsByCurrency[l.monedaBase] || 0) + l.totalLiquidacion;
+    });
+
     return {
-      total: liquidaciones.length,
+      total: scopedLiquidaciones.length,
       borradores,
       cerradas,
       enviadas,
       totalFacturas,
+      distinctWeeks: availableWeeks.length,
+      totalsByCurrency: Object.entries(totalsByCurrency) as [ViaticoCurrency, number][],
     };
-  }, [liquidaciones]);
+  }, [liquidaciones, scopedLiquidaciones, availableWeeks.length]);
 
   const filteredLiquidaciones = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return liquidaciones.filter((l) => {
+    return scopedLiquidaciones.filter((l) => {
       if (statusFilter !== 'ALL' && l.estado !== statusFilter) return false;
+      if (weekFilter !== 'ALL' && (l.semana || '').trim() !== weekFilter) return false;
+      if (currencyFilter !== 'ALL' && l.monedaBase !== currencyFilter) return false;
       if (!q) return true;
       return (
         l.lineaLiquidacion.toLowerCase().includes(q) ||
         l.consultorNombre.toLowerCase().includes(q) ||
         l.consultorEmail.toLowerCase().includes(q) ||
         l.semana.toLowerCase().includes(q) ||
-        l.empresa.toLowerCase().includes(q)
+        l.empresa.toLowerCase().includes(q) ||
+        l.monedaBase.toLowerCase().includes(q)
       );
     });
-  }, [liquidaciones, searchQuery, statusFilter]);
+  }, [scopedLiquidaciones, searchQuery, statusFilter, weekFilter, currencyFilter]);
+
+  const hasActiveFilters =
+    Boolean(searchQuery.trim()) ||
+    statusFilter !== 'ALL' ||
+    weekFilter !== 'ALL' ||
+    currencyFilter !== 'ALL';
 
   const openNewConsultorModal = () => {
     setEditingConsultorId(null);
@@ -162,90 +235,168 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   return (
     <div className="space-y-6">
       {/* KPI Summary Strip */}
-      <section className="bg-white rounded-2xl border border-slate-200/90 grid grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
-        <div className="p-5">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-            Liquidaciones Visibles
+      {isClosedMode ? (
+        <section className="bg-white rounded-2xl border border-slate-200/90 grid grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+          <div className="p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Liquidaciones Cerradas
+            </div>
+            <div className="mt-1.5 text-2xl font-bold text-[#132B63] font-mono tabular-nums">
+              {stats.total}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
+              {stats.cerradas} cerradas · {stats.enviadas} enviadas por correo
+            </div>
           </div>
-          <div className="mt-1.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
-            {stats.total}
-          </div>
-          <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
-            {stats.totalFacturas} comprobantes registrados
-          </div>
-        </div>
 
-        <div className="p-5">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-            Borradores Activos
+          <div className="p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Semanas Concluidas
+            </div>
+            <div className="mt-1.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+              {stats.distinctWeeks}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
+              {availableCurrencies.length}{' '}
+              {availableCurrencies.length === 1 ? 'moneda' : 'monedas'} registradas
+            </div>
           </div>
-          <div className="mt-1.5 text-2xl font-bold text-amber-700 font-mono tabular-nums">
-            {stats.borradores}
-          </div>
-          <div className="mt-0.5 text-xs text-slate-500">Pendientes de cierre</div>
-        </div>
 
-        <div className="p-5">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-            Cerradas / Enviadas
+          <div className="p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Comprobantes Respaldados
+            </div>
+            <div className="mt-1.5 text-2xl font-bold text-emerald-700 font-mono tabular-nums">
+              {stats.totalFacturas}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500">
+              Listos para descarga Excel y PDF
+            </div>
           </div>
-          <div className="mt-1.5 text-2xl font-bold text-emerald-700 font-mono tabular-nums">
-            {stats.cerradas + stats.enviadas}
-          </div>
-          <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
-            {stats.enviadas} enviadas · {stats.cerradas} cerradas
-          </div>
-        </div>
 
-        <div className="p-5">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-            Consultores Disponibles
+          <div className="p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Total Cerrado por Moneda
+            </div>
+            {stats.totalsByCurrency.length === 0 ? (
+              <div className="mt-1.5 text-sm font-mono text-slate-400">—</div>
+            ) : (
+              <div className="mt-1.5 space-y-0.5">
+                {stats.totalsByCurrency.slice(0, 3).map(([cur, amt]) => (
+                  <div
+                    key={cur}
+                    className="text-sm font-bold text-[#132B63] font-mono tabular-nums leading-tight"
+                  >
+                    {formatViaticoAmount(amt, cur, true)}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="mt-1.5 text-2xl font-bold text-[#132B63] font-mono tabular-nums">
-            {consultores.filter((c) => c.activo).length}
+        </section>
+      ) : (
+        <section className="bg-white rounded-2xl border border-slate-200/90 grid grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+          <div className="p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Liquidaciones Visibles
+            </div>
+            <div className="mt-1.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+              {stats.total}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
+              {stats.totalFacturas} comprobantes registrados
+            </div>
           </div>
-          <div className="mt-0.5 text-xs text-slate-500">
-            {isLockedToOwnConsultor ? 'Perfil vinculado a tu correo' : 'Catálogo habilitado'}
-          </div>
-        </div>
-      </section>
 
-      {/* Sub-navigation Switcher */}
+          <div className="p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Liquidaciones Abiertas
+            </div>
+            <div className="mt-1.5 text-2xl font-bold text-amber-700 font-mono tabular-nums">
+              {stats.borradores}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500">En curso · Pendientes de cierre</div>
+          </div>
+
+          <div className="p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Cerradas / Enviadas
+            </div>
+            <div className="mt-1.5 text-2xl font-bold text-emerald-700 font-mono tabular-nums">
+              {stats.cerradas + stats.enviadas}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
+              {stats.enviadas} enviadas · {stats.cerradas} cerradas
+            </div>
+          </div>
+
+          <div className="p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Consultores Disponibles
+            </div>
+            <div className="mt-1.5 text-2xl font-bold text-[#132B63] font-mono tabular-nums">
+              {consultores.filter((c) => c.activo).length}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500">
+              {isLockedToOwnConsultor ? 'Perfil vinculado a tu correo' : 'Catálogo habilitado'}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Filter & Sub-navigation Toolbar */}
       <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70">
-          <button
-            type="button"
-            onClick={() => setSubTab('liquidaciones')}
-            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-              subTab === 'liquidaciones'
-                ? 'bg-white text-[#19377B] shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Historial de Liquidaciones ({liquidaciones.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('consultores')}
-            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-              subTab === 'consultores'
-                ? 'bg-white text-[#19377B] shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Consultores Disponibles ({consultores.length})
-          </button>
-        </div>
+        {isClosedMode ? (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-[#132B63]/10 text-[#132B63] flex items-center justify-center shrink-0">
+              <Archive className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-xs font-bold text-slate-900">
+                Archivo de Liquidaciones Cerradas ({filteredLiquidaciones.length})
+              </h3>
+              <p className="text-[11px] text-slate-500 truncate">
+                Filtra por semana o moneda para consultar comprobantes y descargar Excel o PDF.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70">
+            <button
+              type="button"
+              onClick={() => setSubTab('liquidaciones')}
+              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                subTab === 'liquidaciones'
+                  ? 'bg-white text-[#19377B] shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Todas las Liquidaciones ({liquidaciones.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubTab('consultores')}
+              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                subTab === 'consultores'
+                  ? 'bg-white text-[#19377B] shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Consultores Disponibles ({consultores.length})
+            </button>
+          </div>
+        )}
 
-        {subTab === 'liquidaciones' ? (
+        {isClosedMode || subTab === 'liquidaciones' ? (
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-64">
+            {/* Search */}
+            <div className="relative w-52 sm:w-60">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar semana, línea o consultor..."
+                placeholder="Buscar línea, consultor o sociedad..."
                 className="w-full pl-8 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
               />
               {searchQuery && (
@@ -259,24 +410,89 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               )}
             </div>
 
+            {/* Week Filter */}
+            <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
+              <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+              <select
+                value={weekFilter}
+                aria-label="Filtrar por semana"
+                onChange={(e) => setWeekFilter(e.target.value)}
+                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+              >
+                <option value="ALL">Todas las semanas</option>
+                {availableWeeks.map((w) => (
+                  <option key={w} value={w}>
+                    Semana #{w}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Currency Filter */}
+            <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
+              <Coins className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+              <select
+                value={currencyFilter}
+                aria-label="Filtrar por moneda"
+                onChange={(e) =>
+                  setCurrencyFilter(e.target.value as 'ALL' | ViaticoCurrency)
+                }
+                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+              >
+                <option value="ALL">Todas las monedas</option>
+                {availableCurrencies.map((cur) => (
+                  <option key={cur} value={cur}>
+                    {cur} ({CURRENCY_SYMBOLS[cur]})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Status Filter */}
             <select
               value={statusFilter}
+              aria-label="Filtrar por estado"
               onChange={(e) =>
                 setStatusFilter(e.target.value as 'ALL' | ViaticoLiquidationStatus)
               }
               className="text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5"
             >
-              <option value="ALL">Todos los estados</option>
-              <option value="borrador">Borradores</option>
-              <option value="cerrada">Cerradas</option>
-              <option value="enviada">Enviadas</option>
+              {isClosedMode ? (
+                <>
+                  <option value="ALL">Cerradas y enviadas</option>
+                  <option value="cerrada">Solo cerradas (sin enviar)</option>
+                  <option value="enviada">Cerradas y enviadas</option>
+                </>
+              ) : (
+                <>
+                  <option value="ALL">Todos los estados</option>
+                  <option value="borrador">Abiertas (Borrador)</option>
+                  <option value="cerrada">Cerradas</option>
+                  <option value="enviada">Enviadas</option>
+                </>
+              )}
             </select>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter('ALL');
+                  setWeekFilter('ALL');
+                  setCurrencyFilter('ALL');
+                }}
+                className="text-xs font-semibold text-[#1E60A8] hover:text-[#132B63] px-2 py-1 cursor-pointer whitespace-nowrap"
+              >
+                Limpiar
+              </button>
+            )}
 
             {permissions.canOperate && (
               <button
                 type="button"
                 onClick={onCreateNewLiquidation}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Nueva Liquidación</span>
@@ -288,7 +504,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             <button
               type="button"
               onClick={openNewConsultorModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Agregar Consultor</span>
@@ -297,31 +513,35 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
         )}
       </div>
 
-      {/* SUB-TAB 1: LIQUIDACIONES TABLE */}
-      {subTab === 'liquidaciones' && (
+      {/* LIQUIDACIONES TABLE (Used in both 'cerradas' and 'historial' modes) */}
+      {(isClosedMode || subTab === 'liquidaciones') && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                   <th className="py-3 px-4">Semana / Línea de Liquidación</th>
+                  <th className="py-3 px-4">Moneda</th>
                   <th className="py-3 px-4">Consultor</th>
                   <th className="py-3 px-4 text-center">Facturas</th>
                   <th className="py-3 px-4 text-right">Total Reintegrar</th>
-                  <th className="py-3 px-4">Estado</th>
+                  <th className="py-3 px-4">Estado / Cierre</th>
                   <th className="py-3 px-4 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredLiquidaciones.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-10 text-center text-slate-500">
-                      No se encontraron liquidaciones con los filtros actuales.
+                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                      {isClosedMode && scopedLiquidaciones.length === 0
+                        ? 'Aún no hay liquidaciones cerradas registradas. Cuando cierres una liquidación aparecerá aquí para consulta y descarga de Excel y PDF.'
+                        : 'No se encontraron liquidaciones con los filtros seleccionados.'}
                     </td>
                   </tr>
                 ) : (
                   filteredLiquidaciones.map((liq) => {
                     const isActive = liq.id === activeLiquidationId;
+                    const isDraft = liq.estado === 'borrador';
                     return (
                       <tr
                         key={liq.id}
@@ -331,16 +551,29 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                       >
                         <td className="py-3.5 px-4">
                           <div className="font-bold text-slate-900 flex items-center gap-2">
-                            <span>{liq.lineaLiquidacion || 'Sin título'}</span>
+                            <span className="font-mono text-[#1E60A8] tabular-nums shrink-0">
+                              Sem #{liq.semana || '-'}
+                            </span>
+                            <span className="text-slate-300">·</span>
+                            <span className="truncate max-w-[260px]">
+                              {liq.lineaLiquidacion || 'Sin título'}
+                            </span>
                             {isActive && (
-                              <span className="text-[10px] font-bold text-[#1E60A8]">
-                                · Activa
+                              <span className="text-[10px] font-bold text-[#1E60A8] shrink-0">
+                                · En vista
                               </span>
                             )}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
-                            Semana #{liq.semana || '-'} · {liq.empresa} · Actualizado{' '}
+                            {liq.empresa} · Actualizado{' '}
                             {new Date(liq.updatedAtIso).toLocaleDateString('es-GT')}
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="font-semibold text-slate-800">{liq.monedaBase}</div>
+                          <div className="text-[11px] font-mono text-slate-500">
+                            {CURRENCY_SYMBOLS[liq.monedaBase]}
                           </div>
                         </td>
 
@@ -357,7 +590,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                           {liq.items.length}
                         </td>
 
-                        <td className="py-3.5 px-4 text-right font-mono font-bold tabular-nums text-[#132B63]">
+                        <td className="py-3.5 px-4 text-right font-mono font-bold tabular-nums text-[#132B63] whitespace-nowrap">
                           {formatViaticoAmount(liq.totalLiquidacion, liq.monedaBase, true)}
                         </td>
 
@@ -382,14 +615,20 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                               }
                             >
                               {liq.estado === 'enviada'
-                                ? 'Enviada'
+                                ? 'Cerrada y Enviada'
                                 : liq.estado === 'cerrada'
                                 ? 'Cerrada'
-                                : 'Borrador'}
+                                : 'Abierta'}
                             </span>
                           </div>
+                          {liq.closedAtIso && !isDraft && (
+                            <div className="text-[10px] text-slate-500 tabular-nums mt-0.5">
+                              Cierre: {new Date(liq.closedAtIso).toLocaleDateString('es-GT')}
+                              {liq.closedBy ? ` · ${liq.closedBy}` : ''}
+                            </div>
+                          )}
                           {liq.sentToEmail && (
-                            <div className="text-[10px] text-slate-400 truncate max-w-[160px]">
+                            <div className="text-[10px] text-slate-400 truncate max-w-[180px]">
                               Para: {liq.sentToEmail}
                             </div>
                           )}
@@ -403,14 +642,28 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                               className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[#1E60A8] hover:bg-[#1E60A8]/10 rounded-lg cursor-pointer"
                             >
                               <FolderOpen className="w-3.5 h-3.5" />
-                              <span>Abrir</span>
+                              <span>{isDraft ? 'Abrir' : 'Consultar'}</span>
                             </button>
+
+                            {isDraft && permissions.canOperate && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenCloseConfirmFor(liq)}
+                                disabled={liq.items.length === 0}
+                                title="Cerrar liquidación"
+                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#132B63] bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg cursor-pointer"
+                              >
+                                <Lock className="w-3 h-3" />
+                                <span>Cerrar</span>
+                              </button>
+                            )}
 
                             <button
                               type="button"
                               onClick={() => onDownloadExcel(liq)}
+                              disabled={liq.items.length === 0}
                               title="Descargar Excel Premex"
-                              className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg cursor-pointer"
+                              className="p-1.5 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 rounded-lg cursor-pointer"
                             >
                               <FileSpreadsheet className="w-4 h-4" />
                             </button>
@@ -418,8 +671,9 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                             <button
                               type="button"
                               onClick={() => onDownloadPdf(liq)}
+                              disabled={liq.items.length === 0}
                               title="Descargar PDF con comprobantes"
-                              className="p-1.5 text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer"
+                              className="p-1.5 text-rose-700 hover:bg-rose-50 disabled:opacity-40 rounded-lg cursor-pointer"
                             >
                               <FileText className="w-4 h-4" />
                             </button>
@@ -427,14 +681,26 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                             <button
                               type="button"
                               onClick={() => onOpenCloseEmailFor(liq)}
-                              title="Cerrar y enviar por correo"
-                              className="p-1.5 text-[#132B63] hover:bg-slate-100 rounded-lg cursor-pointer"
+                              disabled={liq.items.length === 0}
+                              title="Enviar por correo electrónico"
+                              className="p-1.5 text-[#132B63] hover:bg-slate-100 disabled:opacity-40 rounded-lg cursor-pointer"
                             >
                               <Send className="w-4 h-4" />
                             </button>
 
+                            {!isDraft && permissions.isAdmin && onReopenLiquidation && (
+                              <button
+                                type="button"
+                                onClick={() => onReopenLiquidation(liq.id)}
+                                title="Reabrir liquidación (Solo Administrador)"
+                                className="p-1.5 text-amber-700 hover:bg-amber-50 rounded-lg cursor-pointer"
+                              >
+                                <Unlock className="w-4 h-4" />
+                              </button>
+                            )}
+
                             {permissions.canOperate &&
-                              (liq.estado === 'borrador' || permissions.isAdmin) &&
+                              (isDraft || permissions.isAdmin) &&
                               (confirmDeleteLiqId === liq.id ? (
                                 <div className="inline-flex items-center gap-1 ml-1">
                                   <button
@@ -477,8 +743,8 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
         </section>
       )}
 
-      {/* SUB-TAB 2: CONSULTORES CATALOG */}
-      {subTab === 'consultores' && (
+      {/* SUB-TAB 2: CONSULTORES CATALOG (Only in 'historial' mode) */}
+      {!isClosedMode && subTab === 'consultores' && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
           <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
             <div>

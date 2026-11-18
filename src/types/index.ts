@@ -333,7 +333,7 @@ export interface BankReconciliationSummary {
 // Liquidación de Viáticos Types
 // ============================================================================
 
-export type ViaticosTab = 'liquidador' | 'historial';
+export type ViaticosTab = 'liquidador' | 'cerradas' | 'historial';
 
 export type ViaticoCurrency =
   | 'Quetzales'

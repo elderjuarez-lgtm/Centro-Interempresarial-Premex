@@ -47,7 +47,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
   const [ccEmail, setCcEmail] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
-  const [autoCloseOnDownload, setAutoCloseOnDownload] = useState(true);
+  const [autoCloseOnDownload, setAutoCloseOnDownload] = useState(false);
 
   const [isGeneratingBundle, setIsGeneratingBundle] = useState(false);
   const [isGeneratingExcel, setIsGeneratingExcel] = useState(false);
@@ -201,7 +201,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
         <div className="px-6 py-4 bg-[#132B63] text-white flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-200">
-              Cierre y Envío Corporativo · Semana #{liquidation.semana || '-'}
+              Envío por Correo y Descarga · Semana #{liquidation.semana || '-'} · {liquidation.monedaBase}
             </div>
             <h3 className="text-base font-bold truncate mt-0.5">
               {liquidation.lineaLiquidacion || 'Liquidación de Viáticos'}

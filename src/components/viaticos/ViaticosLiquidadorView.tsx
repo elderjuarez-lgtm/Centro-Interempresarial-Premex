@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   Upload,
   Camera,
@@ -15,9 +15,13 @@ import {
   AlertTriangle,
   Lock,
   RotateCcw,
+  RotateCw,
   FileSpreadsheet,
   Send,
   Paperclip,
+  Archive,
+  Calendar,
+  Coins,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -33,11 +37,14 @@ import {
   saveReceiptMedia,
 } from '../../services/viaticosMediaStore';
 import {
+  detectInvoiceFileKind,
   extractInvoiceViaServer,
   prepareFileForExtraction,
   readFileAsDataUrl,
+  rotateImageDataUrl90,
 } from '../../services/viaticosInvoiceAi';
 import {
+  CURRENCY_SYMBOLS,
   DEFAULT_TAX_RATE_BY_CURRENCY,
   VIATICO_CATEGORIES,
   VIATICO_CURRENCIES,
@@ -70,8 +77,13 @@ interface ViaticosLiquidadorViewProps {
   }) => void;
   onAddOrUpdateItem: (item: ViaticoExpenseItem, isEdit: boolean) => void;
   onDeleteItem: (itemId: string) => void;
+  onOpenCloseConfirmModal: () => void;
   onOpenCloseEmailModal: () => void;
   onQuickDownloadExcel: () => void;
+  onQuickDownloadPdf: () => void;
+  isDownloadingExcel: boolean;
+  isDownloadingPdf: boolean;
+  onOpenClosedArchive: () => void;
 }
 
 interface PendingUploadFile {
@@ -157,8 +169,13 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   onUpdateHeader,
   onAddOrUpdateItem,
   onDeleteItem,
+  onOpenCloseConfirmModal,
   onOpenCloseEmailModal,
   onQuickDownloadExcel,
+  onQuickDownloadPdf,
+  isDownloadingExcel,
+  isDownloadingPdf,
+  onOpenClosedArchive,
 }) => {
   const baseCurrency: ViaticoCurrency = liquidation?.monedaBase || 'Quetzales';
   const lastCliente = useMemo(() => {
@@ -177,6 +194,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     return '';
   }, [liquidation?.items]);
 
+  // Multi-liquidation switcher filters (Week, Currency, Status)
+  const [switcherScope, setSwitcherScope] = useState<'open' | 'closed' | 'all'>('all');
+  const [switcherWeekFilter, setSwitcherWeekFilter] = useState<string>('ALL');
+  const [switcherCurrencyFilter, setSwitcherCurrencyFilter] = useState<'ALL' | ViaticoCurrency>('ALL');
+
   const [form, setForm] = useState<ItemFormState>(() =>
     createEmptyForm(baseCurrency, lastCliente, lastObjetivo)
   );
@@ -189,6 +211,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     text: string;
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isRotatingImage, setIsRotatingImage] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [lightboxItem, setLightboxItem] = useState<{
     item: ViaticoExpenseItem;
@@ -197,6 +220,130 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const prevLiqIdRef = useRef<string | null>(liquidation?.id || null);
+
+  // Reset capture form cleanly whenever the user switches to another liquidation (different week/currency)
+  useEffect(() => {
+    const nextId = liquidation?.id || null;
+    if (nextId === prevLiqIdRef.current) return;
+    prevLiqIdRef.current = nextId;
+    setEditingItemId(null);
+    setActiveMediaPreview(null);
+    setUploadQueue([]);
+    setAiStatusBanner(null);
+    setFormError(null);
+    setForm(createEmptyForm(baseCurrency, lastCliente, lastObjetivo));
+
+    if (liquidation) {
+      setSwitcherScope((prev) => {
+        if (prev === 'open' && liquidation.estado !== 'borrador') return 'all';
+        if (prev === 'closed' && liquidation.estado === 'borrador') return 'all';
+        return prev;
+      });
+      setSwitcherWeekFilter((prev) =>
+        prev !== 'ALL' && (liquidation.semana || '').trim() !== prev ? 'ALL' : prev
+      );
+      setSwitcherCurrencyFilter((prev) =>
+        prev !== 'ALL' && liquidation.monedaBase !== prev ? 'ALL' : prev
+      );
+    }
+  }, [liquidation, baseCurrency, lastCliente, lastObjetivo]);
+
+  // Sync default invoice currency if the user edits baseCurrency in the header while form is fresh
+  useEffect(() => {
+    if (editingItemId) return;
+    setForm((prev) => {
+      if (prev.valorFactura.trim() !== '' || prev.proveedor.trim() !== '') return prev;
+      if (prev.moneda === baseCurrency) return prev;
+      const defaultRate = DEFAULT_TAX_RATE_BY_CURRENCY[baseCurrency] || 0;
+      return {
+        ...prev,
+        moneda: baseCurrency,
+        tipoCambio: '1.00',
+        aplicaImpuestos: defaultRate > 0,
+        porcentajeImpuesto: String(defaultRate),
+        montoImpuestoManual: '',
+      };
+    });
+  }, [baseCurrency, editingItemId]);
+
+  // Distinct weeks and currencies across visible liquidations
+  const openLiquidaciones = useMemo(
+    () => visibleLiquidaciones.filter((l) => l.estado === 'borrador'),
+    [visibleLiquidaciones]
+  );
+  const closedLiquidaciones = useMemo(
+    () => visibleLiquidaciones.filter((l) => l.estado !== 'borrador'),
+    [visibleLiquidaciones]
+  );
+
+  const availableWeeks = useMemo(() => {
+    const set = new Set<string>();
+    visibleLiquidaciones.forEach((l) => {
+      const w = (l.semana || '').trim();
+      if (w) set.add(w);
+    });
+    return Array.from(set).sort((a, b) => {
+      const na = Number(a);
+      const nb = Number(b);
+      if (Number.isFinite(na) && Number.isFinite(nb)) return nb - na;
+      return b.localeCompare(a);
+    });
+  }, [visibleLiquidaciones]);
+
+  const availableCurrencies = useMemo(() => {
+    const set = new Set<ViaticoCurrency>();
+    visibleLiquidaciones.forEach((l) => {
+      if (l.monedaBase) set.add(l.monedaBase);
+    });
+    return Array.from(set);
+  }, [visibleLiquidaciones]);
+
+  const filterMatches = (
+    l: ViaticoLiquidation,
+    scope: 'open' | 'closed' | 'all',
+    week: string,
+    currency: 'ALL' | ViaticoCurrency
+  ) => {
+    if (scope === 'open' && l.estado !== 'borrador') return false;
+    if (scope === 'closed' && l.estado === 'borrador') return false;
+    if (week !== 'ALL' && (l.semana || '').trim() !== week) return false;
+    if (currency !== 'ALL' && l.monedaBase !== currency) return false;
+    return true;
+  };
+
+  const filteredSwitcherLiquidaciones = useMemo(
+    () =>
+      visibleLiquidaciones.filter((l) =>
+        filterMatches(l, switcherScope, switcherWeekFilter, switcherCurrencyFilter)
+      ),
+    [visibleLiquidaciones, switcherScope, switcherWeekFilter, switcherCurrencyFilter]
+  );
+
+  const openTabsList = useMemo(
+    () =>
+      openLiquidaciones.filter((l) =>
+        filterMatches(l, 'open', switcherWeekFilter, switcherCurrencyFilter)
+      ),
+    [openLiquidaciones, switcherWeekFilter, switcherCurrencyFilter]
+  );
+
+  const applySwitcherFiltersAndAutoSelect = (
+    nextScope: 'open' | 'closed' | 'all',
+    nextWeek: string,
+    nextCurrency: 'ALL' | ViaticoCurrency
+  ) => {
+    setSwitcherScope(nextScope);
+    setSwitcherWeekFilter(nextWeek);
+    setSwitcherCurrencyFilter(nextCurrency);
+
+    const matches = visibleLiquidaciones.filter((l) =>
+      filterMatches(l, nextScope, nextWeek, nextCurrency)
+    );
+    if (matches.length > 0 && (!liquidation || !matches.some((m) => m.id === liquidation.id))) {
+      onSelectLiquidation(matches[0].id);
+    }
+  };
 
   const isLocked =
     !liquidation ||
@@ -340,25 +487,27 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     const accepted: PendingUploadFile[] = [];
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
-      const mime = (file.type || '').toLowerCase();
-      const isPdf = mime === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-      const isImg = mime.startsWith('image/');
-      if (!isPdf && !isImg) continue;
-      const dataUrl = await readFileAsDataUrl(file);
-      accepted.push({
-        id: `rcpt-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-        file,
-        fileName: file.name,
-        mimeType: isPdf ? 'application/pdf' : mime || 'image/jpeg',
-        size: file.size,
-        dataUrl,
-      });
+      const detected = detectInvoiceFileKind(file);
+      if (detected.kind === 'unsupported') continue;
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        accepted.push({
+          id: `rcpt-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+          file,
+          fileName: file.name || `comprobante-${Date.now()}.jpg`,
+          mimeType: detected.mimeType,
+          size: file.size,
+          dataUrl,
+        });
+      } catch {
+        // Skip unreadable file entries and report below if nothing could be loaded
+      }
     }
 
     if (accepted.length === 0) {
       setAiStatusBanner({
         type: 'error',
-        text: 'Solo se admiten imágenes (JPG, PNG, WEBP) o documentos PDF de facturas.',
+        text: 'Solo se admiten imágenes (JPG, PNG, WEBP, HEIC) o documentos PDF de facturas.',
       });
       return;
     }
@@ -369,6 +518,45 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     }
     setEditingItemId(null);
     await processSingleReceiptFile(first);
+  };
+
+  const handleRotateCurrentPreview = async () => {
+    if (
+      !activeMediaPreview ||
+      activeMediaPreview.mimeType === 'application/pdf' ||
+      isExtractingAi ||
+      isRotatingImage
+    ) {
+      return;
+    }
+    setIsRotatingImage(true);
+    try {
+      const rotated = await rotateImageDataUrl90(activeMediaPreview.dataUrl);
+      const updatedRecord: StoredReceiptMedia = {
+        ...activeMediaPreview,
+        mimeType: rotated.mimeType,
+        dataUrl: rotated.dataUrl,
+      };
+      await saveReceiptMedia(updatedRecord);
+      onMediaSaved(updatedRecord);
+      setActiveMediaPreview(updatedRecord);
+      setForm((prev) =>
+        prev.attachmentId === updatedRecord.id
+          ? { ...prev, attachmentMimeType: updatedRecord.mimeType }
+          : prev
+      );
+      setAiStatusBanner({
+        type: 'warning',
+        text: 'Imagen rotada 90°. Presiona "Re-leer IA" si deseas volver a extraer los datos con esta orientación.',
+      });
+    } catch {
+      setAiStatusBanner({
+        type: 'error',
+        text: 'No se pudo rotar la imagen. Puedes volver a cargarla o digitar los campos manualmente.',
+      });
+    } finally {
+      setIsRotatingImage(false);
+    }
   };
 
   const handleReExtractCurrent = async () => {
@@ -600,42 +788,243 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* 1. CABECERA OFICIAL PREMEX (Mirrors Premex Excel Template Header) */}
+      {/* 1. CABECERA OFICIAL PREMEX + SELECTOR POR SEMANA / MONEDA / ABIERTAS */}
       <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
-        {/* Top Selector Bar if multiple liquidaciones exist */}
-        <div className="px-5 py-2.5 bg-slate-50/90 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 shrink-0">
-              Liquidación activa:
-            </span>
-            <select
-              value={liquidation.id}
-              onChange={(e) => onSelectLiquidation(e.target.value)}
-              className="text-xs font-semibold text-[#132B63] bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 max-w-[280px] sm:max-w-[360px]"
-            >
-              {visibleLiquidaciones.map((l) => (
-                <option key={l.id} value={l.id}>
-                  Sem #{l.semana || '-'} · {l.lineaLiquidacion} — {l.consultorNombre} (
-                  {l.estado === 'borrador' ? 'Borrador' : l.estado === 'cerrada' ? 'Cerrada' : 'Enviada'})
-                </option>
-              ))}
-            </select>
+        {/* Top Switcher Bar: Status Scope + Week Filter + Currency Filter + Active Selector */}
+        <div className="px-4 sm:px-5 py-3 bg-slate-50/90 border-b border-slate-200/80 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              {/* Status Scope Segmented Filter */}
+              <div className="inline-flex items-center bg-slate-200/70 p-0.5 rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() =>
+                    applySwitcherFiltersAndAutoSelect(
+                      'open',
+                      switcherWeekFilter,
+                      switcherCurrencyFilter
+                    )
+                  }
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap tabular-nums ${
+                    switcherScope === 'open'
+                      ? 'bg-white text-[#132B63] shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Abiertas ({openLiquidaciones.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    applySwitcherFiltersAndAutoSelect(
+                      'closed',
+                      switcherWeekFilter,
+                      switcherCurrencyFilter
+                    )
+                  }
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap tabular-nums ${
+                    switcherScope === 'closed'
+                      ? 'bg-white text-[#132B63] shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Cerradas ({closedLiquidaciones.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    applySwitcherFiltersAndAutoSelect(
+                      'all',
+                      switcherWeekFilter,
+                      switcherCurrencyFilter
+                    )
+                  }
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap tabular-nums ${
+                    switcherScope === 'all'
+                      ? 'bg-white text-[#132B63] shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Todas ({visibleLiquidaciones.length})
+                </button>
+              </div>
+
+              {/* Week Filter */}
+              <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1">
+                <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                <select
+                  value={switcherWeekFilter}
+                  aria-label="Filtrar por semana"
+                  onChange={(e) =>
+                    applySwitcherFiltersAndAutoSelect(
+                      switcherScope,
+                      e.target.value,
+                      switcherCurrencyFilter
+                    )
+                  }
+                  className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+                >
+                  <option value="ALL">Todas las semanas</option>
+                  {availableWeeks.map((w) => (
+                    <option key={w} value={w}>
+                      Semana #{w}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Currency Filter */}
+              <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1">
+                <Coins className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                <select
+                  value={switcherCurrencyFilter}
+                  aria-label="Filtrar por moneda"
+                  onChange={(e) =>
+                    applySwitcherFiltersAndAutoSelect(
+                      switcherScope,
+                      switcherWeekFilter,
+                      e.target.value as 'ALL' | ViaticoCurrency
+                    )
+                  }
+                  className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+                >
+                  <option value="ALL">Todas las monedas</option>
+                  {availableCurrencies.map((cur) => (
+                    <option key={cur} value={cur}>
+                      {cur} ({CURRENCY_SYMBOLS[cur]})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Active Liquidation Selector Dropdown */}
+              <select
+                value={liquidation.id}
+                aria-label="Seleccionar liquidación activa"
+                onChange={(e) => onSelectLiquidation(e.target.value)}
+                className="text-xs font-semibold text-[#132B63] bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 max-w-[260px] sm:max-w-[340px]"
+              >
+                {!filteredSwitcherLiquidaciones.some((l) => l.id === liquidation.id) && (
+                  <option value={liquidation.id}>
+                    Sem #{liquidation.semana || '-'} · {CURRENCY_SYMBOLS[liquidation.monedaBase]} · {liquidation.lineaLiquidacion} ({liquidation.estado === 'borrador' ? 'Abierta' : liquidation.estado === 'cerrada' ? 'Cerrada' : 'Enviada'})
+                  </option>
+                )}
+                {filteredSwitcherLiquidaciones.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    Sem #{l.semana || '-'} · {CURRENCY_SYMBOLS[l.monedaBase]} · {l.lineaLiquidacion} — {l.consultorNombre} (
+                    {l.estado === 'borrador' ? 'Abierta' : l.estado === 'cerrada' ? 'Cerrada' : 'Enviada'})
+                  </option>
+                ))}
+              </select>
+
+              {(switcherWeekFilter !== 'ALL' ||
+                switcherCurrencyFilter !== 'ALL' ||
+                switcherScope !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSwitcherScope('all');
+                    setSwitcherWeekFilter('ALL');
+                    setSwitcherCurrencyFilter('ALL');
+                  }}
+                  className="text-[11px] font-semibold text-[#1E60A8] hover:text-[#132B63] px-1.5 py-1 cursor-pointer whitespace-nowrap"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+
+            {/* Right: Quick Action Shortcuts & Summary */}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 tabular-nums">
+              {closedLiquidaciones.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onOpenClosedArchive}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                  title="Ir a la consulta de liquidaciones cerradas"
+                >
+                  <Archive className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Cerradas ({closedLiquidaciones.length})</span>
+                </button>
+              )}
+
+              {permissions.canOperate && (
+                <button
+                  type="button"
+                  onClick={onCreateNewLiquidation}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                  title="Iniciar otra liquidación (semana / moneda) manteniendo abiertas las actuales"
+                >
+                  <Plus className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Iniciar otra</span>
+                </button>
+              )}
+
+              <span className="hidden xl:inline text-slate-300">|</span>
+              <span className="hidden xl:inline">
+                <strong className="font-semibold text-slate-900">{liquidation.items.length}</strong>{' '}
+                fact.
+              </span>
+              <span className="hidden xl:inline text-slate-300">·</span>
+              <span className="hidden xl:inline">
+                <strong className="font-semibold text-slate-900">{attachedCount}</strong> sop.
+              </span>
+              <span className="hidden xl:inline text-slate-300">·</span>
+              <span className="font-mono font-bold text-[#132B63]">
+                {formatViaticoAmount(liquidation.totalLiquidacion, liquidation.monedaBase, true)}
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 text-xs text-slate-600 tabular-nums">
-            <span>
-              <strong className="font-semibold text-slate-900">{liquidation.items.length}</strong>{' '}
-              facturas
-            </span>
-            <span className="text-slate-300">·</span>
-            <span>
-              <strong className="font-semibold text-slate-900">{attachedCount}</strong> con soporte
-            </span>
-            <span className="text-slate-300">·</span>
-            <span className="font-mono font-bold text-[#132B63]">
-              Total: {formatViaticoAmount(liquidation.totalLiquidacion, liquidation.monedaBase, true)}
-            </span>
-          </div>
+          {/* Row 2: Quick-Switch Tabs for Concurrent Open Liquidations */}
+          {switcherScope !== 'closed' && openTabsList.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-1 border-t border-slate-200/70">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">
+                Abiertas:
+              </span>
+              {openTabsList.map((openLiq) => {
+                const isSelected = openLiq.id === liquidation.id;
+                return (
+                  <button
+                    key={openLiq.id}
+                    type="button"
+                    onClick={() => onSelectLiquidation(openLiq.id)}
+                    className={`inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors shrink-0 cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#132B63] text-white border-[#132B63] font-semibold'
+                        : 'bg-white text-slate-700 border-slate-200 hover:border-[#1E60A8] hover:text-[#132B63]'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isSelected ? 'bg-amber-300' : 'bg-amber-500'
+                      }`}
+                    />
+                    <span className="font-mono font-bold tabular-nums">
+                      S{openLiq.semana || '-'}
+                    </span>
+                    <span
+                      className={`font-semibold ${
+                        isSelected ? 'text-sky-200' : 'text-[#1E60A8]'
+                      }`}
+                    >
+                      {CURRENCY_SYMBOLS[openLiq.monedaBase]}
+                    </span>
+                    <span className="max-w-[140px] truncate">
+                      {openLiq.lineaLiquidacion || 'Sin título'}
+                    </span>
+                    <span
+                      className={`font-mono tabular-nums ${
+                        isSelected ? 'text-white/90' : 'text-slate-500'
+                      }`}
+                    >
+                      {formatViaticoAmount(openLiq.totalLiquidacion)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Premex Form Header Content */}
@@ -779,34 +1168,97 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         </div>
       </section>
 
-      {/* Closed / Read-Only Notice */}
+      {/* Closed / Read-Only Notice with Direct Download & Archive Actions */}
       {isLocked && (
-        <div className="px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-[#132B63] shrink-0" />
-            <span>
+        <div className="px-4 py-3.5 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <Lock className="w-4 h-4 text-[#132B63] shrink-0 mt-0.5" />
+            <div className="min-w-0">
               {liquidation.estado !== 'borrador' ? (
                 <>
-                  Esta liquidación se encuentra{' '}
-                  <strong>{liquidation.estado === 'enviada' ? 'cerrada y enviada' : 'cerrada'}</strong>.
-                  Puedes revisar todos los comprobantes y volver a descargar el Excel y PDF desde{' '}
-                  <strong>Exportar / Correo</strong>.
+                  <span>
+                    Esta liquidación se encuentra{' '}
+                    <strong>{liquidation.estado === 'enviada' ? 'cerrada y enviada' : 'cerrada'}</strong>
+                    {liquidation.closedAtIso && (
+                      <>
+                        {' '}el{' '}
+                        <span className="font-mono tabular-nums">
+                          {new Date(liquidation.closedAtIso).toLocaleDateString('es-GT')}
+                        </span>
+                      </>
+                    )}
+                    {liquidation.closedBy ? ` por ${liquidation.closedBy}` : ''}.
+                  </span>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    Puedes consultar cada factura y comprobante, descargar el Excel o el PDF, o iniciar una nueva liquidación.
+                  </div>
                 </>
               ) : (
-                <>
+                <span>
                   Tu perfil está en modo <strong>Solo Consulta</strong>. Puedes inspeccionar facturas,
                   ver comprobantes y descargar el Excel o PDF compilado.
-                </>
+                </span>
               )}
-            </span>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={onOpenCloseEmailModal}
-            className="text-xs font-semibold text-[#1E60A8] hover:text-[#132B63] underline cursor-pointer"
-          >
-            Abrir Descargas / Correo
-          </button>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onQuickDownloadExcel}
+              disabled={liquidation.items.length === 0 || isDownloadingExcel}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 bg-white hover:bg-emerald-50 border border-slate-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              {isDownloadingExcel ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+              )}
+              <span>Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={onQuickDownloadPdf}
+              disabled={liquidation.items.length === 0 || isDownloadingPdf}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-rose-800 bg-white hover:bg-rose-50 border border-slate-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              {isDownloadingPdf ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileText className="w-3.5 h-3.5 text-rose-700" />
+              )}
+              <span>PDF</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenCloseEmailModal}
+              disabled={liquidation.items.length === 0}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span>Correo</span>
+            </button>
+            {liquidation.estado !== 'borrador' && (
+              <button
+                type="button"
+                onClick={onOpenClosedArchive}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span>Ver Cerradas</span>
+              </button>
+            )}
+            {permissions.canOperate && (
+              <button
+                type="button"
+                onClick={onCreateNewLiquidation}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-sky-100 hover:bg-sky-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Nueva</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -839,7 +1291,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,application/pdf"
+                accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp,application/pdf"
                 multiple
                 className="hidden"
                 onChange={(e) => {
@@ -850,7 +1302,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <input
                 ref={cameraInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 capture="environment"
                 className="hidden"
                 onChange={(e) => {
@@ -872,10 +1324,26 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       <span className="truncate">{activeMediaPreview.fileName}</span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {activeMediaPreview.mimeType !== 'application/pdf' && (
+                        <button
+                          type="button"
+                          onClick={handleRotateCurrentPreview}
+                          disabled={isExtractingAi || isRotatingImage}
+                          title="Rotar imagen 90° en sentido horario"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200/80 rounded-lg cursor-pointer disabled:opacity-50"
+                        >
+                          {isRotatingImage ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <RotateCw className="w-3.5 h-3.5" />
+                          )}
+                          <span>Rotar</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={handleReExtractCurrent}
-                        disabled={isExtractingAi}
+                        disabled={isExtractingAi || isRotatingImage}
                         title="Volver a leer datos de la factura con IA"
                         className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#1E60A8] hover:bg-blue-50 rounded-lg cursor-pointer disabled:opacity-50"
                       >
@@ -1467,24 +1935,55 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={onQuickDownloadExcel}
-              disabled={liquidation.items.length === 0}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              disabled={liquidation.items.length === 0 || isDownloadingExcel}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+              {isDownloadingExcel ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+              ) : (
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+              )}
               <span>Descargar Excel</span>
             </button>
+
+            <button
+              type="button"
+              onClick={onQuickDownloadPdf}
+              disabled={liquidation.items.length === 0 || isDownloadingPdf}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              {isDownloadingPdf ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-700" />
+              ) : (
+                <FileText className="w-3.5 h-3.5 text-rose-700" />
+              )}
+              <span>Descargar PDF</span>
+            </button>
+
+            {!isLocked && liquidation.estado === 'borrador' && permissions.canOperate && (
+              <button
+                type="button"
+                onClick={onOpenCloseConfirmModal}
+                disabled={liquidation.items.length === 0}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Cerrar Liquidación</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onOpenCloseEmailModal}
               disabled={liquidation.items.length === 0}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
-              <Send className="w-3.5 h-3.5" />
-              <span>Cerrar / Enviar Correo</span>
+              <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span>Enviar Correo</span>
             </button>
           </div>
         </div>

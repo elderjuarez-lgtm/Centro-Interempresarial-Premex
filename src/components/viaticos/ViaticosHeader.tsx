@@ -9,6 +9,7 @@ import {
   Send,
   LogOut,
   FileSpreadsheet,
+  FileText,
   Lock,
 } from 'lucide-react';
 import {
@@ -25,8 +26,12 @@ interface ViaticosHeaderProps {
   onSwitchModule: (moduleId: ActiveModuleId) => void;
   onCreateNewLiquidation: () => void;
   onSaveToCloud: () => void;
+  onOpenCloseConfirmModal: () => void;
   onOpenCloseEmailModal: () => void;
   onQuickDownloadExcel: () => void;
+  onQuickDownloadPdf: () => void;
+  isDownloadingExcel: boolean;
+  isDownloadingPdf: boolean;
   isSavingCloud: boolean;
   hasUnsavedChanges: boolean;
   currentUser: User | null;
@@ -42,8 +47,12 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
   onSwitchModule,
   onCreateNewLiquidation,
   onSaveToCloud,
+  onOpenCloseConfirmModal,
   onOpenCloseEmailModal,
   onQuickDownloadExcel,
+  onQuickDownloadPdf,
+  isDownloadingExcel,
+  isDownloadingPdf,
   isSavingCloud,
   hasUnsavedChanges,
   currentUser,
@@ -59,8 +68,16 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
     if (activeLiquidation.estado === 'cerrada') {
       return { dot: 'bg-sky-600', text: 'Liquidación cerrada', color: 'text-sky-700' };
     }
-    return { dot: 'bg-amber-500', text: 'Borrador editable', color: 'text-amber-700' };
+    return { dot: 'bg-amber-500', text: 'Abierta · Editable', color: 'text-amber-700' };
   })();
+
+  const canCloseActive = Boolean(
+    activeLiquidation &&
+      activeLiquidation.estado === 'borrador' &&
+      permissions.canOperate
+  );
+
+  const hasItems = Boolean(activeLiquidation && activeLiquidation.items.length > 0);
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90">
@@ -101,37 +118,61 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
             <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
               {activeTab === 'liquidador'
                 ? activeLiquidation
-                  ? `${activeLiquidation.lineaLiquidacion || 'Sin título'} · Semana #${activeLiquidation.semana || '-'}`
+                  ? `${activeLiquidation.lineaLiquidacion || 'Sin título'} · Semana #${activeLiquidation.semana || '-'} · ${activeLiquidation.monedaBase}`
                   : 'Panel de Liquidadores'
-                : 'Historial de Liquidaciones y Consultores'}
+                : activeTab === 'cerradas'
+                ? 'Consulta de Liquidaciones Cerradas'
+                : 'Historial General y Consultores'}
             </h2>
           </div>
         </div>
 
         {/* Right: Single-Line Actions */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {permissions.canOperate && (
             <button
               type="button"
               onClick={onCreateNewLiquidation}
               className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              title="Crear nueva liquidación semanal"
+              title="Iniciar otra liquidación (semana / moneda) sin cerrar las actuales"
             >
               <Plus className="w-3.5 h-3.5 text-[#1E60A8]" />
               <span>Nueva</span>
             </button>
           )}
 
-          {activeLiquidation && (
-            <button
-              type="button"
-              onClick={onQuickDownloadExcel}
-              className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              title="Descargar Excel en formato oficial Premex"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Excel</span>
-            </button>
+          {activeLiquidation && activeTab === 'liquidador' && (
+            <>
+              <button
+                type="button"
+                onClick={onQuickDownloadExcel}
+                disabled={!hasItems || isDownloadingExcel}
+                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                title="Descargar Excel en formato oficial Premex"
+              >
+                {isDownloadingExcel ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                ) : (
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                )}
+                <span>Excel</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onQuickDownloadPdf}
+                disabled={!hasItems || isDownloadingPdf}
+                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                title="Descargar PDF compilado con todas las facturas e imágenes"
+              >
+                {isDownloadingPdf ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-700" />
+                ) : (
+                  <FileText className="w-3.5 h-3.5 text-rose-700" />
+                )}
+                <span>PDF</span>
+              </button>
+            </>
           )}
 
           {permissions.canOperate && (
@@ -139,7 +180,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               type="button"
               onClick={onSaveToCloud}
               disabled={isSavingCloud}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
+              className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
                 hasUnsavedChanges
                   ? 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
                   : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
@@ -151,13 +192,26 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               ) : (
                 <Cloud className="w-3.5 h-3.5 text-[#1E60A8]" />
               )}
-              <span className="hidden sm:inline">
+              <span className="hidden xl:inline">
                 {isSavingCloud
                   ? 'Guardando...'
                   : hasUnsavedChanges
-                  ? 'Guardar Nube*'
-                  : 'Guardar Nube'}
+                  ? 'Guardar*'
+                  : 'Guardar'}
               </span>
+            </button>
+          )}
+
+          {canCloseActive && (
+            <button
+              type="button"
+              onClick={onOpenCloseConfirmModal}
+              disabled={!hasItems}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              title="Cerrar esta liquidación sin necesidad de enviarla por correo"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Cerrar Liquidación</span>
             </button>
           )}
 
@@ -165,19 +219,16 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
             <button
               type="button"
               onClick={onOpenCloseEmailModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              title="Cerrar liquidación, descargar Excel + PDF de comprobantes y enviar por correo"
+              disabled={!hasItems}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 ${
+                canCloseActive
+                  ? 'text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200'
+                  : 'text-white bg-[#1E60A8] hover:bg-[#132B63]'
+              }`}
+              title="Preparar envío por correo electrónico con Excel y PDF"
             >
-              {activeLiquidation.estado === 'borrador' && permissions.canOperate ? (
-                <Lock className="w-3.5 h-3.5" />
-              ) : (
-                <Send className="w-3.5 h-3.5" />
-              )}
-              <span>
-                {activeLiquidation.estado === 'borrador' && permissions.canOperate
-                  ? 'Cerrar y Enviar'
-                  : 'Exportar / Correo'}
-              </span>
+              <Send className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Enviar Correo</span>
             </button>
           )}
 
