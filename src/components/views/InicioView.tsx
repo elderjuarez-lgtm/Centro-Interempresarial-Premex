@@ -16,6 +16,7 @@ import {
   Save
 } from 'lucide-react';
 import { Movement, DifferenceRow, ActiveTab, MatrixResult, ReconciliationScope } from '../../types';
+import { getIntercompanyScopeLabel } from '../../utils/demoData';
 import { formatCurrency } from '../../utils/reconciliation';
 
 interface InicioViewProps {
@@ -60,7 +61,7 @@ export const InicioView: React.FC<InicioViewProps> = ({
         <div className="relative z-10 max-w-3xl">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-xs font-semibold mb-3">
             <span className="w-2 h-2 rounded-full animate-pulse bg-blue-300"></span>
-            Centro de Conciliación — Anitox
+            Centro de Conciliación — {getIntercompanyScopeLabel(activeScope)}
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight">
             Gestión y Conciliación Bilateral de Saldos

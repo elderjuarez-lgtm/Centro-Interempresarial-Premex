@@ -29,9 +29,9 @@ export const MODULE_COMPANY_DB_META: Record<
     name: 'Conciliación Intercompany',
     shortName: 'Intercompany',
     status: 'Activo',
-    firestorePath: 'company_directories/internacionales',
+    firestorePath: 'company_directories/{internacionales|nacionales|anitox}',
     description:
-      'Catálogo maestro de sociedades Anitox sincronizado con la vista Empresas del módulo Intercompany.',
+      'Catálogo maestro independiente de sociedades por grupo (Internacionales, Nacionales y Anitox) sincronizado con la vista Empresas de Intercompany.',
     defaultCurrency: 'USD',
   },
   bancos: {

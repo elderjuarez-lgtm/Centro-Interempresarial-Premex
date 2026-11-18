@@ -5,22 +5,42 @@ import {
   setDoc,
   updateDoc,
   onSnapshot,
-  enableNetwork,
   serverTimestamp,
-  Timestamp
+  Timestamp,
 } from 'firebase/firestore';
-import { auth, db, activeFirebaseInfo } from './auth';
+import {
+  auth,
+  db,
+  activeFirebaseInfo,
+  registerFirestoreListener,
+  withFirestoreTimeout,
+  fetchWithTimeout,
+  isRecoverableFirestoreSdkError,
+} from './auth';
 import { EntityMapping, Movement, ClosedMonthRecord, ReconciliationScope } from '../types';
 
 export const DEFAULT_RECONCILIATION_ID = 'principal';
 export const DEFAULT_NACIONALES_ID = 'principal-nacionales';
+export const DEFAULT_ANITOX_ID = 'principal-anitox';
+
+export const normalizeReconciliationScope = (
+  scope?: string | null
+): ReconciliationScope => {
+  if (scope === 'nacionales') return 'nacionales';
+  if (scope === 'anitox') return 'anitox';
+  return 'internacionales';
+};
 
 export const getDefaultReconciliationId = (scope: ReconciliationScope): string => {
-  return scope === 'nacionales' ? DEFAULT_NACIONALES_ID : DEFAULT_RECONCILIATION_ID;
+  if (scope === 'nacionales') return DEFAULT_NACIONALES_ID;
+  if (scope === 'anitox') return DEFAULT_ANITOX_ID;
+  return DEFAULT_RECONCILIATION_ID;
 };
 
 const createScopedCopyId = (scope: ReconciliationScope): string => {
-  return scope === 'nacionales' ? `rec-nac-${Date.now()}` : `rec-${Date.now()}`;
+  if (scope === 'nacionales') return `rec-nac-${Date.now()}`;
+  if (scope === 'anitox') return `rec-anx-${Date.now()}`;
+  return `rec-${Date.now()}`;
 };
 
 export enum OperationType {
@@ -77,8 +97,11 @@ export function handleFirestoreError(
 
 export async function testFirestoreConnection(): Promise<void> {
   try {
-    await enableNetwork(db).catch(() => {});
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await withFirestoreTimeout(
+      getDocFromServer(doc(db, 'test', 'connection')),
+      6000,
+      'test/connection'
+    );
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.warn('Firestore SDK WebChannel offline; REST fallback ready.');
@@ -181,15 +204,7 @@ const sanitizeClosedMonths = (
   return result;
 };
 
-const isOfflineError = (err: unknown): boolean => {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return (
-    msg.includes('client is offline') ||
-    msg.includes('unavailable') ||
-    msg.includes('network') ||
-    msg.includes('failed to get document')
-  );
-};
+const isOfflineError = (err: unknown): boolean => isRecoverableFirestoreSdkError(err);
 
 // --- Firestore REST API v1 conversion helpers (for corporate proxy fallback) ---
 const toFirestoreValue = (val: any): any => {
@@ -250,11 +265,16 @@ const getRestDocumentPath = (collectionName: string, docId: string) => {
 };
 
 const fetchReconciliationViaRest = async (docId: string): Promise<SavedReconciliationDoc | null> => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  const idToken = await user.getIdToken();
   const url = `${getRestBaseUrl()}/documents/reconciliations/${encodeURIComponent(docId)}?key=${encodeURIComponent(
     activeFirebaseInfo.apiKey
   )}`;
-  const res = await fetch(url);
-  if (res.status === 404) return null;
+  const res = await fetchWithTimeout(url, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (res.status === 404 || res.status === 403) return null;
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
     throw new Error(errBody?.error?.message || `Error HTTP ${res.status} al leer conciliación`);
@@ -365,7 +385,7 @@ const saveReconciliationViaRest = async (params: {
   const commitUrl = `${getRestBaseUrl()}/documents:commit?key=${encodeURIComponent(
     activeFirebaseInfo.apiKey
   )}`;
-  const res = await fetch(commitUrl, {
+  const res = await fetchWithTimeout(commitUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${params.idToken}`,
@@ -436,7 +456,7 @@ const createClosedPeriodViaRest = async (params: {
   const commitUrl = `${getRestBaseUrl()}/documents:commit?key=${encodeURIComponent(
     activeFirebaseInfo.apiKey
   )}`;
-  const res = await fetch(commitUrl, {
+  const res = await fetchWithTimeout(commitUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${params.idToken}`,
@@ -464,11 +484,18 @@ export const getInitialScopeAndDocIdFromUrl = (
   const rawDoc = params.get('c')?.trim() || '';
   const validDoc = rawDoc && /^[a-zA-Z0-9_-]{1,128}$/.test(rawDoc) ? rawDoc : null;
 
-  if (rawScope === 'nacionales' || rawScope === 'internacionales') {
+  if (
+    rawScope === 'nacionales' ||
+    rawScope === 'internacionales' ||
+    rawScope === 'anitox'
+  ) {
     return { scope: rawScope, docIdFromUrl: validDoc };
   }
   if (validDoc && (validDoc.endsWith('-nacionales') || validDoc.startsWith('rec-nac-'))) {
     return { scope: 'nacionales', docIdFromUrl: validDoc };
+  }
+  if (validDoc && (validDoc.endsWith('-anitox') || validDoc.startsWith('rec-anx-'))) {
+    return { scope: 'anitox', docIdFromUrl: validDoc };
   }
   if (validDoc) {
     return { scope: 'internacionales', docIdFromUrl: validDoc };
@@ -491,8 +518,8 @@ export const getShareableUrl = (
   scope: ReconciliationScope = 'internacionales'
 ): string => {
   if (typeof window === 'undefined') return '';
-  if (scope === 'nacionales') {
-    return `${window.location.origin}/?s=nacionales&c=${encodeURIComponent(docId)}`;
+  if (scope === 'nacionales' || scope === 'anitox') {
+    return `${window.location.origin}/?s=${scope}&c=${encodeURIComponent(docId)}`;
   }
   return `${window.location.origin}/?c=${encodeURIComponent(docId)}`;
 };
@@ -507,19 +534,21 @@ export const subscribeToReconciliation = (
     : DEFAULT_RECONCILIATION_ID;
   const path = `reconciliations/${safeId}`;
   const ref = doc(db, 'reconciliations', safeId);
+  let isActive = true;
 
   // Proactively fetch once via HTTPS REST so shared links load even if WebChannel is blocked
   fetchReconciliationViaRest(safeId)
     .then((restDoc) => {
-      if (restDoc) onData(restDoc);
+      if (isActive && restDoc) onData(restDoc);
     })
     .catch((err) => {
-      console.warn('REST initial read fallback failed:', err);
+      if (isActive) console.warn('REST initial read fallback failed:', err);
     });
 
-  return onSnapshot(
+  const rawUnsub = onSnapshot(
     ref,
     (snapshot) => {
+      if (!isActive) return;
       if (!snapshot.exists()) {
         onData(null);
         return;
@@ -546,8 +575,7 @@ export const subscribeToReconciliation = (
       });
     },
     (error) => {
-      if (isOfflineError(error)) {
-        // Fallback already attempted via REST above
+      if (!isActive || isOfflineError(error)) {
         return;
       }
       try {
@@ -557,6 +585,11 @@ export const subscribeToReconciliation = (
       }
     }
   );
+
+  return registerFirestoreListener(() => {
+    isActive = false;
+    rawUnsub();
+  });
 };
 
 export interface SaveReconciliationParams {
@@ -594,14 +627,17 @@ export const saveReconciliationToCloud = async (
   const cleanMonth = (params.selectedMonth.trim() || 'Septiembre 2026').slice(0, 60);
   const cleanOwnerName = (user.displayName || 'Usuario').slice(0, 120);
 
-  // Ensure active user's auth token and Firestore network are ready (important after switching accounts)
-  await user.getIdToken().catch(() => {});
-  await enableNetwork(db).catch(() => {});
+  // Ensure active user's auth token is ready
+  await withFirestoreTimeout(user.getIdToken(), 8000, 'token de autenticación').catch(() => {});
 
   let existingSnap;
   const initialPath = `reconciliations/${docId}`;
   try {
-    existingSnap = await getDoc(doc(db, 'reconciliations', docId));
+    existingSnap = await withFirestoreTimeout(
+      getDoc(doc(db, 'reconciliations', docId)),
+      8500,
+      `leer ${initialPath}`
+    );
   } catch (error) {
     if (isOfflineError(error)) {
       // Fallback cleanly to Firestore HTTPS REST API
@@ -637,18 +673,22 @@ export const saveReconciliationToCloud = async (
       });
 
       try {
-        await updateDoc(doc(db, 'reconciliations', docId), {
-          ownerName: cleanOwnerName,
-          title: cleanTitle,
-          selectedMonth: cleanMonth,
-          entities: cleanEntities,
-          movements: cleanMovements,
-          comments: cleanComments,
-          closedMonths: mergedClosedMonths,
-          movementsCount: cleanMovements.length,
-          entitiesCount: cleanEntities.length,
-          updatedAt: serverTimestamp(),
-        });
+        await withFirestoreTimeout(
+          updateDoc(doc(db, 'reconciliations', docId), {
+            ownerName: cleanOwnerName,
+            title: cleanTitle,
+            selectedMonth: cleanMonth,
+            entities: cleanEntities,
+            movements: cleanMovements,
+            comments: cleanComments,
+            closedMonths: mergedClosedMonths,
+            movementsCount: cleanMovements.length,
+            entitiesCount: cleanEntities.length,
+            updatedAt: serverTimestamp(),
+          }),
+          8500,
+          `actualizar reconciliations/${docId}`
+        );
       } catch (error) {
         if (isOfflineError(error)) {
           const idToken = await user.getIdToken();
@@ -684,20 +724,24 @@ export const saveReconciliationToCloud = async (
 
   const createPath = `reconciliations/${docId}`;
   try {
-    await setDoc(doc(db, 'reconciliations', docId), {
-      ownerId: user.uid,
-      ownerName: cleanOwnerName,
-      title: cleanTitle,
-      selectedMonth: cleanMonth,
-      entities: cleanEntities,
-      movements: cleanMovements,
-      comments: cleanComments,
-      closedMonths: cleanClosedMonths,
-      movementsCount: cleanMovements.length,
-      entitiesCount: cleanEntities.length,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    await withFirestoreTimeout(
+      setDoc(doc(db, 'reconciliations', docId), {
+        ownerId: user.uid,
+        ownerName: cleanOwnerName,
+        title: cleanTitle,
+        selectedMonth: cleanMonth,
+        entities: cleanEntities,
+        movements: cleanMovements,
+        comments: cleanComments,
+        closedMonths: cleanClosedMonths,
+        movementsCount: cleanMovements.length,
+        entitiesCount: cleanEntities.length,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+      8500,
+      `crear ${createPath}`
+    );
   } catch (error) {
     if (isOfflineError(error)) {
       const idToken = await user.getIdToken();
@@ -773,7 +817,12 @@ export const closeAndArchiveMonthInCloud = async (
       .replace(/^-+|-+$/g, '')
       .toLowerCase()
       .slice(0, 40) || 'mes';
-  const archiveId = scope === 'nacionales' ? `cierre-nac-${slug}-${Date.now()}` : `cierre-${slug}-${Date.now()}`;
+  const archiveId =
+    scope === 'nacionales'
+      ? `cierre-nac-${slug}-${Date.now()}`
+      : scope === 'anitox'
+      ? `cierre-anx-${slug}-${Date.now()}`
+      : `cierre-${slug}-${Date.now()}`;
   const closedAtIso = new Date().toISOString();
 
   const closedRecord: ClosedMonthRecord = {
@@ -807,21 +856,25 @@ export const closeAndArchiveMonthInCloud = async (
   // Step 2: Create permanent immutable archive document in /closed_periods/{archiveId}
   const archivePath = `closed_periods/${archiveId}`;
   try {
-    await setDoc(doc(db, 'closed_periods', archiveId), {
-      ownerId: user.uid,
-      ownerName: cleanOwnerName,
-      reconciliationId: saveResult.id,
-      month: cleanMonth,
-      title: cleanTitle,
-      entities: cleanEntities,
-      movements: cleanMonthMovements,
-      comments: cleanComments,
-      movementsCount: cleanMonthMovements.length,
-      entitiesCount: cleanEntities.length,
-      differencesCount: safeDiffCount,
-      closedAtIso,
-      createdAt: serverTimestamp(),
-    });
+    await withFirestoreTimeout(
+      setDoc(doc(db, 'closed_periods', archiveId), {
+        ownerId: user.uid,
+        ownerName: cleanOwnerName,
+        reconciliationId: saveResult.id,
+        month: cleanMonth,
+        title: cleanTitle,
+        entities: cleanEntities,
+        movements: cleanMonthMovements,
+        comments: cleanComments,
+        movementsCount: cleanMonthMovements.length,
+        entitiesCount: cleanEntities.length,
+        differencesCount: safeDiffCount,
+        closedAtIso,
+        createdAt: serverTimestamp(),
+      }),
+      8500,
+      `archivar ${archivePath}`
+    );
   } catch (error) {
     if (isOfflineError(error)) {
       const idToken = await user.getIdToken();
@@ -864,12 +917,17 @@ export interface SavedCompanyDirectoryDoc {
 const fetchCompanyDirectoryViaRest = async (
   scope: ReconciliationScope
 ): Promise<SavedCompanyDirectoryDoc | null> => {
-  const safeScope: ReconciliationScope = scope === 'nacionales' ? 'nacionales' : 'internacionales';
+  const user = auth.currentUser;
+  if (!user) return null;
+  const idToken = await user.getIdToken();
+  const safeScope = normalizeReconciliationScope(scope);
   const url = `${getRestBaseUrl()}/documents/company_directories/${encodeURIComponent(
     safeScope
   )}?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`;
-  const res = await fetch(url);
-  if (res.status === 404) return null;
+  const res = await fetchWithTimeout(url, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (res.status === 404 || res.status === 403) return null;
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
     throw new Error(
@@ -900,8 +958,7 @@ const saveCompanyDirectoryViaRest = async (params: {
   updatedByName: string;
   entities: EntityMapping[];
 }): Promise<{ updatedAtIso: string }> => {
-  const safeScope: ReconciliationScope =
-    params.scope === 'nacionales' ? 'nacionales' : 'internacionales';
+  const safeScope = normalizeReconciliationScope(params.scope);
   const existingDoc = await fetchCompanyDirectoryViaRest(safeScope);
   const isUpdate = Boolean(existingDoc);
 
@@ -944,7 +1001,7 @@ const saveCompanyDirectoryViaRest = async (params: {
   const commitUrl = `${getRestBaseUrl()}/documents:commit?key=${encodeURIComponent(
     activeFirebaseInfo.apiKey
   )}`;
-  const res = await fetch(commitUrl, {
+  const res = await fetchWithTimeout(commitUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${params.idToken}`,
@@ -956,7 +1013,9 @@ const saveCompanyDirectoryViaRest = async (params: {
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
     throw new Error(
-      errBody?.error?.message || `Error al guardar directorio vía Firestore REST (${res.status})`
+      `Firestore (company_directories/${safeScope}): ${
+        errBody?.error?.message || `Error HTTP ${res.status}`
+      }`
     );
   }
 
@@ -970,21 +1029,23 @@ export const subscribeToCompanyDirectory = (
   onData: (saved: SavedCompanyDirectoryDoc | null) => void,
   onError?: (err: Error) => void
 ) => {
-  const safeScope: ReconciliationScope = scope === 'nacionales' ? 'nacionales' : 'internacionales';
+  const safeScope = normalizeReconciliationScope(scope);
   const path = `company_directories/${safeScope}`;
   const ref = doc(db, 'company_directories', safeScope);
+  let isActive = true;
 
   fetchCompanyDirectoryViaRest(safeScope)
     .then((restDoc) => {
-      if (restDoc) onData(restDoc);
+      if (isActive && restDoc) onData(restDoc);
     })
     .catch((err) => {
-      console.warn(`REST initial read fallback failed (${path}):`, err);
+      if (isActive) console.warn(`REST initial read fallback failed (${path}):`, err);
     });
 
-  return onSnapshot(
+  const rawUnsub = onSnapshot(
     ref,
     (snapshot) => {
+      if (!isActive) return;
       if (!snapshot.exists()) {
         onData(null);
         return;
@@ -1004,7 +1065,7 @@ export const subscribeToCompanyDirectory = (
       });
     },
     (error) => {
-      if (isOfflineError(error)) return;
+      if (!isActive || isOfflineError(error)) return;
       try {
         handleFirestoreError(error, OperationType.GET, path);
       } catch (wrappedErr: any) {
@@ -1012,6 +1073,11 @@ export const subscribeToCompanyDirectory = (
       }
     }
   );
+
+  return registerFirestoreListener(() => {
+    isActive = false;
+    rawUnsub();
+  });
 };
 
 export const saveCompanyDirectoryToCloud = async (
@@ -1023,17 +1089,20 @@ export const saveCompanyDirectoryToCloud = async (
     throw new Error('Debes iniciar sesión con Google para guardar los cambios de empresas en la nube.');
   }
 
-  const safeScope: ReconciliationScope = scope === 'nacionales' ? 'nacionales' : 'internacionales';
+  const safeScope = normalizeReconciliationScope(scope);
   const cleanEntities = sanitizeEntities(entities);
   const cleanUpdaterName = (user.displayName || user.email || 'Usuario').slice(0, 120);
   const path = `company_directories/${safeScope}`;
 
-  await user.getIdToken().catch(() => {});
-  await enableNetwork(db).catch(() => {});
+  await withFirestoreTimeout(user.getIdToken(), 8000, 'token de autenticación').catch(() => {});
 
   let existingSnap;
   try {
-    existingSnap = await getDoc(doc(db, 'company_directories', safeScope));
+    existingSnap = await withFirestoreTimeout(
+      getDoc(doc(db, 'company_directories', safeScope)),
+      8500,
+      `leer ${path}`
+    );
   } catch (error) {
     if (isOfflineError(error)) {
       const idToken = await user.getIdToken();
@@ -1050,13 +1119,17 @@ export const saveCompanyDirectoryToCloud = async (
 
   if (existingSnap && existingSnap.exists()) {
     try {
-      await updateDoc(doc(db, 'company_directories', safeScope), {
-        entities: cleanEntities,
-        entitiesCount: cleanEntities.length,
-        updatedBy: user.uid,
-        updatedByName: cleanUpdaterName,
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        updateDoc(doc(db, 'company_directories', safeScope), {
+          entities: cleanEntities,
+          entitiesCount: cleanEntities.length,
+          updatedBy: user.uid,
+          updatedByName: cleanUpdaterName,
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        `actualizar ${path}`
+      );
       return { updatedAtIso: new Date().toISOString() };
     } catch (error) {
       if (isOfflineError(error)) {
@@ -1074,15 +1147,19 @@ export const saveCompanyDirectoryToCloud = async (
   }
 
   try {
-    await setDoc(doc(db, 'company_directories', safeScope), {
-      scope: safeScope,
-      entities: cleanEntities,
-      entitiesCount: cleanEntities.length,
-      updatedBy: user.uid,
-      updatedByName: cleanUpdaterName,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    await withFirestoreTimeout(
+      setDoc(doc(db, 'company_directories', safeScope), {
+        scope: safeScope,
+        entities: cleanEntities,
+        entitiesCount: cleanEntities.length,
+        updatedBy: user.uid,
+        updatedByName: cleanUpdaterName,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+      8500,
+      `crear ${path}`
+    );
     return { updatedAtIso: new Date().toISOString() };
   } catch (error) {
     if (isOfflineError(error)) {

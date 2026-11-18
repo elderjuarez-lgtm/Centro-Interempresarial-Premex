@@ -33,7 +33,14 @@ import {
   ModuleCompanyEntry,
   StandaloneCompanyDbModuleId,
 } from './types';
-import { INITIAL_ENTITIES, INITIAL_MOVEMENTS, INITIAL_COMMENTS } from './utils/demoData';
+import {
+  INITIAL_MOVEMENTS,
+  INITIAL_COMMENTS,
+  INTERCOMPANY_SCOPES,
+  INTERCOMPANY_SCOPE_META,
+  getInitialEntitiesForScope,
+  getIntercompanyScopeLabel,
+} from './utils/demoData';
 import {
   INITIAL_BANK_ACCOUNTS,
   INITIAL_BANK_STATEMENT_ITEMS,
@@ -50,13 +57,16 @@ import {
   resolveViaticosConsultantScope,
 } from './utils/viaticos';
 import {
+  ALL_SUITE_MODULES,
   INITIAL_ACCESS_POLICY,
   INITIAL_USER_PERMISSIONS,
   ROLE_METADATA,
   SUPER_ADMIN_EMAIL,
+  emailToPermissionDocId,
   ensureSuperAdminRecord,
   filterBankByPermissions,
   filterIntercompanyByPermissions,
+  normalizeCompanyKey,
   normalizeEmail,
   resolveEffectivePermissions,
 } from './utils/permissions';
@@ -68,7 +78,13 @@ import {
   mergeRuntimeSocietyNames,
   sanitizeModuleCompanyList,
 } from './utils/moduleCompanies';
-import { auth, initAuth, googleSignIn, logout } from './services/auth';
+import {
+  auth,
+  initAuth,
+  googleSignIn,
+  logout,
+  unsubscribeAllFirestoreListeners,
+} from './services/auth';
 import {
   testFirestoreConnection,
   getDefaultReconciliationId,
@@ -102,6 +118,7 @@ import {
 } from './services/moduleCompaniesStore';
 
 import { ModuleLauncher, LauncherLiveMetrics } from './components/ModuleLauncher';
+import { LoginGateView } from './components/LoginGateView';
 import { BankModuleWorkspace, BankWorkspaceData } from './components/bank/BankModuleWorkspace';
 import { ViaticosModuleWorkspace } from './components/viaticos/ViaticosModuleWorkspace';
 import {
@@ -167,11 +184,19 @@ const STORAGE_KEYS_BY_SCOPE: Record<
     CLOSED_MONTHS: 'centro_interempresarial_nacionales_meses_cerrados_v1',
     DOC_ID: 'centro_interempresarial_doc_id_nacionales_v1',
   },
+  anitox: {
+    MOVEMENTS: 'centro_interempresarial_anitox_movimientos_v1',
+    ENTITIES: 'centro_interempresarial_anitox_entidades_v1',
+    COMMENTS: 'centro_interempresarial_anitox_comentarios_v1',
+    CLOSED_MONTHS: 'centro_interempresarial_anitox_meses_cerrados_v1',
+    DOC_ID: 'centro_interempresarial_doc_id_anitox_v1',
+  },
 };
 
 const PENDING_DIRECTORY_SYNC_KEYS: Record<ReconciliationScope, string> = {
   internacionales: 'centro_interempresarial_pending_dir_internacionales_v1',
   nacionales: 'centro_interempresarial_pending_dir_nacionales_v1',
+  anitox: 'centro_interempresarial_pending_dir_anitox_v1',
 };
 
 function readPendingDirSync(scope: ReconciliationScope): boolean {
@@ -235,10 +260,14 @@ function loadInitialWorkspace(
     keys.MOVEMENTS,
     scope === 'internacionales' ? INITIAL_MOVEMENTS : []
   );
-  const entities = readJsonStorage<EntityMapping[]>(
+  const rawEntities = readJsonStorage<EntityMapping[]>(
     keys.ENTITIES,
-    scope === 'internacionales' ? INITIAL_ENTITIES : []
+    getInitialEntitiesForScope(scope)
   );
+  const entities =
+    Array.isArray(rawEntities) && rawEntities.length > 0
+      ? rawEntities
+      : getInitialEntitiesForScope(scope);
   const comments = readJsonStorage<Record<string, string>>(
     keys.COMMENTS,
     scope === 'internacionales' ? INITIAL_COMMENTS : {}
@@ -266,7 +295,7 @@ function loadInitialWorkspace(
 function getStoredActiveScope(): ReconciliationScope {
   try {
     const raw = localStorage.getItem(ACTIVE_SCOPE_STORAGE_KEY);
-    if (raw === 'nacionales' || raw === 'internacionales') return raw;
+    if (raw === 'nacionales' || raw === 'internacionales' || raw === 'anitox') return raw;
   } catch {
     // ignore
   }
@@ -402,7 +431,9 @@ export default function App() {
   const [activeModule, setActiveModule] = useState<ActiveModuleId>(() =>
     getInitialModuleFromUrl()
   );
-  const activeScope: ReconciliationScope = 'internacionales';
+  const [activeScope, setActiveScope] = useState<ReconciliationScope>(
+    () => initialLaunch.scope
+  );
   const [activeTab, setActiveTab] = useState<ActiveTab>('inicio');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
@@ -411,9 +442,12 @@ export default function App() {
   const [movimientosPreset, setMovimientosPreset] = useState<MovimientosNavigationPreset | null>(null);
   const [copiedBannerLink, setCopiedBannerLink] = useState<boolean>(false);
 
-  // Auth state
+  // Auth state & mandatory login gate lifecycle
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState<boolean>(false);
+  const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // RBAC Access Control state (by email, modules, companies, roles)
   const [permissionRecords, setPermissionRecords] = useState<UserPermissionRecord[]>(() =>
@@ -428,20 +462,37 @@ export default function App() {
     readJsonStorage<AccessControlPolicy>(RBAC_STORAGE_KEYS.POLICY, INITIAL_ACCESS_POLICY)
   );
   const [ownPermissionDoc, setOwnPermissionDoc] = useState<UserPermissionRecord | null>(null);
+  const [ownPermState, setOwnPermState] = useState<'idle' | 'loading' | 'cloud' | 'fallback'>(
+    'idle'
+  );
+  const [policyLoaded, setPolicyLoaded] = useState<boolean>(false);
   const [previewEmail, setPreviewEmail] = useState<string | null>(null);
   const [lastPermSyncIso, setLastPermSyncIso] = useState<string | null>(null);
   const [hasPendingPermSync, setHasPendingPermSync] = useState<boolean>(false);
 
-  const realUserEmail = currentUser?.email ? normalizeEmail(currentUser.email) : null;
+  const isVerifiedUser = Boolean(
+    currentUser?.uid && currentUser?.email && currentUser?.emailVerified
+  );
+  const realUserEmail =
+    isVerifiedUser && currentUser?.email ? normalizeEmail(currentUser.email) : null;
+
+  const permissionsResolved = Boolean(
+    isVerifiedUser &&
+      policyLoaded &&
+      (ownPermState === 'cloud' || ownPermState === 'fallback')
+  );
+
   const realIsAdmin = useMemo(() => {
-    if (!currentUser || !realUserEmail) return true;
+    if (!isVerifiedUser || !realUserEmail) return false;
     if (realUserEmail === SUPER_ADMIN_EMAIL) return true;
     const matched =
-      ownPermissionDoc ||
-      permissionRecords.find((r) => normalizeEmail(r.email) === realUserEmail) ||
-      null;
+      ownPermState === 'cloud'
+        ? ownPermissionDoc
+        : ownPermissionDoc ||
+          permissionRecords.find((r) => normalizeEmail(r.email) === realUserEmail) ||
+          null;
     return Boolean(matched && matched.active && matched.role === 'admin');
-  }, [currentUser, realUserEmail, ownPermissionDoc, permissionRecords]);
+  }, [isVerifiedUser, realUserEmail, ownPermState, ownPermissionDoc, permissionRecords]);
 
   const effectivePermissions = useMemo(
     () =>
@@ -449,6 +500,7 @@ export default function App() {
         currentUser,
         permissionsList: permissionRecords,
         ownPermissionDoc,
+        ownPermissionResolved: ownPermState === 'cloud',
         policy: accessPolicy,
         previewEmail: realIsAdmin ? previewEmail : null,
       }),
@@ -456,11 +508,19 @@ export default function App() {
       currentUser,
       permissionRecords,
       ownPermissionDoc,
+      ownPermState,
       accessPolicy,
       realIsAdmin,
       previewEmail,
     ]
   );
+
+  const canLoadCloudData = Boolean(
+    isVerifiedUser && permissionsResolved && effectivePermissions.isAuthorized
+  );
+  const canAccessIntercompany = effectivePermissions.canAccessModule('intercompany');
+  const canAccessBancos = effectivePermissions.canAccessModule('bancos');
+  const canAccessViaticos = effectivePermissions.canAccessModule('viaticos');
 
   // Bank Reconciliation module workspace state
   const [bankWorkspace, setBankWorkspace] = useState<BankWorkspaceData>(() =>
@@ -512,6 +572,8 @@ export default function App() {
       const nextPath =
         nextModule === 'launcher'
           ? window.location.pathname
+          : nextModule === 'intercompany' && activeScope !== 'internacionales'
+          ? `${window.location.pathname}?m=intercompany&s=${activeScope}`
           : `${window.location.pathname}?m=${nextModule}`;
       window.history.replaceState(null, '', nextPath);
     }
@@ -622,21 +684,82 @@ export default function App() {
     if (!realIsAdmin) {
       throw new Error('Solo los administradores pueden sincronizar permisos.');
     }
+
+    // Ensure the currently signed-in verified admin is present in records before publishing access_control
+    let recordsToSync = ensureSuperAdminRecord(permissionRecords);
+    if (currentUser?.email) {
+      const signedEmail = normalizeEmail(currentUser.email);
+      const alreadyListed = recordsToSync.some(
+        (r) => normalizeEmail(r.email) === signedEmail
+      );
+      if (!alreadyListed) {
+        recordsToSync = ensureSuperAdminRecord([
+          ...recordsToSync,
+          {
+            id: emailToPermissionDocId(signedEmail),
+            email: signedEmail,
+            displayName:
+              currentUser.displayName || signedEmail.split('@')[0] || 'Administrador',
+            role: 'admin',
+            allowedModules: [...ALL_SUITE_MODULES],
+            companyScope: 'all',
+            allowedCompanies: [],
+            moduleCompanyAccess: {},
+            active: true,
+            notes: 'Administrador registrado automáticamente al publicar configuración.',
+          },
+        ]);
+        setPermissionRecords(recordsToSync);
+      }
+    }
+
     const res = await saveUserPermissionAndRegistryToCloud({
-      allRecords: permissionRecords,
+      allRecords: recordsToSync,
       policy: accessPolicy,
     });
     setLastPermSyncIso(res.updatedAtIso);
     setHasPendingPermSync(false);
 
-    // Publish Intercompany company catalog and all 5 standalone module company DBs
-    await syncDirectoryToCloud(
-      'internacionales',
-      workspacesRef.current.internacionales.entities
-    );
+    // Publish all 3 Intercompany company catalogs (Internacionales, Nacionales, Anitox)
+    for (const scope of INTERCOMPANY_SCOPES) {
+      await syncDirectoryToCloud(scope, workspacesRef.current[scope].entities, true);
+    }
+
+    // Publish all 5 standalone module company DBs
     for (const modId of STANDALONE_COMPANY_DB_MODULES) {
       await handleSaveModuleCompanies(modId, standaloneModuleCompaniesRef.current[modId]);
     }
+  };
+
+  const handleSaveIntercompanyScopeCompanies = async (
+    targetScope: ReconciliationScope,
+    nextCompanies: ModuleCompanyEntry[]
+  ) => {
+    if (!realIsAdmin) {
+      throw new Error(
+        'Solo los administradores pueden modificar las bases de datos de sociedades.'
+      );
+    }
+    const mergedEntities = mergeModuleCompanyEntriesToEntities(
+      nextCompanies,
+      workspacesRef.current[targetScope].entities
+    );
+    workspacesRef.current = {
+      ...workspacesRef.current,
+      [targetScope]: {
+        ...workspacesRef.current[targetScope],
+        entities: mergedEntities,
+      },
+    };
+    updateScopeWorkspace(
+      targetScope,
+      (prev) => ({
+        ...prev,
+        entities: mergedEntities,
+      }),
+      false
+    );
+    await syncDirectoryToCloud(targetScope, mergedEntities, true);
   };
 
   const handleSaveModuleCompanies = async (
@@ -650,26 +773,7 @@ export default function App() {
     }
 
     if (moduleId === 'intercompany') {
-      const mergedEntities = mergeModuleCompanyEntriesToEntities(
-        nextCompanies,
-        workspacesRef.current.internacionales.entities
-      );
-      workspacesRef.current = {
-        ...workspacesRef.current,
-        internacionales: {
-          ...workspacesRef.current.internacionales,
-          entities: mergedEntities,
-        },
-      };
-      updateScopeWorkspace(
-        'internacionales',
-        (prev) => ({
-          ...prev,
-          entities: mergedEntities,
-        }),
-        false
-      );
-      await syncDirectoryToCloud('internacionales', mergedEntities);
+      await handleSaveIntercompanyScopeCompanies(activeScope, nextCompanies);
       return;
     }
 
@@ -759,16 +863,24 @@ export default function App() {
     });
   };
 
-  // Single Anitox workspace state (uses 'internacionales' storage & Firestore path under the hood)
+  // Three independent Intercompany scopes: Internacionales, Nacionales, and Anitox
   const [workspaces, setWorkspaces] = useState<Record<ReconciliationScope, ScopeWorkspaceState>>(() => {
-    const anitoxWs = loadInitialWorkspace(
+    const intlWs = loadInitialWorkspace(
       'internacionales',
-      initialLaunch.docIdFromUrl
+      initialLaunch.scope === 'internacionales' ? initialLaunch.docIdFromUrl : null
     );
-    const nacPlaceholder = loadInitialWorkspace('nacionales', null);
+    const nacWs = loadInitialWorkspace(
+      'nacionales',
+      initialLaunch.scope === 'nacionales' ? initialLaunch.docIdFromUrl : null
+    );
+    const anitoxWs = loadInitialWorkspace(
+      'anitox',
+      initialLaunch.scope === 'anitox' ? initialLaunch.docIdFromUrl : null
+    );
     return {
-      internacionales: anitoxWs,
-      nacionales: nacPlaceholder,
+      internacionales: intlWs,
+      nacionales: nacWs,
+      anitox: anitoxWs,
     };
   });
 
@@ -778,18 +890,22 @@ export default function App() {
   const hasUnsavedRef = useRef<Record<ReconciliationScope, boolean>>({
     internacionales: false,
     nacionales: false,
+    anitox: false,
   });
   const isHydratingRef = useRef<Record<ReconciliationScope, boolean>>({
     internacionales: false,
     nacionales: false,
+    anitox: false,
   });
   const hasIndependentDirectoryRef = useRef<Record<ReconciliationScope, boolean>>({
     internacionales: false,
     nacionales: false,
+    anitox: false,
   });
   const pendingDirectorySyncRef = useRef<Record<ReconciliationScope, boolean>>({
     internacionales: readPendingDirSync('internacionales'),
     nacionales: readPendingDirSync('nacionales'),
+    anitox: readPendingDirSync('anitox'),
   });
 
   const [directorySyncStatus, setDirectorySyncStatus] = useState<
@@ -800,6 +916,9 @@ export default function App() {
     },
     nacionales: {
       status: readPendingDirSync('nacionales') ? 'pending' : 'idle',
+    },
+    anitox: {
+      status: readPendingDirSync('anitox') ? 'pending' : 'idle',
     },
   });
 
@@ -825,20 +944,22 @@ export default function App() {
     }
   }, [activeScope]);
 
-  // Persist Anitox workspace to localStorage
+  // Persist all 3 Intercompany scopes (Internacionales, Nacionales, Anitox) to localStorage
   useEffect(() => {
-    const ws = workspaces.internacionales;
-    const keys = STORAGE_KEYS_BY_SCOPE.internacionales;
-    try {
-      localStorage.setItem(keys.MOVEMENTS, JSON.stringify(ws.movements));
-      localStorage.setItem(keys.ENTITIES, JSON.stringify(ws.entities));
-      localStorage.setItem(keys.COMMENTS, JSON.stringify(ws.comments));
-      localStorage.setItem(keys.CLOSED_MONTHS, JSON.stringify(ws.closedMonths));
-      localStorage.setItem(keys.DOC_ID, ws.docId);
-    } catch (e) {
-      console.warn('Failed to save Anitox workspace:', e);
-    }
-  }, [workspaces.internacionales]);
+    INTERCOMPANY_SCOPES.forEach((scope) => {
+      const ws = workspaces[scope];
+      const keys = STORAGE_KEYS_BY_SCOPE[scope];
+      try {
+        localStorage.setItem(keys.MOVEMENTS, JSON.stringify(ws.movements));
+        localStorage.setItem(keys.ENTITIES, JSON.stringify(ws.entities));
+        localStorage.setItem(keys.COMMENTS, JSON.stringify(ws.comments));
+        localStorage.setItem(keys.CLOSED_MONTHS, JSON.stringify(ws.closedMonths));
+        localStorage.setItem(keys.DOC_ID, ws.docId);
+      } catch (e) {
+        console.warn(`Failed to save ${scope} workspace:`, e);
+      }
+    });
+  }, [workspaces.internacionales, workspaces.nacionales, workspaces.anitox]);
 
   // Persist Bank Reconciliation workspace to localStorage
   useEffect(() => {
@@ -860,8 +981,9 @@ export default function App() {
     }
   }, [bankWorkspace]);
 
-  // Subscribe to Bank Reconciliation cloud document (/bank_reconciliations/{docId})
+  // Subscribe to Bank Reconciliation cloud document ONLY when authenticated & authorized for Bancos
   useEffect(() => {
+    if (!canLoadCloudData || !canAccessBancos) return;
     const unsubscribe = subscribeToBankReconciliation(
       bankWorkspace.docId,
       (savedDoc) => {
@@ -890,7 +1012,7 @@ export default function App() {
     return () => {
       unsubscribe();
     };
-  }, [bankWorkspace.docId]);
+  }, [bankWorkspace.docId, canLoadCloudData, canAccessBancos]);
 
   // Persist Viáticos workspace to localStorage
   useEffect(() => {
@@ -913,9 +1035,9 @@ export default function App() {
     }
   }, [viaticosWorkspace]);
 
-  // Subscribe to Viáticos cloud document ONLY when authenticated & authorized (PII-isolated rule)
+  // Subscribe to Viáticos cloud document ONLY when authenticated & authorized (primitive deps prevent duplicate Target IDs)
   useEffect(() => {
-    if (!currentUser?.emailVerified || !effectivePermissions.canAccessModule('viaticos')) {
+    if (!canLoadCloudData || !canAccessViaticos) {
       return;
     }
     const unsubscribe = subscribeToViaticosWorkspace(
@@ -947,11 +1069,7 @@ export default function App() {
     return () => {
       unsubscribe();
     };
-  }, [
-    viaticosWorkspace.docId,
-    currentUser?.emailVerified,
-    effectivePermissions,
-  ]);
+  }, [viaticosWorkspace.docId, canLoadCloudData, canAccessViaticos]);
 
   // Persist RBAC permissions & policy locally
   useEffect(() => {
@@ -965,25 +1083,60 @@ export default function App() {
 
   // Subscribe to signed-in user's own permission record & global non-PII access policy
   useEffect(() => {
-    if (!currentUser?.email) {
+    if (!currentUser?.uid || !currentUser?.email || !currentUser?.emailVerified) {
       setOwnPermissionDoc(null);
+      setOwnPermState('idle');
+      setPolicyLoaded(false);
       return;
     }
-    const unsubOwn = subscribeToOwnUserPermission(currentUser.email, (rec) => {
-      setOwnPermissionDoc(rec);
-    });
-    const unsubPolicy = subscribeToAccessPolicy((pol) => {
-      setAccessPolicy(pol);
-    });
+
+    let isActive = true;
+    setOwnPermissionDoc(null);
+    setOwnPermState('loading');
+    setPolicyLoaded(false);
+
+    // Safety fallback so slow/offline networks never keep the user stuck on the loading gate
+    const fallbackTimer = setTimeout(() => {
+      if (!isActive) return;
+      setOwnPermState((prev) => (prev === 'loading' ? 'fallback' : prev));
+      setPolicyLoaded(true);
+    }, 4500);
+
+    const unsubOwn = subscribeToOwnUserPermission(
+      currentUser.email,
+      (rec) => {
+        if (!isActive) return;
+        setOwnPermissionDoc(rec);
+      },
+      (fromCloud) => {
+        if (!isActive) return;
+        setOwnPermState((prev) =>
+          prev === 'cloud' ? 'cloud' : fromCloud ? 'cloud' : 'fallback'
+        );
+      }
+    );
+    const unsubPolicy = subscribeToAccessPolicy(
+      (pol) => {
+        if (!isActive) return;
+        setAccessPolicy(pol);
+      },
+      () => {
+        if (!isActive) return;
+        setPolicyLoaded(true);
+      }
+    );
+
     return () => {
+      isActive = false;
+      clearTimeout(fallbackTimer);
       unsubOwn();
       unsubPolicy();
     };
-  }, [currentUser?.email]);
+  }, [currentUser?.uid, currentUser?.email, currentUser?.emailVerified]);
 
   // Subscribe to consolidated admin RBAC directory ONLY for verified Admins
   useEffect(() => {
-    if (!currentUser?.emailVerified || !realIsAdmin) return;
+    if (!isVerifiedUser || !permissionsResolved || !realIsAdmin) return;
     const unsubAdmin = subscribeToAdminAccessRegistry((cloudRecords) => {
       if (cloudRecords.length > 0) {
         setPermissionRecords(ensureSuperAdminRecord(cloudRecords));
@@ -991,7 +1144,7 @@ export default function App() {
       }
     });
     return () => unsubAdmin();
-  }, [currentUser?.emailVerified, realIsAdmin]);
+  }, [isVerifiedUser, permissionsResolved, realIsAdmin]);
 
   // Persist independent per-module company databases locally
   useEffect(() => {
@@ -1005,9 +1158,9 @@ export default function App() {
     }
   }, [standaloneModuleCompanies]);
 
-  // Subscribe to independent per-module company DBs in Firestore ONLY when verified (matches firestore.rules)
+  // Subscribe to independent per-module company DBs in Firestore ONLY when verified & authorized
   useEffect(() => {
-    if (!currentUser?.emailVerified) return;
+    if (!canLoadCloudData) return;
     const unsubscribers = STANDALONE_COMPANY_DB_MODULES.map((modId) =>
       subscribeToModuleCompanyDirectory(
         modId,
@@ -1035,11 +1188,11 @@ export default function App() {
     return () => {
       unsubscribers.forEach((fn) => fn());
     };
-  }, [currentUser?.emailVerified]);
+  }, [canLoadCloudData]);
 
   // Flush any pending local standalone module company DB changes once verified Admin signs in
   useEffect(() => {
-    if (!currentUser?.emailVerified || !realIsAdmin) return;
+    if (!isVerifiedUser || !permissionsResolved || !realIsAdmin) return;
     STANDALONE_COMPANY_DB_MODULES.forEach((modId) => {
       if (pendingStandaloneDbSyncRef.current[modId]) {
         void handleSaveModuleCompanies(
@@ -1050,7 +1203,7 @@ export default function App() {
         });
       }
     });
-  }, [currentUser?.emailVerified, realIsAdmin]);
+  }, [isVerifiedUser, permissionsResolved, realIsAdmin]);
 
   // Clear preview if signed-in account is not an Admin
   useEffect(() => {
@@ -1059,12 +1212,17 @@ export default function App() {
     }
   }, [currentUser, realIsAdmin, previewEmail]);
 
-  // Enforce module & tab access guards automatically
+  // Enforce module & tab access guards automatically AFTER auth & permissions resolve
+  // (preserves incoming deep links such as ?m=bancos during sign-in, and redirects if unauthorized)
   useEffect(() => {
+    if (!authReady || !canLoadCloudData) return;
     if (activeModule !== 'launcher' && !effectivePermissions.canAccessModule(activeModule)) {
       setActiveModule('launcher');
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
     }
-  }, [activeModule, effectivePermissions]);
+  }, [authReady, canLoadCloudData, activeModule, effectivePermissions]);
 
   useEffect(() => {
     if (effectivePermissions.isReadOnly && activeTab === 'carga') {
@@ -1122,14 +1280,17 @@ export default function App() {
   useEffect(() => {
     hasUnsavedRef.current.internacionales = workspaces.internacionales.hasUnsavedChanges;
     hasUnsavedRef.current.nacionales = workspaces.nacionales.hasUnsavedChanges;
+    hasUnsavedRef.current.anitox = workspaces.anitox.hasUnsavedChanges;
   }, [
     workspaces.internacionales.hasUnsavedChanges,
     workspaces.nacionales.hasUnsavedChanges,
+    workspaces.anitox.hasUnsavedChanges,
   ]);
 
   const syncDirectoryToCloud = async (
     targetScope: ReconciliationScope,
-    nextEntities: EntityMapping[]
+    nextEntities: EntityMapping[],
+    throwOnError = false
   ) => {
     if (!auth.currentUser) {
       pendingDirectorySyncRef.current[targetScope] = true;
@@ -1181,116 +1342,145 @@ export default function App() {
             err?.message || 'No se pudieron guardar las empresas en la nube.',
         },
       }));
+      if (throwOnError) {
+        throw err;
+      }
     }
   };
 
-  // Auth listener & Firestore connection check
+  // Auth listener (resolves session state before any UI or Firestore reads)
   useEffect(() => {
-    testFirestoreConnection();
     const unsubscribe = initAuth((user, token) => {
       setCurrentUser(user);
       setAccessToken(token);
+      setAuthReady(true);
+      if (user && user.emailVerified) {
+        void testFirestoreConnection();
+      }
     });
     return () => {
       if (unsubscribe) unsubscribe();
     };
   }, []);
 
-  // Flush any pending local company directory changes as soon as user signs in
+  // Flush any pending local company directory changes for all 3 Intercompany scopes on verified authorized sign-in
   useEffect(() => {
-    if (!currentUser) return;
-    if (pendingDirectorySyncRef.current.internacionales) {
-      void syncDirectoryToCloud('internacionales', workspacesRef.current.internacionales.entities);
-    }
-  }, [currentUser]);
-
-  // Subscribe independently to Master Company Directory (/company_directories/internacionales)
-  useEffect(() => {
-    const targetScope: ReconciliationScope = 'internacionales';
-    const unsub = subscribeToCompanyDirectory(
-      targetScope,
-      (savedDir) => {
-        if (!savedDir) return;
-        hasIndependentDirectoryRef.current[targetScope] = true;
-        if (pendingDirectorySyncRef.current[targetScope]) return;
-
-        setWorkspaces((prev) => ({
-          ...prev,
-          [targetScope]: {
-            ...prev[targetScope],
-            entities: savedDir.entities,
-          },
-        }));
-        setDirectorySyncStatus((prev) => ({
-          ...prev,
-          [targetScope]: {
-            status: 'saved',
-            lastSyncedAtIso: savedDir.updatedAtIso,
-            updatedByName: savedDir.updatedByName,
-          },
-        }));
-      },
-      (err) => {
-        console.warn('Error loading company directory (Anitox):', err);
+    if (!canLoadCloudData || !effectivePermissions.canManageMasterData) return;
+    INTERCOMPANY_SCOPES.forEach((scope) => {
+      if (pendingDirectorySyncRef.current[scope]) {
+        void syncDirectoryToCloud(scope, workspacesRef.current[scope].entities);
       }
-    );
+    });
+  }, [canLoadCloudData, effectivePermissions.canManageMasterData]);
 
-    return () => {
-      unsub();
-    };
-  }, []);
-
-  // Subscribe independently to Internacionales and Nacionales cloud documents
+  // Subscribe independently to all 3 Master Company Directories ONLY when verified & authorized
   useEffect(() => {
-    const targetScope: ReconciliationScope = 'internacionales';
-    const targetDocId = workspaces.internacionales.docId;
+    if (!canLoadCloudData || (!canAccessIntercompany && !realIsAdmin)) return;
+    const unsubscribers = INTERCOMPANY_SCOPES.map((targetScope) =>
+      subscribeToCompanyDirectory(
+        targetScope,
+        (savedDir) => {
+          if (!savedDir) return;
+          hasIndependentDirectoryRef.current[targetScope] = true;
+          if (pendingDirectorySyncRef.current[targetScope]) return;
 
-    const unsubscribe = subscribeToReconciliation(
-      targetDocId,
-      (savedDoc) => {
-        if (!savedDoc) return;
-        if (hasUnsavedRef.current[targetScope]) return;
-
-        isHydratingRef.current[targetScope] = true;
-        const preserveEntities =
-          hasIndependentDirectoryRef.current[targetScope] ||
-          pendingDirectorySyncRef.current[targetScope];
-
-        setWorkspaces((prev) => {
-          const cur = prev[targetScope];
-          const mergedClosed =
-            savedDoc.closedMonths && typeof savedDoc.closedMonths === 'object'
-              ? { ...cur.closedMonths, ...savedDoc.closedMonths }
-              : cur.closedMonths;
-
-          return {
+          setWorkspaces((prev) => ({
             ...prev,
             [targetScope]: {
-              ...cur,
-              entities: preserveEntities ? cur.entities : savedDoc.entities,
-              movements: savedDoc.movements,
-              comments: savedDoc.comments,
-              closedMonths: mergedClosed,
-              selectedMonth: savedDoc.selectedMonth || cur.selectedMonth,
-              docTitle: savedDoc.title,
-              lastSavedAtIso: savedDoc.updatedAtIso || new Date().toISOString(),
-              hasUnsavedChanges: false,
+              ...prev[targetScope],
+              entities:
+                savedDir.entities.length > 0 ? savedDir.entities : prev[targetScope].entities,
             },
-          };
-        });
-        setTimeout(() => {
-          isHydratingRef.current[targetScope] = false;
-        }, 0);
-      },
-      (err) => {
-        console.warn('Error loading cloud reconciliation (Anitox):', err);
-      }
+          }));
+          setDirectorySyncStatus((prev) => ({
+            ...prev,
+            [targetScope]: {
+              status: 'saved',
+              lastSyncedAtIso: savedDir.updatedAtIso,
+              updatedByName: savedDir.updatedByName,
+            },
+          }));
+        },
+        (err) => {
+          console.warn(
+            `Error loading company directory (${getIntercompanyScopeLabel(targetScope)}):`,
+            err
+          );
+        }
+      )
     );
 
     return () => {
-      unsubscribe();
+      unsubscribers.forEach((unsub) => unsub());
     };
-  }, [workspaces.internacionales.docId]);
+  }, [canLoadCloudData, canAccessIntercompany, realIsAdmin]);
+
+  // Subscribe independently to Internacionales, Nacionales, and Anitox cloud reconciliation documents ONLY when authorized
+  useEffect(() => {
+    if (!canLoadCloudData || !canAccessIntercompany) return;
+    const scopesToWatch: { scope: ReconciliationScope; docId: string }[] = [
+      { scope: 'internacionales', docId: workspaces.internacionales.docId },
+      { scope: 'nacionales', docId: workspaces.nacionales.docId },
+      { scope: 'anitox', docId: workspaces.anitox.docId },
+    ];
+
+    const unsubscribers = scopesToWatch.map(({ scope: targetScope, docId: targetDocId }) =>
+      subscribeToReconciliation(
+        targetDocId,
+        (savedDoc) => {
+          if (!savedDoc) return;
+          if (hasUnsavedRef.current[targetScope]) return;
+
+          isHydratingRef.current[targetScope] = true;
+          const preserveEntities =
+            hasIndependentDirectoryRef.current[targetScope] ||
+            pendingDirectorySyncRef.current[targetScope];
+
+          setWorkspaces((prev) => {
+            const cur = prev[targetScope];
+            const mergedClosed =
+              savedDoc.closedMonths && typeof savedDoc.closedMonths === 'object'
+                ? { ...cur.closedMonths, ...savedDoc.closedMonths }
+                : cur.closedMonths;
+
+            return {
+              ...prev,
+              [targetScope]: {
+                ...cur,
+                entities: preserveEntities ? cur.entities : savedDoc.entities,
+                movements: savedDoc.movements,
+                comments: savedDoc.comments,
+                closedMonths: mergedClosed,
+                selectedMonth: savedDoc.selectedMonth || cur.selectedMonth,
+                docTitle: savedDoc.title,
+                lastSavedAtIso: savedDoc.updatedAtIso || new Date().toISOString(),
+                hasUnsavedChanges: false,
+              },
+            };
+          });
+          setTimeout(() => {
+            isHydratingRef.current[targetScope] = false;
+          }, 0);
+        },
+        (err) => {
+          console.warn(
+            `Error loading cloud reconciliation (${getIntercompanyScopeLabel(targetScope)}):`,
+            err
+          );
+        }
+      )
+    );
+
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
+  }, [
+    canLoadCloudData,
+    canAccessIntercompany,
+    workspaces.internacionales.docId,
+    workspaces.nacionales.docId,
+    workspaces.anitox.docId,
+  ]);
 
   const updateScopeWorkspace = (
     scope: ReconciliationScope,
@@ -1312,26 +1502,67 @@ export default function App() {
     });
   };
 
-  const handleChangeScope = (_nextScope: ReconciliationScope) => {
-    // Single reconciliation mode (Anitox)
+  const handleChangeScope = (nextScope: ReconciliationScope) => {
+    setActiveScope(nextScope);
+    setMovimientosPreset(null);
+    if (typeof window !== 'undefined' && activeModule === 'intercompany') {
+      const nextUrl =
+        nextScope === 'internacionales'
+          ? `${window.location.pathname}?m=intercompany`
+          : `${window.location.pathname}?m=intercompany&s=${nextScope}`;
+      window.history.replaceState(null, '', nextUrl);
+    }
   };
 
   const handleSignInWithGoogle = async () => {
-    const res = await googleSignIn();
-    if (res) {
-      setCurrentUser(res.user);
-      setAccessToken(res.accessToken);
+    setIsSigningIn(true);
+    setAuthError(null);
+    try {
+      const res = await googleSignIn();
+      if (res) {
+        setCurrentUser(res.user);
+        setAccessToken(res.accessToken);
+      }
+      return res;
+    } catch (err: any) {
+      const code = String(err?.code || '');
+      let message =
+        'No se pudo completar el inicio de sesión con Google. Inténtalo nuevamente.';
+      if (code === 'auth/popup-blocked') {
+        message =
+          'El navegador bloqueó la ventana emergente de Google. Permite las ventanas emergentes para este sitio e inténtalo de nuevo.';
+      } else if (code === 'auth/unauthorized-domain') {
+        message =
+          'Este dominio aún no está autorizado en Firebase Authentication (Authorized domains). Contacta al administrador.';
+      } else if (code === 'auth/network-request-failed') {
+        message =
+          'Error de red al conectar con Google. Verifica tu conexión a internet e inténtalo nuevamente.';
+      } else if (err?.message) {
+        message = `Error al iniciar sesión con Google: ${err.message}`;
+      }
+      setAuthError(message);
+      return null;
+    } finally {
+      setIsSigningIn(false);
     }
-    return res;
   };
 
   const handleSignOut = async () => {
     try {
+      // Unsubscribe every active Firestore listener BEFORE revoking Firebase auth state
+      unsubscribeAllFirestoreListeners();
       await logout();
       setCurrentUser(null);
       setAccessToken(null);
       setOwnPermissionDoc(null);
+      setOwnPermState('idle');
+      setPolicyLoaded(false);
       setPreviewEmail(null);
+      setAuthError(null);
+      setActiveModule('launcher');
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
     } catch (err: any) {
       console.error('Sign out error:', err);
     }
@@ -1367,7 +1598,9 @@ export default function App() {
     }));
 
     if (typeof window !== 'undefined' && scopeAtSave === activeScope) {
-      const nextUrl = `${window.location.pathname}?c=${encodeURIComponent(result.id)}`;
+      const scopeQuery =
+        scopeAtSave === 'internacionales' ? '' : `s=${scopeAtSave}&`;
+      const nextUrl = `${window.location.pathname}?${scopeQuery}c=${encodeURIComponent(result.id)}`;
       window.history.replaceState(null, '', nextUrl);
     }
 
@@ -1385,7 +1618,7 @@ export default function App() {
     }
     const scopeAtClose = targetScope;
     const ws = workspaces[scopeAtClose];
-    const scopeLabel = 'Anitox';
+    const scopeLabel = getIntercompanyScopeLabel(scopeAtClose);
 
     const monthMovements = ws.movements.filter(
       (m) => (m.mes || 'Septiembre 2026') === monthToClose
@@ -1418,7 +1651,9 @@ export default function App() {
     }));
 
     if (typeof window !== 'undefined' && scopeAtClose === activeScope) {
-      const nextUrl = `${window.location.pathname}?c=${encodeURIComponent(saveResult.id)}`;
+      const scopeQuery =
+        scopeAtClose === 'internacionales' ? '' : `s=${scopeAtClose}&`;
+      const nextUrl = `${window.location.pathname}?${scopeQuery}c=${encodeURIComponent(saveResult.id)}`;
       window.history.replaceState(null, '', nextUrl);
     }
 
@@ -1428,11 +1663,33 @@ export default function App() {
     };
   };
 
+  // Independent company databases per Intercompany scope (Internacionales, Nacionales, Anitox)
+  const intercompanyScopeCompanies = useMemo<Record<ReconciliationScope, ModuleCompanyEntry[]>>(
+    () => ({
+      internacionales: entityMappingsToModuleCompanies(workspaces.internacionales.entities),
+      nacionales: entityMappingsToModuleCompanies(workspaces.nacionales.entities),
+      anitox: entityMappingsToModuleCompanies(workspaces.anitox.entities),
+    }),
+    [
+      workspaces.internacionales.entities,
+      workspaces.nacionales.entities,
+      workspaces.anitox.entities,
+    ]
+  );
+
   // Independent company databases for each of the 6 functional modules
   const moduleCompanyDatabases = useMemo<ModuleCompaniesMap>(() => {
-    const intercompanyList = entityMappingsToModuleCompanies(
-      workspaces.internacionales.entities
-    );
+    const mergedIntercompany: ModuleCompanyEntry[] = [];
+    const seenIc = new Set<string>();
+    INTERCOMPANY_SCOPES.forEach((scope) => {
+      intercompanyScopeCompanies[scope].forEach((entry) => {
+        const key = normalizeCompanyKey(entry.nombre);
+        if (!key || seenIc.has(key)) return;
+        seenIc.add(key);
+        mergedIntercompany.push(entry);
+      });
+    });
+
     const bancosList = mergeRuntimeSocietyNames(
       standaloneModuleCompanies.bancos,
       bankWorkspace.accounts.map((a) => ({
@@ -1452,7 +1709,7 @@ export default function App() {
     );
 
     return {
-      intercompany: intercompanyList,
+      intercompany: mergedIntercompany,
       bancos: bancosList,
       viaticos: viaticosList,
       anticipos: standaloneModuleCompanies.anticipos,
@@ -1460,24 +1717,30 @@ export default function App() {
       cxp: standaloneModuleCompanies.cxp,
     };
   }, [
-    workspaces.internacionales.entities,
+    intercompanyScopeCompanies,
     standaloneModuleCompanies,
     bankWorkspace.accounts,
     viaticosWorkspace.consultores,
     viaticosWorkspace.liquidaciones,
   ]);
 
-  const moduleDbSyncStatus = useMemo<Record<FunctionalModuleId, ModuleDbSyncState>>(
-    () => ({
-      intercompany: directorySyncStatus.internacionales,
+  const moduleDbSyncStatus = useMemo<Record<FunctionalModuleId, ModuleDbSyncState>>(() => {
+    const scopeStatuses = INTERCOMPANY_SCOPES.map((s) => directorySyncStatus[s]);
+    const aggregateIntercompanySync: ModuleDbSyncState =
+      scopeStatuses.find((s) => s.status === 'error') ||
+      scopeStatuses.find((s) => s.status === 'saving') ||
+      scopeStatuses.find((s) => s.status === 'pending') ||
+      scopeStatuses.find((s) => s.status === 'saved') || { status: 'idle' };
+
+    return {
+      intercompany: aggregateIntercompanySync,
       bancos: standaloneDbSyncStatus.bancos,
       viaticos: standaloneDbSyncStatus.viaticos,
       anticipos: standaloneDbSyncStatus.anticipos,
       cxc: standaloneDbSyncStatus.cxc,
       cxp: standaloneDbSyncStatus.cxp,
-    }),
-    [directorySyncStatus.internacionales, standaloneDbSyncStatus]
-  );
+    };
+  }, [directorySyncStatus, standaloneDbSyncStatus]);
 
   // Apply non-destructive cross-module company scoping based on effectivePermissions
   const scopedIntercompany = useMemo(
@@ -1681,8 +1944,8 @@ export default function App() {
   const handleAddMissingEntities = (names: string[]) => {
     if (!effectivePermissions.canManageMasterData) return;
     const scopeAtAdd = activeScope;
-    const defaultCountry = 'Global';
-    const defaultCurrency = 'USD';
+    const defaultCountry = INTERCOMPANY_SCOPE_META[scopeAtAdd].defaultCountry;
+    const defaultCurrency = INTERCOMPANY_SCOPE_META[scopeAtAdd].defaultCurrency;
     const prevEntities = workspacesRef.current[scopeAtAdd].entities;
 
     const existing = new Set(prevEntities.map((e) => e.nombreOficial.trim().toLowerCase()));
@@ -1807,10 +2070,11 @@ export default function App() {
     return {
       internacionales: buildInfo(workspaces.internacionales),
       nacionales: buildInfo(workspaces.nacionales),
+      anitox: buildInfo(workspaces.anitox),
     };
-  }, [workspaces.internacionales, workspaces.nacionales]);
+  }, [workspaces.internacionales, workspaces.nacionales, workspaces.anitox]);
 
-  const scopeSummary = {
+  const scopeSummary: Record<ReconciliationScope, { entities: number; movements: number }> = {
     internacionales: {
       entities: workspaces.internacionales.entities.length,
       movements: workspaces.internacionales.movements.length,
@@ -1818,6 +2082,10 @@ export default function App() {
     nacionales: {
       entities: workspaces.nacionales.entities.length,
       movements: workspaces.nacionales.movements.length,
+    },
+    anitox: {
+      entities: workspaces.anitox.entities.length,
+      movements: workspaces.anitox.movements.length,
     },
   };
 
@@ -1934,7 +2202,68 @@ export default function App() {
     </div>
   ) : null;
 
-  // 0. Access Denied Gate (Strict Mode unregistered user or suspended user)
+  // 0A. Mandatory Google Sign-In & Session Verification Gate (zero module visibility before auth + permissions)
+  if (!authReady) {
+    return (
+      <LoginGateView
+        mode="checking_session"
+        currentUser={null}
+        isSigningIn={false}
+        authError={null}
+        onSignInWithGoogle={() => {
+          void handleSignInWithGoogle();
+        }}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <LoginGateView
+        mode="sign_in"
+        currentUser={null}
+        isSigningIn={isSigningIn}
+        authError={authError}
+        onSignInWithGoogle={() => {
+          void handleSignInWithGoogle();
+        }}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  if (!currentUser.emailVerified) {
+    return (
+      <LoginGateView
+        mode="unverified_email"
+        currentUser={currentUser}
+        isSigningIn={false}
+        authError={null}
+        onSignInWithGoogle={() => {
+          void handleSignInWithGoogle();
+        }}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  if (!permissionsResolved) {
+    return (
+      <LoginGateView
+        mode="loading_permissions"
+        currentUser={currentUser}
+        isSigningIn={false}
+        authError={null}
+        onSignInWithGoogle={() => {
+          void handleSignInWithGoogle();
+        }}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  // 0B. Access Denied Gate (Strict Mode unregistered user or suspended user)
   if (!effectivePermissions.isAuthorized) {
     return (
       <div className="min-h-screen bg-[#F5F8FC] flex flex-col font-sans text-slate-800 antialiased">
@@ -1988,8 +2317,11 @@ export default function App() {
     );
   }
 
-  // 1. Modular Premex Suite Launcher Hub
-  if (activeModule === 'launcher') {
+  // 1. Modular Premex Suite Launcher Hub (also immediately catches any unauthorized deep-linked module)
+  if (
+    activeModule === 'launcher' ||
+    !effectivePermissions.canAccessModule(activeModule)
+  ) {
     return (
       <div className="min-h-screen flex flex-col">
         {previewBanner}
@@ -1998,9 +2330,7 @@ export default function App() {
             onOpenModule={handleSwitchModule}
             currentUser={currentUser}
             onSignInWithGoogle={() => {
-              handleSignInWithGoogle().catch((err) => {
-                console.error('Google sign in failed:', err);
-              });
+              void handleSignInWithGoogle();
             }}
             onSignOut={handleSignOut}
             metrics={launcherMetrics}
@@ -2022,6 +2352,9 @@ export default function App() {
             policy={accessPolicy}
             moduleCompanyDatabases={moduleCompanyDatabases}
             moduleDbSyncStatus={moduleDbSyncStatus}
+            intercompanyScopeCompanies={intercompanyScopeCompanies}
+            intercompanyScopeSyncStatus={directorySyncStatus}
+            onSaveIntercompanyScopeCompanies={handleSaveIntercompanyScopeCompanies}
             currentUser={currentUser}
             onSignInWithGoogle={() => {
               handleSignInWithGoogle().catch((err) => {
@@ -2096,7 +2429,7 @@ export default function App() {
     );
   }
 
-  // 5. Conciliación Intercompany Module (Anitox Workspace with RBAC & Company Scoping)
+  // 5. Conciliación Intercompany Module (Internacionales, Nacionales y Anitox with RBAC & Company Scoping)
   return (
     <div className="min-h-screen bg-[#F5F8FC] flex flex-col font-sans text-slate-800 antialiased selection:bg-[#1E60A8] selection:text-white">
       {previewBanner}
@@ -2104,6 +2437,9 @@ export default function App() {
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        activeScope={activeScope}
+        onChangeScope={handleChangeScope}
+        scopeSummary={scopeSummary}
         isOpenMobile={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
         differencesCount={differencesCount}
@@ -2118,6 +2454,7 @@ export default function App() {
         {/* Sticky Header */}
         <Header
           activeTab={activeTab}
+          activeScope={activeScope}
           onToggleMobileMenu={() => setIsMobileMenuOpen(true)}
           currentUser={currentUser}
           onSignInWithGoogle={() => {
@@ -2182,8 +2519,11 @@ export default function App() {
                   />
                   {effectivePermissions.canOperate && hasUnsavedChanges ? (
                     <span className="truncate">
-                      <strong>Cambios locales sin guardar (Anitox):</strong> Presiona{' '}
-                      <strong>Guardar Conciliación</strong> para actualizar el enlace compartido.
+                      <strong>
+                        Cambios locales sin guardar ({getIntercompanyScopeLabel(activeScope)}):
+                      </strong>{' '}
+                      Presiona <strong>Guardar Conciliación</strong> para actualizar el enlace
+                      compartido.
                     </span>
                   ) : (
                     <span className="truncate">

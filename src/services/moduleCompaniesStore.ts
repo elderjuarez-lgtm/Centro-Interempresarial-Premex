@@ -4,11 +4,18 @@ import {
   setDoc,
   updateDoc,
   onSnapshot,
-  enableNetwork,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
-import { auth, db, activeFirebaseInfo } from './auth';
+import {
+  auth,
+  db,
+  activeFirebaseInfo,
+  registerFirestoreListener,
+  withFirestoreTimeout,
+  fetchWithTimeout,
+  isRecoverableFirestoreSdkError,
+} from './auth';
 import { handleFirestoreError, OperationType } from './reconciliationStore';
 import { ModuleCompanyEntry, StandaloneCompanyDbModuleId } from '../types';
 import {
@@ -29,15 +36,7 @@ const VALID_STANDALONE_MODULES = new Set<StandaloneCompanyDbModuleId>(
   STANDALONE_COMPANY_DB_MODULES
 );
 
-const isOfflineError = (err: unknown): boolean => {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return (
-    msg.includes('client is offline') ||
-    msg.includes('unavailable') ||
-    msg.includes('network') ||
-    msg.includes('failed to get document')
-  );
-};
+const isOfflineError = (err: unknown): boolean => isRecoverableFirestoreSdkError(err);
 
 const toFirestoreValue = (val: unknown): unknown => {
   if (val === null || val === undefined) return { nullValue: null };
@@ -97,7 +96,7 @@ const fetchAuthModuleCompaniesViaRest = async (
   const url = `${getRestBaseUrl()}/documents/module_company_directories/${encodeURIComponent(
     moduleId
   )}?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${idToken}` },
   });
   if (!res.ok) return null;
@@ -132,16 +131,18 @@ export const subscribeToModuleCompanyDirectory = (
   }
   const path = `module_company_directories/${moduleId}`;
   const ref = doc(db, 'module_company_directories', moduleId);
+  let isActive = true;
 
   fetchAuthModuleCompaniesViaRest(moduleId)
     .then((parsed) => {
-      if (parsed) onData(parsed);
+      if (isActive && parsed) onData(parsed);
     })
     .catch(() => {});
 
-  return onSnapshot(
+  const rawUnsub = onSnapshot(
     ref,
     (snapshot) => {
+      if (!isActive) return;
       if (!snapshot.exists()) {
         onData(null);
         return;
@@ -163,7 +164,7 @@ export const subscribeToModuleCompanyDirectory = (
       });
     },
     (error) => {
-      if (isOfflineError(error)) return;
+      if (!isActive || isOfflineError(error)) return;
       try {
         handleFirestoreError(error, OperationType.GET, path);
       } catch (wrapped) {
@@ -171,6 +172,11 @@ export const subscribeToModuleCompanyDirectory = (
       }
     }
   );
+
+  return registerFirestoreListener(() => {
+    isActive = false;
+    rawUnsub();
+  });
 };
 
 /**
@@ -191,8 +197,7 @@ export const saveModuleCompanyDirectoryToCloud = async (
     );
   }
 
-  await user.getIdToken().catch(() => {});
-  await enableNetwork(db).catch(() => {});
+  await withFirestoreTimeout(user.getIdToken(), 8000, 'token de autenticación').catch(() => {});
 
   const cleanCompanies = sanitizeModuleCompanyList(companies).map((c) => ({
     id: c.id,
@@ -248,7 +253,7 @@ export const saveModuleCompanyDirectoryToCloud = async (
       };
     }
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${getRestBaseUrl()}/documents:commit?key=${encodeURIComponent(
         activeFirebaseInfo.apiKey
       )}`,
@@ -265,8 +270,9 @@ export const saveModuleCompanyDirectoryToCloud = async (
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
       throw new Error(
-        errBody?.error?.message ||
-          `Error HTTP ${res.status} al guardar base de empresas de ${moduleId}`
+        `Firestore (${path}): ${
+          errBody?.error?.message || `Error HTTP ${res.status}`
+        }`
       );
     }
     return { updatedAtIso: new Date().toISOString() };
@@ -274,25 +280,33 @@ export const saveModuleCompanyDirectoryToCloud = async (
 
   try {
     const ref = doc(db, 'module_company_directories', moduleId);
-    const snap = await getDoc(ref);
+    const snap = await withFirestoreTimeout(getDoc(ref), 8500, `leer ${path}`);
     if (snap.exists()) {
-      await updateDoc(ref, {
-        companies: cleanCompanies,
-        companiesCount: cleanCompanies.length,
-        updatedBy: user.uid,
-        updatedByName,
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        updateDoc(ref, {
+          companies: cleanCompanies,
+          companiesCount: cleanCompanies.length,
+          updatedBy: user.uid,
+          updatedByName,
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        `actualizar ${path}`
+      );
     } else {
-      await setDoc(ref, {
-        moduleId,
-        companies: cleanCompanies,
-        companiesCount: cleanCompanies.length,
-        updatedBy: user.uid,
-        updatedByName,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        setDoc(ref, {
+          moduleId,
+          companies: cleanCompanies,
+          companiesCount: cleanCompanies.length,
+          updatedBy: user.uid,
+          updatedByName,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        `crear ${path}`
+      );
     }
     return { updatedAtIso: new Date().toISOString() };
   } catch (error) {

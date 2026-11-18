@@ -12,13 +12,26 @@ import {
   ArrowLeft,
   X
 } from 'lucide-react';
-import { ActiveModuleId, ActiveTab, EffectivePermissions } from '../types';
+import {
+  ActiveModuleId,
+  ActiveTab,
+  EffectivePermissions,
+  ReconciliationScope,
+} from '../types';
+import {
+  INTERCOMPANY_SCOPES,
+  INTERCOMPANY_SCOPE_META,
+  getIntercompanyScopeLabel,
+} from '../utils/demoData';
 import { IntercompanyModuleLogo, PremexBrandLogo } from './ModuleIcons';
 import { AppSwitcherMenu } from './AppSwitcherMenu';
 
 interface SidebarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
+  activeScope: ReconciliationScope;
+  onChangeScope: (scope: ReconciliationScope) => void;
+  scopeSummary: Record<ReconciliationScope, { entities: number; movements: number }>;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
   differencesCount: number;
@@ -31,6 +44,9 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
+  activeScope,
+  onChangeScope,
+  scopeSummary,
   isOpenMobile,
   onCloseMobile,
   differencesCount,
@@ -147,26 +163,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
               Conciliación Intercompany
             </h1>
             <p className="text-[11px] text-sky-200/80 font-medium truncate">
-              Centro Interempresarial · Anitox
+              Centro Interempresarial · {getIntercompanyScopeLabel(activeScope)}
             </p>
           </div>
         </div>
 
-        {/* Single Active Reconciliation Context (Anitox) */}
-        <div className="px-3.5 py-2.5 mx-3.5 my-3 rounded-xl bg-white/8 border border-white/12">
-          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-sky-200/80">
-            <span>Sociedad / Grupo</span>
-            <span className="text-emerald-300 font-semibold">Activo</span>
+        {/* 3-Scope Intercompany Selector (Internacionales / Nacionales / Anitox) */}
+        <div className="px-3 py-2.5 mx-3 my-3 rounded-xl bg-white/8 border border-white/12 space-y-2">
+          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-sky-200/80 px-0.5">
+            <span className="inline-flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-sky-300 shrink-0" />
+              <span>Ámbito Intercompany</span>
+            </span>
+            <span className="font-mono text-sky-200">
+              {INTERCOMPANY_SCOPE_META[activeScope].defaultCurrency}
+            </span>
           </div>
 
-          <div className="mt-1.5 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <Layers className="w-4 h-4 text-sky-300 shrink-0" />
-              <span className="text-sm font-bold text-white truncate">Anitox</span>
-            </div>
-            <span className="text-[11px] font-mono text-sky-100/90 tabular-nums shrink-0">
-              {entitiesCount} emp. · {movementsCount} mov.
-            </span>
+          <div className="space-y-1">
+            {INTERCOMPANY_SCOPES.map((scope) => {
+              const meta = INTERCOMPANY_SCOPE_META[scope];
+              const isSelected = activeScope === scope;
+              const summary = scopeSummary[scope] || { entities: 0, movements: 0 };
+              return (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => {
+                    onChangeScope(scope);
+                    onCloseMobile();
+                  }}
+                  className={`w-full px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 text-left transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-[#1E60A8] text-white shadow-xs ring-1 ring-sky-300/40'
+                      : 'text-blue-100/85 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <div className="min-w-0 flex items-center gap-2">
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isSelected ? 'bg-emerald-300' : 'bg-blue-300/40'
+                      }`}
+                    />
+                    <span className="text-xs font-bold truncate">{meta.label}</span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-mono tabular-nums shrink-0 ${
+                      isSelected ? 'text-sky-100' : 'text-blue-200/70'
+                    }`}
+                  >
+                    {summary.entities} emp. · {summary.movements} mov.
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 

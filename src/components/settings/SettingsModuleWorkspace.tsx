@@ -38,10 +38,16 @@ import {
   ModuleCompaniesMap,
   ModuleCompanyEntry,
   ModuleCompanyScopeMap,
+  ReconciliationScope,
   SuiteModuleId,
   UserPermissionRecord,
   UserRole,
 } from '../../types';
+import {
+  INTERCOMPANY_SCOPES,
+  INTERCOMPANY_SCOPE_META,
+  getIntercompanyScopeLabel,
+} from '../../utils/demoData';
 import {
   ALL_FUNCTIONAL_MODULES,
   ALL_SUITE_MODULES,
@@ -76,6 +82,12 @@ interface SettingsModuleWorkspaceProps {
   policy: AccessControlPolicy;
   moduleCompanyDatabases: ModuleCompaniesMap;
   moduleDbSyncStatus: Record<FunctionalModuleId, ModuleDbSyncState>;
+  intercompanyScopeCompanies?: Record<ReconciliationScope, ModuleCompanyEntry[]>;
+  intercompanyScopeSyncStatus?: Record<ReconciliationScope, ModuleDbSyncState>;
+  onSaveIntercompanyScopeCompanies?: (
+    scope: ReconciliationScope,
+    companies: ModuleCompanyEntry[]
+  ) => Promise<void>;
   currentUser: User | null;
   onSignInWithGoogle: () => void;
   onSignOut: () => void;
@@ -163,6 +175,41 @@ const ROLE_CAPABILITY_ROWS: {
   },
 ];
 
+const formatCloudError = (err: unknown, fallback: string): string => {
+  const rawMessage =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+      ? err
+      : err && typeof err === 'object' && 'message' in err
+      ? String((err as { message?: unknown }).message || '')
+      : '';
+
+  const trimmed = rawMessage.trim();
+  if (!trimmed) return fallback;
+
+  const jsonStart = trimmed.indexOf('{');
+  const jsonEnd = trimmed.lastIndexOf('}');
+  if (jsonStart !== -1 && jsonEnd > jsonStart) {
+    try {
+      const parsed = JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1)) as {
+        error?: string;
+        operationType?: string;
+        path?: string;
+      };
+      if (parsed && typeof parsed.error === 'string' && parsed.error.trim()) {
+        const location = parsed.path ? ` en "${parsed.path}"` : '';
+        const op = parsed.operationType ? `${parsed.operationType}` : 'operación';
+        return `Error Firestore (${op}${location}): ${parsed.error}`;
+      }
+    } catch {
+      // Keep original message if not structured JSON
+    }
+  }
+
+  return trimmed;
+};
+
 const formatShortDate = (iso?: string | null): string => {
   if (!iso) return 'Sin sincronizar';
   try {
@@ -180,6 +227,9 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
   policy,
   moduleCompanyDatabases,
   moduleDbSyncStatus,
+  intercompanyScopeCompanies,
+  intercompanyScopeSyncStatus,
+  onSaveIntercompanyScopeCompanies,
   currentUser,
   onSignInWithGoogle,
   onSignOut,
@@ -234,6 +284,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
   // Per-Module Company Database Tab State
   const [selectedDbModule, setSelectedDbModule] =
     useState<FunctionalModuleId>('intercompany');
+  const [selectedIntercompanyScope, setSelectedIntercompanyScope] =
+    useState<ReconciliationScope>('internacionales');
   const [dbSearchQuery, setDbSearchQuery] = useState('');
   const [isCompanyFormOpen, setIsCompanyFormOpen] = useState(false);
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
@@ -268,15 +320,21 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     [moduleCompanyDatabases]
   );
 
-  const anyModuleDbPending = useMemo(
-    () =>
-      ALL_FUNCTIONAL_MODULES.some(
-        (m) =>
-          moduleDbSyncStatus[m]?.status === 'pending' ||
-          moduleDbSyncStatus[m]?.status === 'error'
-      ),
-    [moduleDbSyncStatus]
-  );
+  const anyModuleDbPending = useMemo(() => {
+    const hasStandalonePending = ALL_FUNCTIONAL_MODULES.some(
+      (m) =>
+        moduleDbSyncStatus[m]?.status === 'pending' ||
+        moduleDbSyncStatus[m]?.status === 'error'
+    );
+    const hasIntercompanyScopePending = intercompanyScopeSyncStatus
+      ? INTERCOMPANY_SCOPES.some(
+          (sc) =>
+            intercompanyScopeSyncStatus[sc]?.status === 'pending' ||
+            intercompanyScopeSyncStatus[sc]?.status === 'error'
+        )
+      : false;
+    return hasStandalonePending || hasIntercompanyScopePending;
+  }, [moduleDbSyncStatus, intercompanyScopeSyncStatus]);
 
   const filteredRecords = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -350,8 +408,45 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }, [moduleCompanyDatabases, effectiveActiveConfigModule, activeModuleRule.companies, companySearch]);
 
-  // Selected DB module filtered table rows
-  const selectedDbCompanies = moduleCompanyDatabases[selectedDbModule] || [];
+  // Selected DB module filtered table rows (supports 3 independent scopes for Intercompany)
+  const isIntercompanyDbSelected =
+    selectedDbModule === 'intercompany' &&
+    Boolean(intercompanyScopeCompanies && onSaveIntercompanyScopeCompanies);
+
+  const selectedDbMeta = MODULE_COMPANY_DB_META[selectedDbModule];
+  const activeDbDisplayName = isIntercompanyDbSelected
+    ? `Conciliación Intercompany — ${getIntercompanyScopeLabel(selectedIntercompanyScope)}`
+    : selectedDbMeta.name;
+  const activeDbShortName = isIntercompanyDbSelected
+    ? `Intercompany (${getIntercompanyScopeLabel(selectedIntercompanyScope)})`
+    : selectedDbMeta.shortName;
+  const activeDbFirestorePath = isIntercompanyDbSelected
+    ? `company_directories/${selectedIntercompanyScope}`
+    : selectedDbMeta.firestorePath;
+  const activeDbDefaultCurrency = isIntercompanyDbSelected
+    ? INTERCOMPANY_SCOPE_META[selectedIntercompanyScope].defaultCurrency
+    : selectedDbMeta.defaultCurrency;
+  const activeDbDefaultCountry = isIntercompanyDbSelected
+    ? INTERCOMPANY_SCOPE_META[selectedIntercompanyScope].defaultCountry
+    : '';
+
+  const selectedDbCompanies = isIntercompanyDbSelected
+    ? intercompanyScopeCompanies?.[selectedIntercompanyScope] || []
+    : moduleCompanyDatabases[selectedDbModule] || [];
+
+  const selectedDbSync = isIntercompanyDbSelected
+    ? intercompanyScopeSyncStatus?.[selectedIntercompanyScope] ||
+      moduleDbSyncStatus.intercompany || { status: 'idle' }
+    : moduleDbSyncStatus[selectedDbModule] || { status: 'idle' };
+
+  const saveCurrentDbCompanies = async (nextList: ModuleCompanyEntry[]) => {
+    if (isIntercompanyDbSelected && onSaveIntercompanyScopeCompanies) {
+      await onSaveIntercompanyScopeCompanies(selectedIntercompanyScope, nextList);
+      return;
+    }
+    await onSaveModuleCompanies(selectedDbModule, nextList);
+  };
+
   const filteredDbCompanies = useMemo(() => {
     const q = dbSearchQuery.trim().toLowerCase();
     return selectedDbCompanies.filter((c) => {
@@ -524,10 +619,12 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
         };
       });
       setQuickAddCompanyInput('');
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFormError(
-        err?.message ||
+        formatCloudError(
+          err,
           `No se pudo agregar "${clean}" a la base de datos de ${MODULE_COMPANY_DB_META[modId].shortName}.`
+        )
       );
     } finally {
       setIsQuickAddingCompany(false);
@@ -622,12 +719,13 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
           ? `Permisos por módulo y sociedades de ${cleanEmail} guardados y sincronizados en Firestore.`
           : `Permisos de ${cleanEmail} guardados localmente. Inicia sesión con Google para publicarlos en Firestore.`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message:
-          err?.message ||
-          'Se guardó localmente, pero ocurrió un error al sincronizar con Firestore.',
+        message: formatCloudError(
+          err,
+          'Se guardó localmente, pero ocurrió un error al sincronizar con Firestore.'
+        ),
       });
       setIsEditorOpen(false);
     } finally {
@@ -648,10 +746,10 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
         type: 'info',
         message: `Acceso de ${rec.email} ${!rec.active ? 'activado' : 'suspendido'}.`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message: err?.message || 'Error actualizando el estado del usuario.',
+        message: formatCloudError(err, 'Error actualizando el estado del usuario en Firestore.'),
       });
     } finally {
       setIsSaving(false);
@@ -667,10 +765,10 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
         type: 'info',
         message: `Regla de permisos para ${email} eliminada.`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message: err?.message || 'No se pudo eliminar el registro en la nube.',
+        message: formatCloudError(err, 'No se pudo eliminar el registro en Firestore.'),
       });
     } finally {
       setIsSaving(false);
@@ -684,8 +782,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setCompNombre('');
     setCompCodigo('');
     setCompNit('');
-    setCompPais('');
-    setCompMoneda(MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency);
+    setCompPais(activeDbDefaultCountry);
+    setCompMoneda(activeDbDefaultCurrency);
     setCompActivo(true);
     setCompFormError(null);
     setIsCompanyFormOpen(true);
@@ -696,10 +794,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setCompNombre(comp.nombre);
     setCompCodigo(comp.codigo || '');
     setCompNit(comp.nit || '');
-    setCompPais(comp.pais || '');
-    setCompMoneda(
-      comp.moneda || MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency
-    );
+    setCompPais(comp.pais || activeDbDefaultCountry);
+    setCompMoneda(comp.moneda || activeDbDefaultCurrency);
     setCompActivo(comp.activo !== false);
     setCompFormError(null);
     setIsCompanyFormOpen(true);
@@ -720,18 +816,20 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     );
     if (duplicate) {
       setCompFormError(
-        `Ya existe una sociedad llamada "${duplicate.nombre}" en la base de datos de ${MODULE_COMPANY_DB_META[selectedDbModule].shortName}.`
+        `Ya existe una sociedad llamada "${duplicate.nombre}" en la base de datos de ${activeDbShortName}.`
       );
       return;
     }
 
     const entry = sanitizeModuleCompanyEntry({
-      id: editingCompanyId || `${selectedDbModule}-comp-${Date.now()}`,
+      id:
+        editingCompanyId ||
+        `${isIntercompanyDbSelected ? `ic-${selectedIntercompanyScope}` : selectedDbModule}-comp-${Date.now()}`,
       nombre: cleanName,
       codigo: compCodigo,
       nit: compNit,
-      pais: compPais,
-      moneda: compMoneda || MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+      pais: compPais || activeDbDefaultCountry,
+      moneda: compMoneda || activeDbDefaultCurrency,
       activo: selectedDbModule === 'intercompany' ? true : compActivo,
     });
 
@@ -741,21 +839,22 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
 
     setIsSaving(true);
     try {
-      await onSaveModuleCompanies(selectedDbModule, nextList);
+      await saveCurrentDbCompanies(nextList);
       setIsCompanyFormOpen(false);
       setEditingCompanyId(null);
       setFeedback({
         type: 'success',
         message: currentUser
-          ? `Sociedad "${entry.nombre}" guardada en la base de datos de ${MODULE_COMPANY_DB_META[selectedDbModule].name} y sincronizada en Firestore.`
-          : `Sociedad "${entry.nombre}" guardada localmente en ${MODULE_COMPANY_DB_META[selectedDbModule].name}. Inicia sesión con Google para sincronizar en Firestore.`,
+          ? `Sociedad "${entry.nombre}" guardada en ${activeDbDisplayName} y sincronizada en Firestore.`
+          : `Sociedad "${entry.nombre}" guardada localmente en ${activeDbDisplayName}. Inicia sesión con Google para sincronizar en Firestore.`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message:
-          err?.message ||
-          'No se pudo sincronizar la base de datos de sociedades en Firestore.',
+        message: formatCloudError(
+          err,
+          'No se pudo sincronizar la base de datos de sociedades en Firestore.'
+        ),
       });
     } finally {
       setIsSaving(false);
@@ -769,11 +868,11 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     );
     setIsSaving(true);
     try {
-      await onSaveModuleCompanies(selectedDbModule, nextList);
-    } catch (err: any) {
+      await saveCurrentDbCompanies(nextList);
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message: err?.message || 'Error al actualizar el estado de la sociedad.',
+        message: formatCloudError(err, 'Error al actualizar el estado de la sociedad.'),
       });
     } finally {
       setIsSaving(false);
@@ -785,16 +884,16 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     const nextList = selectedDbCompanies.filter((c) => c.id !== compId);
     setIsSaving(true);
     try {
-      await onSaveModuleCompanies(selectedDbModule, nextList);
+      await saveCurrentDbCompanies(nextList);
       setConfirmDeleteCompId(null);
       setFeedback({
         type: 'info',
-        message: `Sociedad "${target?.nombre || ''}" eliminada de la base de datos de ${MODULE_COMPANY_DB_META[selectedDbModule].shortName}.`,
+        message: `Sociedad "${target?.nombre || ''}" eliminada de ${activeDbShortName}.`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message: err?.message || 'Error al eliminar la sociedad en Firestore.',
+        message: formatCloudError(err, 'Error al eliminar la sociedad en Firestore.'),
       });
     } finally {
       setIsSaving(false);
@@ -820,8 +919,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
             nombre: src.nombre,
             codigo: src.codigo,
             nit: src.nit,
-            pais: src.pais,
-            moneda: src.moneda || MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+            pais: src.pais || activeDbDefaultCountry,
+            moneda: src.moneda || activeDbDefaultCurrency,
             activo: true,
           },
           idx
@@ -833,25 +932,22 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     if (additions.length === 0) {
       setFeedback({
         type: 'info',
-        message: `Todas las sociedades activas de ${MODULE_COMPANY_DB_META[sourceModId].shortName} ya existen en ${MODULE_COMPANY_DB_META[selectedDbModule].shortName}.`,
+        message: `Todas las sociedades activas de ${MODULE_COMPANY_DB_META[sourceModId].shortName} ya existen en ${activeDbShortName}.`,
       });
       return;
     }
 
     setIsSaving(true);
     try {
-      await onSaveModuleCompanies(selectedDbModule, [
-        ...selectedDbCompanies,
-        ...additions,
-      ]);
+      await saveCurrentDbCompanies([...selectedDbCompanies, ...additions]);
       setFeedback({
         type: 'success',
-        message: `Se copiaron ${additions.length} sociedad(es) independientes desde ${MODULE_COMPANY_DB_META[sourceModId].shortName} hacia ${MODULE_COMPANY_DB_META[selectedDbModule].shortName}.`,
+        message: `Se copiaron ${additions.length} sociedad(es) independientes desde ${MODULE_COMPANY_DB_META[sourceModId].shortName} hacia ${activeDbShortName}.`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message: err?.message || 'Error al copiar sociedades entre módulos.',
+        message: formatCloudError(err, 'Error al copiar sociedades entre módulos.'),
       });
     } finally {
       setIsSaving(false);
@@ -863,8 +959,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       Nombre: c.nombre,
       Codigo: c.codigo || '',
       NIT: c.nit || '',
-      Pais: c.pais || '',
-      Moneda: c.moneda || MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+      Pais: c.pais || activeDbDefaultCountry,
+      Moneda: c.moneda || activeDbDefaultCurrency,
       Activo: c.activo !== false ? 'SI' : 'NO',
     }));
     const ws = XLSX.utils.json_to_sheet(
@@ -875,19 +971,18 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
               Nombre: 'Ejemplo Sociedad S.A.',
               Codigo: 'SOC-01',
               NIT: '900000000-1',
-              Pais: 'Guatemala',
-              Moneda: MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+              Pais: activeDbDefaultCountry || 'Colombia',
+              Moneda: activeDbDefaultCurrency,
               Activo: 'SI',
             },
           ]
     );
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(
-      wb,
-      ws,
-      MODULE_COMPANY_DB_META[selectedDbModule].shortName.slice(0, 31)
-    );
-    XLSX.writeFile(wb, `BD_Sociedades_${selectedDbModule}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, activeDbShortName.slice(0, 31));
+    const fileSuffix = isIntercompanyDbSelected
+      ? `intercompany_${selectedIntercompanyScope}`
+      : selectedDbModule;
+    XLSX.writeFile(wb, `BD_Sociedades_${fileSuffix}.xlsx`);
   };
 
   const handleImportModuleCompaniesExcel = async (
@@ -953,10 +1048,10 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
               nombre,
               codigo: pickCol(row, ['codigo', 'cod', 'clave']),
               nit: pickCol(row, ['nit', 'tax', 'rfc', 'ruc', 'identificacion']),
-              pais: pickCol(row, ['pais', 'country']),
+              pais: pickCol(row, ['pais', 'country']) || activeDbDefaultCountry,
               moneda:
                 pickCol(row, ['moneda', 'currency', 'divisa']) ||
-                MODULE_COMPANY_DB_META[selectedDbModule].defaultCurrency,
+                activeDbDefaultCurrency,
               activo: selectedDbModule === 'intercompany' ? true : activo,
             },
             idx
@@ -975,17 +1070,18 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
 
       const merged = sanitizeModuleCompanyList([...selectedDbCompanies, ...imported]);
       setIsSaving(true);
-      await onSaveModuleCompanies(selectedDbModule, merged);
+      await saveCurrentDbCompanies(merged);
       setFeedback({
         type: 'success',
-        message: `Se importaron ${imported.length} sociedad(es) a la base de datos de ${MODULE_COMPANY_DB_META[selectedDbModule].name}.`,
+        message: `Se importaron ${imported.length} sociedad(es) a ${activeDbDisplayName}.`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message:
-          err?.message ||
-          'No se pudo leer el archivo Excel de sociedades. Verifica las columnas Nombre, Codigo, NIT, Pais, Moneda.',
+        message: formatCloudError(
+          err,
+          'No se pudo leer o sincronizar el archivo Excel de sociedades. Verifica las columnas Nombre, Codigo, NIT, Pais, Moneda.'
+        ),
       });
     } finally {
       setIsSaving(false);
@@ -1002,20 +1098,23 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       onSignInWithGoogle();
       return;
     }
+
+    setFeedback(null);
     setIsSaving(true);
     try {
       await onSyncAllToCloud();
       setFeedback({
         type: 'success',
         message:
-          'Permisos de usuarios, políticas y las 6 bases de datos de empresas por módulo fueron publicados en Firestore.',
+          'Permisos por correo, políticas, los 3 ámbitos de Intercompany (Internacionales, Nacionales y Anitox) y las bases de datos de empresas por módulo fueron publicados en Firestore.',
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFeedback({
         type: 'error',
-        message:
-          err?.message ||
-          'No se pudo sincronizar con Firestore. Verifica que iniciaste sesión como administrador.',
+        message: formatCloudError(
+          err,
+          'No se pudo publicar en Firestore. Verifica tu conexión y que tu cuenta tenga permisos de administrador.'
+        ),
       });
     } finally {
       setIsSaving(false);
@@ -1061,9 +1160,6 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       icon: SlidersHorizontal,
     },
   ];
-
-  const selectedDbMeta = MODULE_COMPANY_DB_META[selectedDbModule];
-  const selectedDbSync = moduleDbSyncStatus[selectedDbModule] || { status: 'idle' };
 
   return (
     <div className="min-h-screen bg-[#F5F8FC] flex flex-col font-sans text-slate-800 antialiased">
@@ -1292,7 +1388,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
         {feedback && (
           <div className="px-4 sm:px-6 lg:px-8 pt-4 max-w-7xl mx-auto w-full">
             <div
-              className={`px-4 py-2.5 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+              className={`px-4 py-3 rounded-xl border text-xs flex items-start justify-between gap-3 ${
                 feedback.type === 'success'
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                   : feedback.type === 'error'
@@ -1300,18 +1396,20 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                   : 'bg-blue-50 border-blue-200 text-blue-900'
               }`}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-start gap-2 min-w-0">
                 {feedback.type === 'error' ? (
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
                 ) : (
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
                 )}
-                <span className="font-medium">{feedback.message}</span>
+                <span className="font-medium break-words select-text leading-relaxed">
+                  {feedback.message}
+                </span>
               </div>
               <button
                 type="button"
                 onClick={() => setFeedback(null)}
-                className="p-1 opacity-70 hover:opacity-100 cursor-pointer"
+                className="p-1 opacity-70 hover:opacity-100 shrink-0 cursor-pointer"
                 aria-label="Cerrar aviso"
               >
                 <X className="w-3.5 h-3.5" />
@@ -1741,14 +1839,16 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-base font-bold text-[#132B63]">
-                          Base de Datos de Empresas — {selectedDbMeta.name}
+                          Base de Datos de Empresas — {activeDbDisplayName}
                         </h3>
                         <span className="font-mono text-[11px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
-                          /{selectedDbMeta.firestorePath}
+                          /{activeDbFirestorePath}
                         </span>
                       </div>
                       <p className="text-xs text-slate-600 mt-1">
-                        {selectedDbMeta.description}
+                        {isIntercompanyDbSelected
+                          ? INTERCOMPANY_SCOPE_META[selectedIntercompanyScope].description
+                          : selectedDbMeta.description}
                       </p>
                       <div className="text-[11px] text-slate-400 mt-1">
                         {selectedDbSync.lastSyncedAtIso
@@ -1830,20 +1930,18 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                         }
                         setIsSaving(true);
                         try {
-                          await onSaveModuleCompanies(
-                            selectedDbModule,
-                            selectedDbCompanies
-                          );
+                          await saveCurrentDbCompanies(selectedDbCompanies);
                           setFeedback({
                             type: 'success',
-                            message: `Catálogo de ${selectedDbMeta.name} publicado en Firestore.`,
+                            message: `Catálogo de ${activeDbDisplayName} publicado en Firestore.`,
                           });
-                        } catch (err: any) {
+                        } catch (err: unknown) {
                           setFeedback({
                             type: 'error',
-                            message:
-                              err?.message ||
-                              'No se pudo publicar el catálogo en Firestore.',
+                            message: formatCloudError(
+                              err,
+                              'No se pudo publicar el catálogo en Firestore.'
+                            ),
                           });
                         } finally {
                           setIsSaving(false);
@@ -1857,6 +1955,61 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                   </div>
                 </div>
 
+                {/* Intercompany 3-Scope Sub-Selector (Internacionales | Nacionales | Anitox) */}
+                {isIntercompanyDbSelected && (
+                  <div className="px-5 py-3 bg-[#F5F8FC] border-b border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="text-xs font-semibold text-[#132B63]">
+                      Ámbito de Conciliación Intercompany:
+                    </div>
+                    <div className="inline-flex flex-wrap items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200/90">
+                      {INTERCOMPANY_SCOPES.map((sc) => {
+                        const meta = INTERCOMPANY_SCOPE_META[sc];
+                        const count = (intercompanyScopeCompanies?.[sc] || []).length;
+                        const scSync = intercompanyScopeSyncStatus?.[sc];
+                        const isScActive = selectedIntercompanyScope === sc;
+                        return (
+                          <button
+                            key={sc}
+                            type="button"
+                            onClick={() => {
+                              setSelectedIntercompanyScope(sc);
+                              setDbSearchQuery('');
+                              setIsCompanyFormOpen(false);
+                              setConfirmDeleteCompId(null);
+                            }}
+                            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              isScActive
+                                ? 'bg-[#1E60A8] text-white shadow-2xs'
+                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                            }`}
+                          >
+                            <span>{meta.label}</span>
+                            <span
+                              className={`text-[10px] font-mono tabular-nums ${
+                                isScActive ? 'text-sky-100' : 'text-slate-400'
+                              }`}
+                            >
+                              {count} · {meta.defaultCurrency}
+                            </span>
+                            {scSync?.status === 'pending' && (
+                              <span
+                                className="w-1.5 h-1.5 rounded-full bg-amber-400"
+                                title="Pendiente por sincronizar"
+                              />
+                            )}
+                            {scSync?.status === 'error' && (
+                              <span
+                                className="w-1.5 h-1.5 rounded-full bg-rose-400"
+                                title={scSync.errorMsg || 'Error de sincronización'}
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Inline Add / Edit Society Form */}
                 {isCompanyFormOpen && (
                   <form
@@ -1866,8 +2019,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                     <div className="flex items-center justify-between">
                       <h4 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
                         {editingCompanyId
-                          ? `Editar Sociedad en ${selectedDbMeta.shortName}`
-                          : `Nueva Sociedad para ${selectedDbMeta.name}`}
+                          ? `Editar Sociedad en ${activeDbShortName}`
+                          : `Nueva Sociedad para ${activeDbDisplayName}`}
                       </h4>
                       <button
                         type="button"
@@ -1963,7 +2116,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                         </label>
                       ) : (
                         <span className="text-[11px] text-slate-500">
-                          Las sociedades de Intercompany se sincronizan directamente con la vista Empresas de Anitox.
+                          Las sociedades de {activeDbShortName} se sincronizan directamente con la vista Empresas de Conciliación Intercompany.
                         </span>
                       )}
 
@@ -1998,7 +2151,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                       type="text"
                       value={dbSearchQuery}
                       onChange={(e) => setDbSearchQuery(e.target.value)}
-                      placeholder={`Buscar en BD de ${selectedDbMeta.shortName}...`}
+                      placeholder={`Buscar en BD de ${activeDbShortName}...`}
                       className="w-full pl-8 pr-8 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#1E60A8]"
                     />
                     {dbSearchQuery && (
@@ -2013,7 +2166,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                   </div>
                   <div className="text-xs text-slate-500 tabular-nums">
                     {filteredDbCompanies.length} de {selectedDbCompanies.length} sociedades en{' '}
-                    <strong className="text-slate-700">{selectedDbMeta.shortName}</strong>
+                    <strong className="text-slate-700">{activeDbShortName}</strong>
                   </div>
                 </div>
 
@@ -2272,10 +2425,13 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                             ? 'Modo Estricto activado: solo correos registrados podrán ingresar.'
                             : 'Modo Estricto desactivado: correos no listados ingresan como Solo Consulta.',
                         });
-                      } catch (err: any) {
+                      } catch (err: unknown) {
                         setFeedback({
                           type: 'error',
-                          message: err?.message || 'Error al actualizar la política.',
+                          message: formatCloudError(
+                            err,
+                            'Error al actualizar la política en Firestore.'
+                          ),
                         });
                       } finally {
                         setIsSaving(false);

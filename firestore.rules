@@ -64,9 +64,31 @@ service cloud.firestore {
       );
     }
 
+    // First-time bootstrap gate: allows an authenticated verified deployer to initialize
+    // the permissions registry ONCE before /app_settings/access_control exists.
+    // Closes automatically and permanently as soon as access_control is published.
+    function isBootstrapAdmin() {
+      return isVerifiedUser() &&
+        !exists(/databases/$(database)/documents/app_settings/access_control);
+    }
+
+    // Fail-closed strict mode: enabled by default until an administrator explicitly sets strictMode == false
     function isStrictModeEnabled() {
-      return exists(/databases/$(database)/documents/app_settings/policy) &&
+      return !exists(/databases/$(database)/documents/app_settings/policy) ||
         get(/databases/$(database)/documents/app_settings/policy).data.strictMode == true;
+    }
+
+    // Verified users authorized to read a specific operational module
+    function canReadModule(moduleId) {
+      return isAdmin() || (
+        isVerifiedUser() && (
+          (!hasMyPermissionDoc() && !isStrictModeEnabled()) || (
+            hasMyPermissionDoc() &&
+            myPermissionData().active == true &&
+            moduleId in myPermissionData().allowedModules
+          )
+        )
+      );
     }
 
     // Only verified Admins or explicitly registered active Operadores for the target module can write operational data.
@@ -80,21 +102,19 @@ service cloud.firestore {
       );
     }
 
-    // Verified users authorized for Viáticos (admin, registered active user with viaticos module,
-    // or non-strict mode read-only verified user)
-    function canAccessViaticos() {
-      return isAdmin() || (
-        isVerifiedUser() && (
-          (!hasMyPermissionDoc() && !isStrictModeEnabled()) || (
-            hasMyPermissionDoc() &&
-            myPermissionData().active == true &&
-            'viaticos' in myPermissionData().allowedModules
-          )
-        )
-      );
+    // Verified users permitted to manage non-PII corporate catalogs in module_company_directories:
+    // Admins, first-time bootstrapper, active module operators, or verified non-strict users without a restrictive role doc.
+    function canManageModuleCatalog(moduleId) {
+      return isAdmin() ||
+        isBootstrapAdmin() ||
+        canOperateModule(moduleId) || (
+          isVerifiedUser() &&
+          !isStrictModeEnabled() &&
+          !hasMyPermissionDoc()
+        );
     }
 
-    // Verified users permitted to read module company catalogs (admin, active registered user,
+    // Verified users permitted to read non-PII module company catalogs (admin, active registered user,
     // or non-strict mode verified user)
     function canReadCompanyCatalogs() {
       return isAdmin() || (
@@ -215,7 +235,7 @@ service cloud.firestore {
           'createdAt',
           'updatedAt'
         ]) &&
-        data.scope is string && data.scope in ['internacionales', 'nacionales'] &&
+        data.scope is string && data.scope in ['internacionales', 'nacionales', 'anitox'] &&
         data.entities is list && data.entities.size() <= 200 &&
         (data.entities.size() == 0 || data.entities[0] is map) &&
         data.entitiesCount is int && data.entitiesCount >= 0 && data.entitiesCount <= 200 &&
@@ -432,11 +452,13 @@ service cloud.firestore {
     }
 
     match /reconciliations/{reconciliationId} {
-      // Shared link viewers can read a specific reconciliation by valid ID (contains no PII)
-      allow get: if isValidId(reconciliationId);
+      // Strictly requires verified Google sign-in and authorization for the Intercompany module
+      allow get: if isVerifiedUser() &&
+        isValidId(reconciliationId) &&
+        canReadModule('intercompany');
 
-      // Authenticated users can only list their own reconciliations
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      // Verified users can only list their own reconciliations
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
 
       // Verified admins or active intercompany operators can create reconciliations owned by themselves
       allow create: if isVerifiedUser() &&
@@ -478,11 +500,13 @@ service cloud.firestore {
     }
 
     match /closed_periods/{archiveId} {
-      // Shared link viewers can read a specific archived closed month by valid ID
-      allow get: if isValidId(archiveId);
+      // Strictly requires verified Google sign-in and authorization for Intercompany
+      allow get: if isVerifiedUser() &&
+        isValidId(archiveId) &&
+        canReadModule('intercompany');
 
-      // Authenticated users can list only their own closed period archives
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      // Verified users can list only their own closed period archives
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
 
       // Only verified administrators can permanently close a month
       allow create: if isVerifiedUser() &&
@@ -498,26 +522,29 @@ service cloud.firestore {
     }
 
     match /company_directories/{scopeId} {
-      // Shared link viewers can read the company directory for valid scopes
-      allow get: if isValidId(scopeId) && scopeId in ['internacionales', 'nacionales'];
+      // Requires verified Google sign-in and authorized catalog access
+      allow get: if isVerifiedUser() &&
+        isValidId(scopeId) &&
+        scopeId in ['internacionales', 'nacionales', 'anitox'] &&
+        canReadCompanyCatalogs();
 
       // List is not needed since directories are fetched directly by scopeId
       allow list: if false;
 
-      // Admins or authorized intercompany operators can create or update the independent company directory
+      // Admins, first-time bootstrapper, or authorized intercompany operators can create or update the independent directory
       allow create: if isVerifiedUser() &&
         isValidId(scopeId) &&
-        scopeId in ['internacionales', 'nacionales'] &&
+        scopeId in ['internacionales', 'nacionales', 'anitox'] &&
         isValidCompanyDirectory(incoming()) &&
         incoming().scope == scopeId &&
         incoming().updatedBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        canOperateModule('intercompany');
+        (canOperateModule('intercompany') || isBootstrapAdmin());
 
       allow update: if isVerifiedUser() &&
         isValidId(scopeId) &&
-        scopeId in ['internacionales', 'nacionales'] &&
+        scopeId in ['internacionales', 'nacionales', 'anitox'] &&
         isValidCompanyDirectory(incoming()) &&
         incoming().scope == existing().scope &&
         incoming().updatedBy == request.auth.uid &&
@@ -530,7 +557,7 @@ service cloud.firestore {
           'updatedByName',
           'updatedAt'
         ]) &&
-        canOperateModule('intercompany');
+        (canOperateModule('intercompany') || isBootstrapAdmin());
 
       allow delete: if false;
     }
@@ -544,7 +571,7 @@ service cloud.firestore {
 
       allow list: if false;
 
-      // Strictly managed by verified Administrators from Ajustes y Configuraciones
+      // Managed by verified Administrators, first-time bootstrapper, or authorized module operators
       allow create: if isVerifiedUser() &&
         isValidId(moduleId) &&
         moduleId in ['bancos', 'viaticos', 'anticipos', 'cxc', 'cxp'] &&
@@ -553,7 +580,7 @@ service cloud.firestore {
         incoming().updatedBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        isAdmin();
+        canManageModuleCatalog(moduleId);
 
       allow update: if isVerifiedUser() &&
         isValidId(moduleId) &&
@@ -570,17 +597,19 @@ service cloud.firestore {
           'updatedByName',
           'updatedAt'
         ]) &&
-        isAdmin();
+        canManageModuleCatalog(moduleId);
 
       allow delete: if false;
     }
 
     match /bank_reconciliations/{bankRecId} {
-      // Shared link viewers can read a specific bank reconciliation by valid ID
-      allow get: if isValidId(bankRecId);
+      // Strictly requires verified Google sign-in and authorization for the Bancos module
+      allow get: if isVerifiedUser() &&
+        isValidId(bankRecId) &&
+        canReadModule('bancos');
 
-      // Authenticated users can only list their own bank reconciliations
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      // Verified users can only list their own bank reconciliations
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
 
       // Verified admins or active bank operators can create a bank reconciliation
       allow create: if isVerifiedUser() &&
@@ -621,15 +650,15 @@ service cloud.firestore {
     }
 
     match /user_permissions/{emailDocId} {
-      // Strict PII isolation: users can only read their own permission doc; admins can read any
+      // Strict PII isolation: verified users can read their own permission doc; verified admins (or first-time bootstrapper) can read any
       allow get: if isVerifiedUser() &&
         isValidId(emailDocId) &&
-        (emailDocId == myEmailDocId() || isAdmin());
+        (emailDocId == myEmailDocId() || isAdmin() || isBootstrapAdmin());
 
       // Never list user_permissions directly (admins read consolidated registry at /app_settings/access_control)
       allow list: if false;
 
-      // Only verified administrators can create user permission rules
+      // Verified administrators (or first-time bootstrapper prior to access_control creation) can create permission rules
       allow create: if isVerifiedUser() &&
         isValidId(emailDocId) &&
         isValidUserPermission(incoming()) &&
@@ -637,9 +666,9 @@ service cloud.firestore {
         incoming().updatedBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        isAdmin();
+        (isAdmin() || isBootstrapAdmin());
 
-      // Only verified administrators can update user permission rules; super-admin cannot be demoted or deactivated
+      // Verified administrators (or first-time bootstrapper) can update permission rules; super-admin cannot be demoted or deactivated
       allow update: if isVerifiedUser() &&
         isValidId(emailDocId) &&
         isValidUserPermission(incoming()) &&
@@ -660,7 +689,7 @@ service cloud.firestore {
           'updatedBy',
           'updatedAt'
         ]) &&
-        isAdmin();
+        (isAdmin() || isBootstrapAdmin());
 
       // Only verified administrators can delete non-super-admin rules
       allow delete: if isVerifiedUser() &&
@@ -672,12 +701,12 @@ service cloud.firestore {
     match /app_settings/{settingId} {
       // Split PII Isolation:
       // - 'policy' contains zero PII (strictMode flag) and can be read by verified signed-in users
-      // - 'access_control' contains user emails and is strictly restricted to verified administrators
+      // - 'access_control' contains user emails and is strictly restricted to verified administrators (or first-time bootstrapper)
       allow get: if isVerifiedUser() &&
         isValidId(settingId) &&
         (
           settingId == 'policy' ||
-          (settingId == 'access_control' && isAdmin())
+          (settingId == 'access_control' && (isAdmin() || isBootstrapAdmin()))
         );
 
       allow list: if false;
@@ -691,7 +720,7 @@ service cloud.firestore {
           (settingId == 'access_control' && isValidAccessControlRegistry(incoming())) ||
           (settingId == 'policy' && isValidAccessPolicy(incoming()))
         ) &&
-        isAdmin();
+        (isAdmin() || isBootstrapAdmin());
 
       allow update: if isVerifiedUser() &&
         isValidId(settingId) &&
@@ -719,7 +748,7 @@ service cloud.firestore {
             ])
           )
         ) &&
-        isAdmin();
+        (isAdmin() || isBootstrapAdmin());
 
       allow delete: if false;
     }
@@ -728,10 +757,10 @@ service cloud.firestore {
       // Strictly isolated to verified users authorized for Viáticos (protects consultant emails)
       allow get: if isVerifiedUser() &&
         isValidId(viaticosId) &&
-        canAccessViaticos();
+        canReadModule('viaticos');
 
-      // Authenticated users can list only workspaces they created
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      // Verified users can list only workspaces they created
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
 
       // Verified admins or active viaticos operators can create workspaces
       allow create: if isVerifiedUser() &&

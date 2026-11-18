@@ -4,11 +4,18 @@ import {
   setDoc,
   updateDoc,
   onSnapshot,
-  enableNetwork,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
-import { auth, db, activeFirebaseInfo } from './auth';
+import {
+  auth,
+  db,
+  activeFirebaseInfo,
+  registerFirestoreListener,
+  withFirestoreTimeout,
+  fetchWithTimeout,
+  isRecoverableFirestoreSdkError,
+} from './auth';
 import { handleFirestoreError, OperationType } from './reconciliationStore';
 import {
   BankAccount,
@@ -35,16 +42,6 @@ export interface SavedBankReconciliationDoc {
   ledgerCount: number;
   updatedAtIso?: string;
 }
-
-const isOfflineError = (err: unknown): boolean => {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return (
-    msg.includes('client is offline') ||
-    msg.includes('unavailable') ||
-    msg.includes('network') ||
-    msg.includes('failed to get document')
-  );
-};
 
 const sanitizeAccounts = (accounts: BankAccount[]): BankAccount[] =>
   accounts.slice(0, 100).map((a, idx) => ({
@@ -164,11 +161,18 @@ const getRestBaseUrl = () => {
 };
 
 const fetchBankDocViaRest = async (docId: string): Promise<SavedBankReconciliationDoc | null> => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  const idToken = await user.getIdToken();
   const url = `${getRestBaseUrl()}/documents/bank_reconciliations/${encodeURIComponent(
     docId
   )}?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`;
-  const res = await fetch(url);
-  if (res.status === 404) return null;
+  const res = await fetchWithTimeout(
+    url,
+    { headers: { Authorization: `Bearer ${idToken}` } },
+    10000
+  );
+  if (res.status === 404 || res.status === 403) return null;
   if (!res.ok) return null;
   const raw = await res.json();
   const parsed: Record<string, any> = {};
@@ -202,16 +206,18 @@ export const subscribeToBankReconciliation = (
   const safeId = /^[a-zA-Z0-9_-]{1,128}$/.test(bankRecId) ? bankRecId : DEFAULT_BANK_REC_ID;
   const path = `bank_reconciliations/${safeId}`;
   const ref = doc(db, 'bank_reconciliations', safeId);
+  let isActive = true;
 
   fetchBankDocViaRest(safeId)
     .then((restDoc) => {
-      if (restDoc) onData(restDoc);
+      if (isActive && restDoc) onData(restDoc);
     })
     .catch(() => {});
 
-  return onSnapshot(
+  const unsubscribe = onSnapshot(
     ref,
     (snapshot) => {
+      if (!isActive) return;
       if (!snapshot.exists()) {
         onData(null);
         return;
@@ -239,7 +245,7 @@ export const subscribeToBankReconciliation = (
       });
     },
     (error) => {
-      if (isOfflineError(error)) return;
+      if (!isActive || isRecoverableFirestoreSdkError(error)) return;
       try {
         handleFirestoreError(error, OperationType.GET, path);
       } catch (wrappedErr: any) {
@@ -247,6 +253,11 @@ export const subscribeToBankReconciliation = (
       }
     }
   );
+
+  return registerFirestoreListener(() => {
+    isActive = false;
+    unsubscribe();
+  });
 };
 
 export const saveBankReconciliationToCloud = async (params: {
@@ -278,7 +289,6 @@ export const saveBankReconciliationToCloud = async (params: {
   const cleanOwnerName = (user.displayName || user.email || 'Usuario').slice(0, 120);
 
   await user.getIdToken().catch(() => {});
-  await enableNetwork(db).catch(() => {});
 
   const saveViaRest = async (targetDocId: string, isUpdate: boolean) => {
     const idToken = await user.getIdToken();
@@ -332,7 +342,7 @@ export const saveBankReconciliationToCloud = async (params: {
       };
     }
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${getRestBaseUrl()}/documents:commit?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`,
       {
         method: 'POST',
@@ -341,20 +351,28 @@ export const saveBankReconciliationToCloud = async (params: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ writes: [writeOp] }),
-      }
+      },
+      12000
     );
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody?.error?.message || `Error HTTP ${res.status} al guardar conciliación bancaria`);
+      throw new Error(
+        errBody?.error?.message ||
+          `Error HTTP ${res.status} al guardar conciliación bancaria (bank_reconciliations/${targetDocId})`
+      );
     }
     return { id: targetDocId, updatedAtIso: new Date().toISOString() };
   };
 
   let existingSnap;
   try {
-    existingSnap = await getDoc(doc(db, 'bank_reconciliations', docId));
+    existingSnap = await withFirestoreTimeout(
+      getDoc(doc(db, 'bank_reconciliations', docId)),
+      8500,
+      `bank_reconciliations/${docId}`
+    );
   } catch (error) {
-    if (isOfflineError(error)) {
+    if (isRecoverableFirestoreSdkError(error)) {
       const restDoc = await fetchBankDocViaRest(docId);
       return saveViaRest(docId, Boolean(restDoc));
     }
@@ -363,7 +381,35 @@ export const saveBankReconciliationToCloud = async (params: {
 
   if (existingSnap && existingSnap.exists()) {
     try {
-      await updateDoc(doc(db, 'bank_reconciliations', docId), {
+      await withFirestoreTimeout(
+        updateDoc(doc(db, 'bank_reconciliations', docId), {
+          ownerName: cleanOwnerName,
+          title: cleanTitle,
+          selectedMonth: cleanMonth,
+          selectedAccountId: cleanAccountId,
+          accounts: cleanAccounts,
+          statementItems: cleanStatements,
+          ledgerItems: cleanLedgers,
+          matches: cleanMatches,
+          accountsCount: cleanAccounts.length,
+          statementCount: cleanStatements.length,
+          ledgerCount: cleanLedgers.length,
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        `bank_reconciliations/${docId}`
+      );
+      return { id: docId, updatedAtIso: new Date().toISOString() };
+    } catch (error) {
+      if (isRecoverableFirestoreSdkError(error)) return saveViaRest(docId, true);
+      handleFirestoreError(error, OperationType.UPDATE, `bank_reconciliations/${docId}`);
+    }
+  }
+
+  try {
+    await withFirestoreTimeout(
+      setDoc(doc(db, 'bank_reconciliations', docId), {
+        ownerId: user.uid,
         ownerName: cleanOwnerName,
         title: cleanTitle,
         selectedMonth: cleanMonth,
@@ -375,35 +421,15 @@ export const saveBankReconciliationToCloud = async (params: {
         accountsCount: cleanAccounts.length,
         statementCount: cleanStatements.length,
         ledgerCount: cleanLedgers.length,
+        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      return { id: docId, updatedAtIso: new Date().toISOString() };
-    } catch (error) {
-      if (isOfflineError(error)) return saveViaRest(docId, true);
-      handleFirestoreError(error, OperationType.UPDATE, `bank_reconciliations/${docId}`);
-    }
-  }
-
-  try {
-    await setDoc(doc(db, 'bank_reconciliations', docId), {
-      ownerId: user.uid,
-      ownerName: cleanOwnerName,
-      title: cleanTitle,
-      selectedMonth: cleanMonth,
-      selectedAccountId: cleanAccountId,
-      accounts: cleanAccounts,
-      statementItems: cleanStatements,
-      ledgerItems: cleanLedgers,
-      matches: cleanMatches,
-      accountsCount: cleanAccounts.length,
-      statementCount: cleanStatements.length,
-      ledgerCount: cleanLedgers.length,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+      }),
+      8500,
+      `bank_reconciliations/${docId}`
+    );
     return { id: docId, updatedAtIso: new Date().toISOString() };
   } catch (error) {
-    if (isOfflineError(error)) return saveViaRest(docId, false);
+    if (isRecoverableFirestoreSdkError(error)) return saveViaRest(docId, false);
     handleFirestoreError(error, OperationType.CREATE, `bank_reconciliations/${docId}`);
   }
 };

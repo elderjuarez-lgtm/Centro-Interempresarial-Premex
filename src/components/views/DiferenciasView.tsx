@@ -30,6 +30,7 @@ import {
 import { formatCurrency, reconcileByDocument } from '../../utils/reconciliation';
 import { exportReconciliationToExcelFile } from '../../utils/excel';
 import { extractPersonNameFromEmail } from '../../utils/diffEmailImage';
+import { INTERCOMPANY_SCOPE_META, getIntercompanyScopeLabel } from '../../utils/demoData';
 
 interface DiferenciasViewProps {
   differences: DifferenceRow[];
@@ -68,7 +69,8 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
   activeScope = 'internacionales',
   readOnly = false,
 }) => {
-  const scopeLabel = 'Anitox';
+  const scopeLabel = getIntercompanyScopeLabel(activeScope);
+  const currencyBannerLabel = INTERCOMPANY_SCOPE_META[activeScope].currencyBannerLabel;
   const isMonthClosed = selectedMonth !== 'ALL' && Boolean(closedMonths[selectedMonth]);
   const isEditingLocked = isMonthClosed || readOnly;
   const [searchTerm, setSearchTerm] = useState('');
@@ -623,8 +625,8 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
             onClick={() => {
               const label =
                 selectedMonth === 'ALL'
-                  ? 'CONSOLIDADO HISTÓRICO - ( CIFRAS EN DOLARES )'
-                  : `${selectedMonth.toUpperCase()} - ( CIFRAS EN DOLARES )`;
+                  ? `CONSOLIDADO HISTÓRICO (${scopeLabel.toUpperCase()}) - ( ${currencyBannerLabel} )`
+                  : `${selectedMonth.toUpperCase()} (${scopeLabel.toUpperCase()}) - ( ${currencyBannerLabel} )`;
               exportReconciliationToExcelFile(differences, matrizCxc, matrizCxp, movements, orderedEntities, label);
             }}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300/80 rounded-xl transition-colors cursor-pointer"

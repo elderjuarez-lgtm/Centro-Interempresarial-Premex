@@ -10,7 +10,8 @@ import {
 import {
   Firestore,
   getFirestore,
-  initializeFirestore
+  initializeFirestore,
+  memoryLocalCache,
 } from 'firebase/firestore';
 import defaultFirebaseConfig from '../../firebase-applet-config.json';
 
@@ -76,12 +77,14 @@ export const activeFirebaseInfo = {
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Force HTTP long-polling to avoid "client is offline" errors behind corporate proxies/firewalls/iframes
+// Explicit in-memory cache (memoryLocalCache) avoids Firestore 13.3.0 IndexedDB/Target ID
+// INTERNAL ASSERTION FAILED crashes in production, combined with long-polling for proxies.
 export const db: Firestore = (() => {
   try {
     return initializeFirestore(
       app,
       {
+        localCache: memoryLocalCache(),
         experimentalForceLongPolling: true,
         ignoreUndefinedProperties: true,
       },
@@ -93,6 +96,93 @@ export const db: Firestore = (() => {
       : getFirestore(app);
   }
 })();
+
+// --- Central Active Firestore Listener Registry ---
+// Guarantees every active onSnapshot is unsubscribed cleanly on unmount AND BEFORE signOut(),
+// preventing Firestore 13.3.0 "Target ID already exists" and "INTERNAL ASSERTION FAILED".
+const activeFirestoreUnsubscribers = new Set<() => void>();
+
+export const registerFirestoreListener = (unsubscribe: () => void): (() => void) => {
+  let disposed = false;
+  const safeUnsubscribe = () => {
+    if (disposed) return;
+    disposed = true;
+    activeFirestoreUnsubscribers.delete(safeUnsubscribe);
+    try {
+      unsubscribe();
+    } catch {
+      // Ignore cleanup errors when Firestore stream was already torn down
+    }
+  };
+  activeFirestoreUnsubscribers.add(safeUnsubscribe);
+  return safeUnsubscribe;
+};
+
+export const unsubscribeAllFirestoreListeners = (): void => {
+  const snapshot = Array.from(activeFirestoreUnsubscribers);
+  activeFirestoreUnsubscribers.clear();
+  snapshot.forEach((unsub) => {
+    try {
+      unsub();
+    } catch {
+      // Ignore individual teardown errors
+    }
+  });
+};
+
+// --- Resilience Helpers (Prevent hung SDK promises / frozen "Publicando...") ---
+export const withFirestoreTimeout = async <T>(
+  promise: Promise<T>,
+  ms = 8500,
+  label = 'operación en Firestore'
+): Promise<T> => {
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>((_, reject) => {
+        timerId = setTimeout(() => {
+          reject(new Error(`Timeout Firestore SDK (${ms}ms) en ${label}`));
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timerId !== undefined) clearTimeout(timerId);
+  }
+};
+
+export const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  ms = 12000
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timerId = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Tiempo de espera agotado (${Math.round(ms / 1000)}s) al conectar con Firestore.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timerId);
+  }
+};
+
+export const isRecoverableFirestoreSdkError = (err: unknown): boolean => {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('client is offline') ||
+    msg.includes('unavailable') ||
+    msg.includes('network') ||
+    msg.includes('failed to get document') ||
+    msg.includes('timeout firestore sdk') ||
+    msg.includes('internal assertion failed') ||
+    msg.includes('target id already exists') ||
+    msg.includes('unexpected state')
+  );
+};
 
 export const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
@@ -181,6 +271,9 @@ export const setAccessToken = (token: string | null) => {
 };
 
 export const logout = async () => {
+  // Strictly detach all active Firestore onSnapshot listeners BEFORE revoking auth state
+  unsubscribeAllFirestoreListeners();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   await signOut(auth);
   cachedAccessToken = null;
   writeStoredToken(null);

@@ -5,11 +5,18 @@ import {
   updateDoc,
   deleteDoc,
   onSnapshot,
-  enableNetwork,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
-import { auth, db, activeFirebaseInfo } from './auth';
+import {
+  auth,
+  db,
+  activeFirebaseInfo,
+  registerFirestoreListener,
+  withFirestoreTimeout,
+  fetchWithTimeout,
+  isRecoverableFirestoreSdkError,
+} from './auth';
 import { handleFirestoreError, OperationType } from './reconciliationStore';
 import {
   AccessControlPolicy,
@@ -26,15 +33,7 @@ import {
   SUPER_ADMIN_EMAIL,
 } from '../utils/permissions';
 
-const isOfflineError = (err: unknown): boolean => {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return (
-    msg.includes('client is offline') ||
-    msg.includes('unavailable') ||
-    msg.includes('network') ||
-    msg.includes('failed to get document')
-  );
-};
+const isOfflineError = (err: unknown): boolean => isRecoverableFirestoreSdkError(err);
 
 const VALID_MODULES = new Set<SuiteModuleId>(ALL_SUITE_MODULES);
 
@@ -153,27 +152,44 @@ const getRestDocName = (collectionName: string, docId: string) => {
   return `projects/${projectId}/databases/${databaseId}/documents/${collectionName}/${docId}`;
 };
 
+type RestDocLookupResult =
+  | { status: 'ok'; data: Record<string, any> }
+  | { status: 'not_found' }
+  | { status: 'error' };
+
+const fetchAuthDocLookupViaRest = async (
+  collectionName: string,
+  docId: string
+): Promise<RestDocLookupResult> => {
+  const user = auth.currentUser;
+  if (!user) return { status: 'error' };
+  try {
+    const idToken = await user.getIdToken();
+    const url = `${getRestBaseUrl()}/documents/${encodeURIComponent(
+      collectionName
+    )}/${encodeURIComponent(docId)}?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`;
+    const res = await fetchWithTimeout(url, {
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (res.status === 404) return { status: 'not_found' };
+    if (res.status === 403 || !res.ok) return { status: 'error' };
+    const raw = await res.json();
+    const parsed: Record<string, any> = {};
+    Object.entries(raw.fields || {}).forEach(([k, v]) => {
+      parsed[k] = fromFirestoreValue(v as Record<string, any>);
+    });
+    return { status: 'ok', data: parsed };
+  } catch {
+    return { status: 'error' };
+  }
+};
+
 const fetchAuthDocViaRest = async (
   collectionName: string,
   docId: string
 ): Promise<Record<string, any> | null> => {
-  const user = auth.currentUser;
-  if (!user) return null;
-  const idToken = await user.getIdToken();
-  const url = `${getRestBaseUrl()}/documents/${encodeURIComponent(
-    collectionName
-  )}/${encodeURIComponent(docId)}?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${idToken}` },
-  });
-  if (res.status === 404 || res.status === 403) return null;
-  if (!res.ok) return null;
-  const raw = await res.json();
-  const parsed: Record<string, any> = {};
-  Object.entries(raw.fields || {}).forEach(([k, v]) => {
-    parsed[k] = fromFirestoreValue(v as Record<string, any>);
-  });
-  return parsed;
+  const result = await fetchAuthDocLookupViaRest(collectionName, docId);
+  return result.status === 'ok' ? result.data : null;
 };
 
 const parsePermissionDocData = (
@@ -211,31 +227,56 @@ const parsePermissionDocData = (
  */
 export const subscribeToOwnUserPermission = (
   email: string,
-  onData: (record: UserPermissionRecord | null) => void
+  onData: (record: UserPermissionRecord | null) => void,
+  onResolved?: (fromCloud: boolean) => void
 ) => {
   const docId = emailToPermissionDocId(email);
   const path = `user_permissions/${docId}`;
   const ref = doc(db, 'user_permissions', docId);
+  let isActive = true;
+  let resolvedFromCloud = false;
 
-  fetchAuthDocViaRest('user_permissions', docId)
-    .then((parsed) => {
-      if (parsed && parsed.email) {
-        onData(parsePermissionDocData(docId, parsed));
+  const markResolved = (fromCloud: boolean) => {
+    if (!isActive) return;
+    if (fromCloud) {
+      resolvedFromCloud = true;
+      onResolved?.(true);
+    } else if (!resolvedFromCloud) {
+      onResolved?.(false);
+    }
+  };
+
+  fetchAuthDocLookupViaRest('user_permissions', docId)
+    .then((result) => {
+      if (!isActive) return;
+      if (result.status === 'ok' && result.data.email) {
+        onData(parsePermissionDocData(docId, result.data));
+        markResolved(true);
+      } else if (result.status === 'not_found') {
+        onData(null);
+        markResolved(true);
       }
     })
     .catch(() => {});
 
-  return onSnapshot(
+  const rawUnsub = onSnapshot(
     ref,
     (snapshot) => {
+      if (!isActive) return;
       if (!snapshot.exists()) {
         onData(null);
+        markResolved(true);
         return;
       }
       onData(parsePermissionDocData(snapshot.id, snapshot.data()));
+      markResolved(true);
     },
     (error) => {
-      if (isOfflineError(error)) return;
+      if (!isActive) return;
+      if (isOfflineError(error)) {
+        return;
+      }
+      markResolved(false);
       try {
         handleFirestoreError(error, OperationType.GET, path);
       } catch {
@@ -243,33 +284,62 @@ export const subscribeToOwnUserPermission = (
       }
     }
   );
+
+  return registerFirestoreListener(() => {
+    isActive = false;
+    rawUnsub();
+  });
 };
 
 /**
  * Subscribes to the non-PII global access policy (/app_settings/policy).
+ * Defaults fail-closed (`strictMode: true`) when no policy document has been published yet.
  */
 export const subscribeToAccessPolicy = (
-  onData: (policy: AccessControlPolicy) => void
+  onData: (policy: AccessControlPolicy) => void,
+  onResolved?: (fromCloud: boolean) => void
 ) => {
   const path = 'app_settings/policy';
   const ref = doc(db, 'app_settings', 'policy');
+  let isActive = true;
+  let resolvedFromCloud = false;
 
-  fetchAuthDocViaRest('app_settings', 'policy')
-    .then((parsed) => {
-      if (parsed && typeof parsed.strictMode === 'boolean') {
+  const markResolved = (fromCloud: boolean) => {
+    if (!isActive) return;
+    if (fromCloud) {
+      resolvedFromCloud = true;
+      onResolved?.(true);
+    } else if (!resolvedFromCloud) {
+      onResolved?.(false);
+    }
+  };
+
+  fetchAuthDocLookupViaRest('app_settings', 'policy')
+    .then((result) => {
+      if (!isActive) return;
+      if (result.status === 'ok' && typeof result.data.strictMode === 'boolean') {
         onData({
-          strictMode: parsed.strictMode,
-          updatedBy: parsed.updatedBy ? String(parsed.updatedBy) : undefined,
-          updatedAtIso: parsed.updatedAt ? String(parsed.updatedAt) : undefined,
+          strictMode: result.data.strictMode,
+          updatedBy: result.data.updatedBy ? String(result.data.updatedBy) : undefined,
+          updatedAtIso: result.data.updatedAt ? String(result.data.updatedAt) : undefined,
         });
+        markResolved(true);
+      } else if (result.status === 'not_found') {
+        onData({ strictMode: true });
+        markResolved(true);
       }
     })
     .catch(() => {});
 
-  return onSnapshot(
+  const rawUnsub = onSnapshot(
     ref,
     (snapshot) => {
-      if (!snapshot.exists()) return;
+      if (!isActive) return;
+      if (!snapshot.exists()) {
+        onData({ strictMode: true });
+        markResolved(true);
+        return;
+      }
       const data = snapshot.data();
       onData({
         strictMode: Boolean(data.strictMode),
@@ -279,9 +349,14 @@ export const subscribeToAccessPolicy = (
             ? data.updatedAt.toDate().toISOString()
             : undefined,
       });
+      markResolved(true);
     },
     (error) => {
-      if (isOfflineError(error)) return;
+      if (!isActive) return;
+      if (isOfflineError(error)) {
+        return;
+      }
+      markResolved(false);
       try {
         handleFirestoreError(error, OperationType.GET, path);
       } catch {
@@ -289,6 +364,11 @@ export const subscribeToAccessPolicy = (
       }
     }
   );
+
+  return registerFirestoreListener(() => {
+    isActive = false;
+    rawUnsub();
+  });
 };
 
 /**
@@ -300,10 +380,11 @@ export const subscribeToAdminAccessRegistry = (
 ) => {
   const path = 'app_settings/access_control';
   const ref = doc(db, 'app_settings', 'access_control');
+  let isActive = true;
 
   fetchAuthDocViaRest('app_settings', 'access_control')
     .then((parsed) => {
-      if (parsed && Array.isArray(parsed.records)) {
+      if (isActive && parsed && Array.isArray(parsed.records)) {
         const mapped = parsed.records
           .filter((r: any) => r && r.email)
           .map((r: any) => parsePermissionDocData(emailToPermissionDocId(r.email), r));
@@ -312,10 +393,10 @@ export const subscribeToAdminAccessRegistry = (
     })
     .catch(() => {});
 
-  return onSnapshot(
+  const rawUnsub = onSnapshot(
     ref,
     (snapshot) => {
-      if (!snapshot.exists()) return;
+      if (!isActive || !snapshot.exists()) return;
       const data = snapshot.data();
       if (!Array.isArray(data.records)) return;
       const mapped = data.records
@@ -324,7 +405,7 @@ export const subscribeToAdminAccessRegistry = (
       onData(mapped);
     },
     (error) => {
-      if (isOfflineError(error)) return;
+      if (!isActive || isOfflineError(error)) return;
       try {
         handleFirestoreError(error, OperationType.GET, path);
       } catch {
@@ -332,6 +413,11 @@ export const subscribeToAdminAccessRegistry = (
       }
     }
   );
+
+  return registerFirestoreListener(() => {
+    isActive = false;
+    rawUnsub();
+  });
 };
 
 const commitRestWrite = async (
@@ -366,7 +452,7 @@ const commitRestWrite = async (
     writeOp.updateMask = { fieldPaths: updateMaskFields };
   }
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${getRestBaseUrl()}/documents:commit?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`,
     {
       method: 'POST',
@@ -380,7 +466,9 @@ const commitRestWrite = async (
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
     throw new Error(
-      errBody?.error?.message || `Error HTTP ${res.status} al sincronizar permisos`
+      `Firestore (${collectionName}/${docId}): ${
+        errBody?.error?.message || `Error HTTP ${res.status} al sincronizar permisos`
+      }`
     );
   }
 };
@@ -396,11 +484,12 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
 }): Promise<{ updatedAtIso: string }> => {
   const user = auth.currentUser;
   if (!user) {
-    throw new Error('Inicia sesión con tu cuenta de Google administradora para sincronizar permisos en la nube.');
+    throw new Error(
+      'Inicia sesión con tu cuenta de Google administradora para sincronizar permisos en la nube.'
+    );
   }
 
-  await user.getIdToken().catch(() => {});
-  await enableNetwork(db).catch(() => {});
+  await withFirestoreTimeout(user.getIdToken(), 8000, 'token de autenticación').catch(() => {});
 
   const cleanAll = params.allRecords.slice(0, 200).map(sanitizeRecord);
 
@@ -423,7 +512,8 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
     if (cleanRec.notes) payloadBase.notes = cleanRec.notes;
 
     try {
-      const snap = await getDoc(doc(db, 'user_permissions', docId));
+      const ref = doc(db, 'user_permissions', docId);
+      const snap = await withFirestoreTimeout(getDoc(ref), 8500, `leer ${path}`);
       if (snap.exists()) {
         const updatePayload: Record<string, unknown> = {
           displayName: cleanRec.displayName,
@@ -437,13 +527,17 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
           updatedBy: user.uid,
           updatedAt: serverTimestamp(),
         };
-        await updateDoc(doc(db, 'user_permissions', docId), updatePayload);
+        await withFirestoreTimeout(updateDoc(ref, updatePayload), 8500, `actualizar ${path}`);
       } else {
-        await setDoc(doc(db, 'user_permissions', docId), {
-          ...payloadBase,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        await withFirestoreTimeout(
+          setDoc(ref, {
+            ...payloadBase,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }),
+          8500,
+          `crear ${path}`
+        );
       }
     } catch (error) {
       if (isOfflineError(error)) {
@@ -483,11 +577,15 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
       const docId = emailToPermissionDocId(delEmail);
       const path = `user_permissions/${docId}`;
       try {
-        await deleteDoc(doc(db, 'user_permissions', docId));
+        await withFirestoreTimeout(
+          deleteDoc(doc(db, 'user_permissions', docId)),
+          8500,
+          `eliminar ${path}`
+        );
       } catch (error) {
         if (isOfflineError(error)) {
           const idToken = await user.getIdToken();
-          await fetch(
+          const res = await fetchWithTimeout(
             `${getRestBaseUrl()}/documents/user_permissions/${encodeURIComponent(
               docId
             )}?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`,
@@ -496,6 +594,12 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
               headers: { Authorization: `Bearer ${idToken}` },
             }
           );
+          if (!res.ok && res.status !== 404) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(
+              `Firestore (${path}): ${errBody?.error?.message || `Error HTTP ${res.status}`}`
+            );
+          }
         } else {
           handleFirestoreError(error, OperationType.DELETE, path);
         }
@@ -507,6 +611,7 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
   if (!params.changedRecord && !params.deletedEmail) {
     for (const rec of cleanAll) {
       const docId = rec.id;
+      const path = `user_permissions/${docId}`;
       const payload: Record<string, unknown> = {
         email: rec.email,
         displayName: rec.displayName,
@@ -520,19 +625,28 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
         updatedBy: user.uid,
       };
       try {
-        const snap = await getDoc(doc(db, 'user_permissions', docId));
+        const ref = doc(db, 'user_permissions', docId);
+        const snap = await withFirestoreTimeout(getDoc(ref), 8500, `leer ${path}`);
         if (snap.exists()) {
           const { email: _ignored, ...updateOnly } = payload;
-          await updateDoc(doc(db, 'user_permissions', docId), {
-            ...updateOnly,
-            updatedAt: serverTimestamp(),
-          });
+          await withFirestoreTimeout(
+            updateDoc(ref, {
+              ...updateOnly,
+              updatedAt: serverTimestamp(),
+            }),
+            8500,
+            `actualizar ${path}`
+          );
         } else {
-          await setDoc(doc(db, 'user_permissions', docId), {
-            ...payload,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
+          await withFirestoreTimeout(
+            setDoc(ref, {
+              ...payload,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            }),
+            8500,
+            `crear ${path}`
+          );
         }
       } catch (error) {
         if (isOfflineError(error)) {
@@ -557,7 +671,7 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
             ]
           );
         } else {
-          handleFirestoreError(error, OperationType.WRITE, `user_permissions/${docId}`);
+          handleFirestoreError(error, OperationType.WRITE, path);
         }
       }
     }
@@ -566,22 +680,31 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
   // 3. Upsert admin consolidated registry at /app_settings/access_control
   const registryPath = 'app_settings/access_control';
   try {
-    const snap = await getDoc(doc(db, 'app_settings', 'access_control'));
+    const ref = doc(db, 'app_settings', 'access_control');
+    const snap = await withFirestoreTimeout(getDoc(ref), 8500, `leer ${registryPath}`);
     if (snap.exists()) {
-      await updateDoc(doc(db, 'app_settings', 'access_control'), {
-        records: cleanAll,
-        recordsCount: cleanAll.length,
-        updatedBy: user.uid,
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        updateDoc(ref, {
+          records: cleanAll,
+          recordsCount: cleanAll.length,
+          updatedBy: user.uid,
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        `actualizar ${registryPath}`
+      );
     } else {
-      await setDoc(doc(db, 'app_settings', 'access_control'), {
-        records: cleanAll,
-        recordsCount: cleanAll.length,
-        updatedBy: user.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        setDoc(ref, {
+          records: cleanAll,
+          recordsCount: cleanAll.length,
+          updatedBy: user.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        `crear ${registryPath}`
+      );
     }
   } catch (error) {
     if (isOfflineError(error)) {
@@ -605,20 +728,29 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
   // 4. Upsert non-PII policy flag at /app_settings/policy
   const policyPath = 'app_settings/policy';
   try {
-    const snap = await getDoc(doc(db, 'app_settings', 'policy'));
+    const ref = doc(db, 'app_settings', 'policy');
+    const snap = await withFirestoreTimeout(getDoc(ref), 8500, `leer ${policyPath}`);
     if (snap.exists()) {
-      await updateDoc(doc(db, 'app_settings', 'policy'), {
-        strictMode: Boolean(params.policy.strictMode),
-        updatedBy: user.uid,
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        updateDoc(ref, {
+          strictMode: Boolean(params.policy.strictMode),
+          updatedBy: user.uid,
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        `actualizar ${policyPath}`
+      );
     } else {
-      await setDoc(doc(db, 'app_settings', 'policy'), {
-        strictMode: Boolean(params.policy.strictMode),
-        updatedBy: user.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        setDoc(ref, {
+          strictMode: Boolean(params.policy.strictMode),
+          updatedBy: user.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        `crear ${policyPath}`
+      );
     }
   } catch (error) {
     if (isOfflineError(error)) {

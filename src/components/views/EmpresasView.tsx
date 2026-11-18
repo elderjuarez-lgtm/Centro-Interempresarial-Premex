@@ -35,6 +35,7 @@ import {
   downloadEntitiesTemplate,
   ParseBulkEntitiesResult
 } from '../../utils/excel';
+import { INTERCOMPANY_SCOPE_META, getIntercompanyScopeLabel } from '../../utils/demoData';
 
 interface EmpresasViewProps {
   entities: EntityMapping[];
@@ -64,8 +65,10 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
   canManageMasterData = true,
 }) => {
   const isDirectoryLocked = Boolean(readOnly || !canManageMasterData);
-  const defaultCountry = activeScope === 'nacionales' ? 'Colombia' : 'Global';
-  const defaultCurrency = activeScope === 'nacionales' ? 'COP' : 'USD';
+  const scopeMeta = INTERCOMPANY_SCOPE_META[activeScope];
+  const scopeLabel = getIntercompanyScopeLabel(activeScope);
+  const defaultCountry = scopeMeta.defaultCountry;
+  const defaultCurrency = scopeMeta.defaultCurrency;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -370,7 +373,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
             <h3 className="text-lg font-bold text-slate-900">
-              Empresas a Conciliar — Anitox
+              Empresas a Conciliar — {scopeLabel}
             </h3>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-900 border border-blue-200">
               {entities.length} en la matriz
@@ -378,7 +381,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
           </div>
           <p className="text-xs text-slate-500 mt-1">
             Las empresas registradas aquí (y su <strong>NIT</strong> para cruce automático en la carga de Excel) alimentan en este orden exacto la reportería de{' '}
-            <strong>Anitox</strong>.
+            <strong>{scopeLabel}</strong>.
           </p>
         </div>
 
@@ -939,7 +942,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
                 </div>
                 <div>
                   <h4 className="font-bold text-base">
-                    Carga Masiva de Sociedades (Anitox)
+                    Carga Masiva de Sociedades ({scopeLabel})
                   </h4>
                   <p className="text-xs text-blue-200">
                     Conserva exactamente el orden de tu listado e incluye el NIT para cruce automático en movimientos

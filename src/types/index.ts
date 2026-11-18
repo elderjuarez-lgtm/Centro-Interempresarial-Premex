@@ -1,4 +1,4 @@
-export type ReconciliationScope = 'internacionales' | 'nacionales';
+export type ReconciliationScope = 'internacionales' | 'nacionales' | 'anitox';
 
 export type MovementType = 'CXC' | 'CXP';
 

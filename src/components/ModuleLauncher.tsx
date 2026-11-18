@@ -67,7 +67,7 @@ const SUITE_MODULES: SuiteModuleDefinition[] = [
     name: 'Conciliación Intercompany',
     category: 'Conciliación',
     shortDesc:
-      'Matrices bilaterales CxC vs CxP entre sociedades Anitox, diferencias con comentarios, correos de ajuste y cierre mensual.',
+      'Matrices bilaterales CxC vs CxP para Internacionales, Nacionales y Anitox, diferencias con comentarios, correos de ajuste y cierre mensual.',
     status: 'active',
     targetModule: 'intercompany',
     accentBorderHover: 'hover:border-[#2169B5]/60',
@@ -527,7 +527,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
             {permissions.canAccessModule('intercompany') ? (
               <div className="sm:px-6">
                 <div className="text-[11px] font-medium text-sky-200/90 uppercase tracking-wider">
-                  Intercompany Anitox
+                  Intercompany (Int. · Nac. · Anitox)
                 </div>
                 <div className="mt-1 flex items-baseline gap-2 tabular-nums">
                   <span className="text-xl font-bold text-white">

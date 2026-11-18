@@ -13,6 +13,7 @@ import {
 import { MatrixResult, Movement, DifferenceRow, SymmetricMatrixResult, SymmetricMatrixCell, ClosedMonthRecord, MovimientosNavigationPreset, ReconciliationScope } from '../../types';
 import { formatCurrency, formatNumber, reconcileByDocument } from '../../utils/reconciliation';
 import { exportReconciliationToExcelFile } from '../../utils/excel';
+import { INTERCOMPANY_SCOPE_META, getIntercompanyScopeLabel } from '../../utils/demoData';
 
 interface ConciliacionViewProps {
   matrizCxc: MatrixResult;
@@ -49,13 +50,14 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
   activeScope = 'internacionales',
   readOnly = false,
 }) => {
-  const scopeLabel = 'Anitox';
+  const scopeLabel = getIntercompanyScopeLabel(activeScope);
+  const currencyBannerLabel = INTERCOMPANY_SCOPE_META[activeScope].currencyBannerLabel;
   const isSelectedMonthClosed = selectedMonth !== 'ALL' && Boolean(closedMonths[selectedMonth]);
   const closedInfo = selectedMonth !== 'ALL' ? closedMonths[selectedMonth] : undefined;
   const [selectedSubTab, setSelectedSubTab] = useState<'bilateral' | 'cxc' | 'cxp' | 'ambas'>('bilateral');
   const activeBannerText = selectedMonth === 'ALL'
-    ? 'CONSOLIDADO HISTÓRICO - ( CIFRAS EN DOLARES )'
-    : `${selectedMonth.toUpperCase()} - ( CIFRAS EN DOLARES )`;
+    ? `CONSOLIDADO HISTÓRICO (${scopeLabel.toUpperCase()}) - ( ${currencyBannerLabel} )`
+    : `${selectedMonth.toUpperCase()} (${scopeLabel.toUpperCase()}) - ( ${currencyBannerLabel} )`;
   const docRecon = useMemo(() => reconcileByDocument(movements), [movements]);
 
   const [drilldownCell, setDrilldownCell] = useState<{

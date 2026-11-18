@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { ReconciliationScope } from '../types';
+import { getIntercompanyScopeLabel } from '../utils/demoData';
 import { getShareableUrl } from '../services/reconciliationStore';
 
 interface SaveReconciliationModalProps {
@@ -52,7 +53,7 @@ export const SaveReconciliationModal: React.FC<SaveReconciliationModalProps> = (
   selectedMonth,
   activeScope = 'internacionales',
 }) => {
-  const scopeLabel = 'Anitox';
+  const scopeLabel = getIntercompanyScopeLabel(activeScope);
   const defaultTitle =
     activeDocTitle ||
     `Conciliación ${scopeLabel} - ${selectedMonth === 'ALL' ? 'Consolidado' : selectedMonth}`;

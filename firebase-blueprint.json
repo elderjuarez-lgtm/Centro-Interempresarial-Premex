@@ -171,7 +171,7 @@
       "properties": {
         "scope": {
           "type": "string",
-          "enum": ["internacionales", "nacionales"],
+          "enum": ["internacionales", "nacionales", "anitox"],
           "description": "Scope group identifier",
           "minLength": 1,
           "maxLength": 30
@@ -592,7 +592,7 @@
       "schema": {
         "$ref": "#/entities/CompanyDirectory"
       },
-      "description": "Stores independent company directories per scope (internacionales, nacionales) editable independently of closed months."
+      "description": "Stores independent company directories per scope (internacionales, nacionales, anitox) editable independently of closed months."
     },
     "/bank_reconciliations/{bankRecId}": {
       "schema": {

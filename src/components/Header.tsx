@@ -11,12 +11,21 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { User } from 'firebase/auth';
-import { ActiveModuleId, ActiveTab, ClosedMonthRecord, EffectivePermissions, EntityMapping } from '../types';
+import {
+  ActiveModuleId,
+  ActiveTab,
+  ClosedMonthRecord,
+  EffectivePermissions,
+  EntityMapping,
+  ReconciliationScope,
+} from '../types';
+import { getIntercompanyScopeLabel } from '../utils/demoData';
 import { downloadExcelTemplate } from '../utils/excel';
 import { ROLE_METADATA } from '../utils/permissions';
 
 interface HeaderProps {
   activeTab: ActiveTab;
+  activeScope?: ReconciliationScope;
   onToggleMobileMenu: () => void;
   currentUser: User | null;
   onSignInWithGoogle: () => void;
@@ -63,6 +72,7 @@ const TAB_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
 
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
+  activeScope = 'internacionales',
   onToggleMobileMenu,
   currentUser,
   onSignInWithGoogle,
@@ -114,7 +124,9 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>Premex</span>
               )}
               <ChevronRight className="w-3 h-3 text-slate-400" />
-              <span className="text-[#19377B]">Intercompany Anitox</span>
+              <span className="text-[#19377B]">
+                Intercompany · {getIntercompanyScopeLabel(activeScope)}
+              </span>
               {permissions && !permissions.isAdmin && (
                 <>
                   <span className="text-slate-300">·</span>

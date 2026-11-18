@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { Movement, DifferenceRow, MatrixResult, ReconciliationScope } from '../types';
+import { getIntercompanyScopeLabel } from '../utils/demoData';
 import { exportDataToSheets } from '../services/googleSheets';
 import { getAccessToken } from '../services/auth';
 
@@ -43,7 +44,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   activeScope = 'internacionales',
 }) => {
   const today = new Date().toISOString().split('T')[0];
-  const scopeLabel = 'Anitox';
+  const scopeLabel = getIntercompanyScopeLabel(activeScope);
   const periodSuffix = selectedMonth === 'ALL' ? 'Consolidado' : selectedMonth;
   const [sheetTitle, setSheetTitle] = useState(`Centro Interempresarial (${scopeLabel}) - ${periodSuffix} (${today})`);
   const [useExisting, setUseExisting] = useState(false);

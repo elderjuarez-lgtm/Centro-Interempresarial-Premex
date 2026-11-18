@@ -225,7 +225,7 @@ export const getRecordModuleCompanyRule = (
 };
 
 export const INITIAL_ACCESS_POLICY: AccessControlPolicy = {
-  strictMode: false,
+  strictMode: true,
 };
 
 export const INITIAL_USER_PERMISSIONS: UserPermissionRecord[] = [
@@ -416,20 +416,64 @@ export const resolveEffectivePermissions = (params: {
   currentUser: User | null;
   permissionsList: UserPermissionRecord[];
   ownPermissionDoc: UserPermissionRecord | null;
+  ownPermissionResolved?: boolean;
   policy: AccessControlPolicy;
   previewEmail: string | null;
 }): EffectivePermissions => {
-  const { currentUser, permissionsList, ownPermissionDoc, policy, previewEmail } = params;
-  const userEmail = currentUser?.email ? normalizeEmail(currentUser.email) : null;
+  const {
+    currentUser,
+    permissionsList,
+    ownPermissionDoc,
+    ownPermissionResolved = false,
+    policy,
+    previewEmail,
+  } = params;
+
+  const isVerifiedSignedIn = Boolean(
+    currentUser && currentUser.email && currentUser.emailVerified
+  );
+  const userEmail = isVerifiedSignedIn && currentUser?.email
+    ? normalizeEmail(currentUser.email)
+    : null;
+
+  // Unauthenticated or unverified session: zero module or company access
+  if (!userEmail) {
+    return {
+      email: currentUser?.email ? normalizeEmail(currentUser.email) : null,
+      displayName: currentUser?.displayName || 'Sin iniciar sesión',
+      role: 'consulta',
+      isAuthorized: false,
+      isSuperAdmin: false,
+      isAdmin: false,
+      canOperate: false,
+      isReadOnly: true,
+      canCloseMonth: false,
+      canManageMasterData: false,
+      allowedModules: [],
+      companyScope: 'selected',
+      allowedCompanies: [],
+      moduleCompanyAccess: {},
+      canAccessModule: () => false,
+      isCompanyAllowed: () => false,
+      getModuleCompanyScope: () => 'selected',
+      getAllowedCompaniesForModule: () => [],
+      isPreviewing: false,
+      previewEmail: null,
+    };
+  }
+
   const realIsSuperAdmin = userEmail === SUPER_ADMIN_EMAIL;
 
-  // Determine the real user's base record
-  const matchedInList = userEmail
-    ? permissionsList.find((r) => normalizeEmail(r.email) === userEmail) || null
-    : null;
-  const realRecord = ownPermissionDoc || matchedInList;
+  // When Firestore confirmed the signed-in user's own permission doc (found or not found),
+  // trust cloud state rather than potentially stale localStorage from a prior session.
+  const matchedInList =
+    permissionsList.find((r) => normalizeEmail(r.email) === userEmail) || null;
+  const realRecord =
+    ownPermissionResolved && !realIsSuperAdmin
+      ? ownPermissionDoc
+      : ownPermissionDoc || matchedInList;
+
   const realIsAdmin =
-    !userEmail ||
     realIsSuperAdmin ||
     Boolean(realRecord && realRecord.active && realRecord.role === 'admin');
 
@@ -440,12 +484,7 @@ export const resolveEffectivePermissions = (params: {
       (r) => normalizeEmail(r.email) === targetEmail
     );
     if (previewRec) {
-      return buildPermissionsFromRecord(
-        previewRec,
-        false,
-        true,
-        targetEmail
-      );
+      return buildPermissionsFromRecord(previewRec, false, true, targetEmail);
     }
   }
 
@@ -460,83 +499,58 @@ export const resolveEffectivePermissions = (params: {
   }
 
   // Signed-in user found in permissions directory
-  if (userEmail && realRecord) {
+  if (realRecord) {
     return buildPermissionsFromRecord(realRecord, false, false, null);
   }
 
   // Signed-in user NOT in permissions directory
-  if (userEmail && !realRecord) {
-    if (policy.strictMode) {
-      return {
-        email: userEmail,
-        displayName: currentUser?.displayName || userEmail,
-        role: 'consulta',
-        isAuthorized: false,
-        isSuperAdmin: false,
-        isAdmin: false,
-        canOperate: false,
-        isReadOnly: true,
-        canCloseMonth: false,
-        canManageMasterData: false,
-        allowedModules: [],
-        companyScope: 'selected',
-        allowedCompanies: [],
-        moduleCompanyAccess: {},
-        canAccessModule: () => false,
-        isCompanyAllowed: () => false,
-        getModuleCompanyScope: () => 'selected',
-        getAllowedCompaniesForModule: () => [],
-        isPreviewing: false,
-        previewEmail: null,
-      };
-    }
-
-    // Non-strict mode: unregistered signed-in user defaults to read-only consulta across active operational modules
+  if (policy.strictMode) {
     return {
       email: userEmail,
       displayName: currentUser?.displayName || userEmail,
       role: 'consulta',
-      isAuthorized: true,
+      isAuthorized: false,
       isSuperAdmin: false,
       isAdmin: false,
       canOperate: false,
       isReadOnly: true,
       canCloseMonth: false,
       canManageMasterData: false,
-      allowedModules: ['intercompany', 'bancos', 'viaticos'],
-      companyScope: 'all',
+      allowedModules: [],
+      companyScope: 'selected',
       allowedCompanies: [],
-      moduleCompanyAccess: {
-        intercompany: { scope: 'all', companies: [] },
-        bancos: { scope: 'all', companies: [] },
-        viaticos: { scope: 'all', companies: [] },
-      },
-      canAccessModule: (m) => m === 'intercompany' || m === 'bancos' || m === 'viaticos',
-      isCompanyAllowed: () => true,
-      getModuleCompanyScope: () => 'all',
+      moduleCompanyAccess: {},
+      canAccessModule: () => false,
+      isCompanyAllowed: () => false,
+      getModuleCompanyScope: () => 'selected',
       getAllowedCompaniesForModule: () => [],
       isPreviewing: false,
       previewEmail: null,
     };
   }
 
-  // Local unauthenticated session (before Google sign-in): full local evaluation access including Ajustes preview
+  // Non-strict mode: unregistered signed-in user defaults to read-only consulta across active operational modules
   return {
-    email: null,
-    displayName: 'Sesión Local (Admin)',
-    role: 'admin',
+    email: userEmail,
+    displayName: currentUser?.displayName || userEmail,
+    role: 'consulta',
     isAuthorized: true,
     isSuperAdmin: false,
-    isAdmin: true,
-    canOperate: true,
-    isReadOnly: false,
-    canCloseMonth: true,
-    canManageMasterData: true,
-    allowedModules: [...ALL_SUITE_MODULES],
+    isAdmin: false,
+    canOperate: false,
+    isReadOnly: true,
+    canCloseMonth: false,
+    canManageMasterData: false,
+    allowedModules: ['intercompany', 'bancos', 'viaticos'],
     companyScope: 'all',
     allowedCompanies: [],
-    moduleCompanyAccess: {},
-    canAccessModule: () => true,
+    moduleCompanyAccess: {
+      intercompany: { scope: 'all', companies: [] },
+      bancos: { scope: 'all', companies: [] },
+      viaticos: { scope: 'all', companies: [] },
+    },
+    canAccessModule: (m) =>
+      m === 'intercompany' || m === 'bancos' || m === 'viaticos',
     isCompanyAllowed: () => true,
     getModuleCompanyScope: () => 'all',
     getAllowedCompaniesForModule: () => [],

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { ClosedMonthRecord, ReconciliationScope } from '../types';
+import { INTERCOMPANY_SCOPES, getIntercompanyScopeLabel } from '../utils/demoData';
 import { getShareableUrl } from '../services/reconciliationStore';
 
 export interface ScopeClosureInfo {
@@ -54,6 +55,7 @@ export const CloseMonthModal: React.FC<CloseMonthModalProps> = ({
   onConfirmCloseMonth,
   onLoadNewMonth,
 }) => {
+  const [targetScope, setTargetScope] = useState<ReconciliationScope>(activeScope);
   const [targetMonth, setTargetMonth] = useState<string>(defaultMonth);
   const [confirmed, setConfirmed] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -77,6 +79,7 @@ export const CloseMonthModal: React.FC<CloseMonthModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setTargetScope(activeScope);
       setTargetMonth(pickBestMonthForScope(activeScope, defaultMonth));
       setConfirmed(false);
       setClosing(false);
@@ -89,8 +92,8 @@ export const CloseMonthModal: React.FC<CloseMonthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentInfo = scopeDetails[activeScope];
-  const scopeLabel = 'Anitox';
+  const currentInfo = scopeDetails[targetScope];
+  const scopeLabel = getIntercompanyScopeLabel(targetScope);
 
   const existingClosure =
     targetMonth && targetMonth !== 'ALL' ? currentInfo.closedMonths[targetMonth] : undefined;
@@ -111,9 +114,9 @@ export const CloseMonthModal: React.FC<CloseMonthModalProps> = ({
           return;
         }
       }
-      const res = await onConfirmCloseMonth(targetMonth, activeScope);
+      const res = await onConfirmCloseMonth(targetMonth, targetScope);
       setResult({
-        scope: activeScope,
+        scope: targetScope,
         month: targetMonth,
         url: res.url,
         closedRecord: res.closedRecord,
@@ -171,6 +174,34 @@ export const CloseMonthModal: React.FC<CloseMonthModalProps> = ({
 
         {/* Body */}
         <div className="p-6 overflow-y-auto space-y-4 flex-1">
+          {/* Scope Selector */}
+          <div className="p-1 bg-slate-100 rounded-xl border border-slate-200 grid grid-cols-3 gap-1">
+            {INTERCOMPANY_SCOPES.map((sc) => {
+              const selected = targetScope === sc;
+              return (
+                <button
+                  key={sc}
+                  type="button"
+                  disabled={closing}
+                  onClick={() => {
+                    setTargetScope(sc);
+                    setTargetMonth(pickBestMonthForScope(sc, defaultMonth));
+                    setConfirmed(false);
+                    setError(null);
+                    setResult(null);
+                  }}
+                  className={`py-1.5 px-2 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                    selected
+                      ? 'bg-[#1E60A8] text-white shadow-2xs'
+                      : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                  }`}
+                >
+                  {getIntercompanyScopeLabel(sc)}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Month Selector */}
           <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
@@ -290,12 +321,12 @@ export const CloseMonthModal: React.FC<CloseMonthModalProps> = ({
                 <div className="flex-1 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 font-mono truncate">
                   <Link2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span className="truncate select-all">
-                    {getShareableUrl(currentInfo.docId, activeScope)}
+                    {getShareableUrl(currentInfo.docId, targetScope)}
                   </span>
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleCopy(getShareableUrl(currentInfo.docId, activeScope))}
+                  onClick={() => handleCopy(getShareableUrl(currentInfo.docId, targetScope))}
                   className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg transition-colors shrink-0 cursor-pointer"
                 >
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}

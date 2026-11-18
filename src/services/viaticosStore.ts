@@ -4,11 +4,18 @@ import {
   setDoc,
   updateDoc,
   onSnapshot,
-  enableNetwork,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
-import { auth, db, activeFirebaseInfo } from './auth';
+import {
+  auth,
+  db,
+  activeFirebaseInfo,
+  registerFirestoreListener,
+  withFirestoreTimeout,
+  fetchWithTimeout,
+  isRecoverableFirestoreSdkError,
+} from './auth';
 import { handleFirestoreError, OperationType } from './reconciliationStore';
 import {
   ViaticoConsultor,
@@ -29,16 +36,6 @@ export interface SavedViaticosWorkspaceDoc {
   liquidaciones: ViaticoLiquidation[];
   updatedAtIso?: string;
 }
-
-const isOfflineError = (err: unknown): boolean => {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return (
-    msg.includes('client is offline') ||
-    msg.includes('unavailable') ||
-    msg.includes('network') ||
-    msg.includes('failed to get document')
-  );
-};
 
 const sanitizeConsultor = (c: ViaticoConsultor): ViaticoConsultor => ({
   id: String(c.id || `cons-${Date.now()}`).slice(0, 120),
@@ -174,9 +171,13 @@ const fetchAuthViaticosViaRest = async (
   const url = `${getRestBaseUrl()}/documents/viaticos_workspaces/${encodeURIComponent(
     docId
   )}?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${idToken}` },
-  });
+  const res = await fetchWithTimeout(
+    url,
+    {
+      headers: { Authorization: `Bearer ${idToken}` },
+    },
+    10000
+  );
   if (!res.ok) return null;
   const raw = await res.json();
   const fields: Record<string, any> = {};
@@ -209,16 +210,18 @@ export const subscribeToViaticosWorkspace = (
   const safeId = /^[a-zA-Z0-9_-]{1,128}$/.test(docId) ? docId : DEFAULT_VIATICOS_DOC_ID;
   const path = `viaticos_workspaces/${safeId}`;
   const ref = doc(db, 'viaticos_workspaces', safeId);
+  let isActive = true;
 
   fetchAuthViaticosViaRest(safeId)
     .then((parsed) => {
-      if (parsed) onData(parsed);
+      if (isActive && parsed) onData(parsed);
     })
     .catch(() => {});
 
-  return onSnapshot(
+  const unsubscribe = onSnapshot(
     ref,
     (snapshot) => {
+      if (!isActive) return;
       if (!snapshot.exists()) {
         onData(null);
         return;
@@ -245,7 +248,7 @@ export const subscribeToViaticosWorkspace = (
       });
     },
     (error) => {
-      if (isOfflineError(error)) return;
+      if (!isActive || isRecoverableFirestoreSdkError(error)) return;
       try {
         handleFirestoreError(error, OperationType.GET, path);
       } catch (wrapped) {
@@ -253,6 +256,11 @@ export const subscribeToViaticosWorkspace = (
       }
     }
   );
+
+  return registerFirestoreListener(() => {
+    isActive = false;
+    unsubscribe();
+  });
 };
 
 export const saveViaticosWorkspaceToCloud = async (params: {
@@ -268,7 +276,6 @@ export const saveViaticosWorkspaceToCloud = async (params: {
   }
 
   await user.getIdToken().catch(() => {});
-  await enableNetwork(db).catch(() => {});
 
   const docId =
     params.targetId && /^[a-zA-Z0-9_-]{1,128}$/.test(params.targetId)
@@ -295,22 +302,30 @@ export const saveViaticosWorkspaceToCloud = async (params: {
 
   try {
     const ref = doc(db, 'viaticos_workspaces', docId);
-    const snap = await getDoc(ref);
+    const snap = await withFirestoreTimeout(getDoc(ref), 8500, path);
     if (snap.exists()) {
-      await updateDoc(ref, {
-        ...updateFields,
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        updateDoc(ref, {
+          ...updateFields,
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        path
+      );
     } else {
-      await setDoc(ref, {
-        ownerId: user.uid,
-        ...updateFields,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await withFirestoreTimeout(
+        setDoc(ref, {
+          ownerId: user.uid,
+          ...updateFields,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }),
+        8500,
+        path
+      );
     }
   } catch (error) {
-    if (isOfflineError(error)) {
+    if (isRecoverableFirestoreSdkError(error)) {
       const existing = await fetchAuthViaticosViaRest(docId);
       const isUpdate = Boolean(existing);
       const idToken = await user.getIdToken();
@@ -349,7 +364,7 @@ export const saveViaticosWorkspaceToCloud = async (params: {
         };
       }
 
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `${getRestBaseUrl()}/documents:commit?key=${encodeURIComponent(activeFirebaseInfo.apiKey)}`,
         {
           method: 'POST',
@@ -358,12 +373,14 @@ export const saveViaticosWorkspaceToCloud = async (params: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ writes: [writeOp] }),
-        }
+        },
+        12000
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(
-          body?.error?.message || `Error HTTP ${res.status} al guardar viáticos en la nube.`
+          body?.error?.message ||
+            `Error HTTP ${res.status} al guardar viáticos en la nube (${path}).`
         );
       }
     } else {

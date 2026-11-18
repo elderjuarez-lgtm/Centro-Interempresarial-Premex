@@ -1,4 +1,53 @@
-import { Movement, EntityMapping } from '../types';
+import { Movement, EntityMapping, ReconciliationScope } from '../types';
+
+export const INTERCOMPANY_SCOPES: ReconciliationScope[] = [
+  'internacionales',
+  'nacionales',
+  'anitox',
+];
+
+export const INTERCOMPANY_SCOPE_META: Record<
+  ReconciliationScope,
+  {
+    label: string;
+    shortLabel: string;
+    defaultCountry: string;
+    defaultCurrency: string;
+    currencyBannerLabel: string;
+    description: string;
+  }
+> = {
+  internacionales: {
+    label: 'Internacionales',
+    shortLabel: 'Int.',
+    defaultCountry: 'Global',
+    defaultCurrency: 'USD',
+    currencyBannerLabel: 'CIFRAS EN DOLARES',
+    description: 'Sociedades internacionales y filiales globales del grupo Premex',
+  },
+  nacionales: {
+    label: 'Nacionales',
+    shortLabel: 'Nac.',
+    defaultCountry: 'Colombia',
+    defaultCurrency: 'COP',
+    currencyBannerLabel: 'CIFRAS EN PESOS COLOMBIANOS',
+    description: 'Sociedades nacionales locales (Colombia)',
+  },
+  anitox: {
+    label: 'Anitox',
+    shortLabel: 'Anitox',
+    defaultCountry: 'Global',
+    defaultCurrency: 'USD',
+    currencyBannerLabel: 'CIFRAS EN DOLARES',
+    description: 'Sociedades dedicadas del grupo Anitox',
+  },
+};
+
+export const getIntercompanyScopeLabel = (scope?: ReconciliationScope): string => {
+  if (scope === 'nacionales') return INTERCOMPANY_SCOPE_META.nacionales.label;
+  if (scope === 'anitox') return INTERCOMPANY_SCOPE_META.anitox.label;
+  return INTERCOMPANY_SCOPE_META.internacionales.label;
+};
 
 export const ORDERED_ENTITIES: string[] = [
   'Premex',
@@ -737,4 +786,135 @@ export const INITIAL_COMMENTS: Record<string, string> = {
   'Premex Inc.___Adiquim': 'Diferencia de $2,442 USD por retención impositiva no reconocida por Adiquim.',
   'Alura INC___Adiquim': 'Diferencia de $4,028 USD originada por pronto pago no reflejado en notas de crédito.',
   'Alura SAS___Ecuadpremex': 'Diferencia de $5,100 USD en recargo por flete marítimo pendiente de aprobación contable.'
+};
+
+export const INITIAL_NACIONALES_ENTITIES: EntityMapping[] = [
+  {
+    id: 'nac-ent-1',
+    alias: 'Premex',
+    nombreOficial: 'Premex S.A.S.',
+    nit: '890900148-1',
+    codigoSociedad: 'NAC-100',
+    pais: 'Colombia',
+    moneda: 'COP',
+  },
+  {
+    id: 'nac-ent-2',
+    alias: 'Adiquim',
+    nombreOficial: 'Adiquim S.A.S.',
+    nit: '800142510-2',
+    codigoSociedad: 'NAC-200',
+    pais: 'Colombia',
+    moneda: 'COP',
+  },
+  {
+    id: 'nac-ent-3',
+    alias: 'Nutreo',
+    nombreOficial: 'Nutreo S.A.S.',
+    nit: '900315420-4',
+    codigoSociedad: 'NAC-300',
+    pais: 'Colombia',
+    moneda: 'COP',
+  },
+  {
+    id: 'nac-ent-4',
+    alias: 'Asimetrix',
+    nombreOficial: 'Asimetrix S.A.S.',
+    nit: '901128490-7',
+    codigoSociedad: 'NAC-400',
+    pais: 'Colombia',
+    moneda: 'COP',
+  },
+  {
+    id: 'nac-ent-5',
+    alias: 'Alura SAS',
+    nombreOficial: 'Alura S.A.S.',
+    nit: '900884312-9',
+    codigoSociedad: 'NAC-500',
+    pais: 'Colombia',
+    moneda: 'COP',
+  },
+  {
+    id: 'nac-ent-6',
+    alias: 'Prizma SAS',
+    nombreOficial: 'Prizma S.A.S.',
+    nit: '900654120-5',
+    codigoSociedad: 'NAC-600',
+    pais: 'Colombia',
+    moneda: 'COP',
+  },
+  {
+    id: 'nac-ent-7',
+    alias: 'Progal BT SAS',
+    nombreOficial: 'Progal BT S.A.S.',
+    nit: '900442198-3',
+    codigoSociedad: 'NAC-700',
+    pais: 'Colombia',
+    moneda: 'COP',
+  },
+];
+
+export const INITIAL_ANITOX_ENTITIES: EntityMapping[] = [
+  {
+    id: 'anx-ent-1',
+    alias: 'Anitox Corp',
+    nombreOficial: 'Anitox Corporation',
+    nit: 'US-58-129044',
+    codigoSociedad: 'ANX-100',
+    pais: 'Estados Unidos',
+    moneda: 'USD',
+  },
+  {
+    id: 'anx-ent-2',
+    alias: 'Anitox UK',
+    nombreOficial: 'Anitox Ltd (UK)',
+    nit: 'GB-41029384',
+    codigoSociedad: 'ANX-200',
+    pais: 'Reino Unido',
+    moneda: 'USD',
+  },
+  {
+    id: 'anx-ent-3',
+    alias: 'Anitox Asia',
+    nombreOficial: 'Anitox Asia Pacific',
+    nit: 'MY-902184-X',
+    codigoSociedad: 'ANX-300',
+    pais: 'Malasia',
+    moneda: 'USD',
+  },
+  {
+    id: 'anx-ent-4',
+    alias: 'Anitox México',
+    nombreOficial: 'Anitox México S. de R.L.',
+    nit: 'ANM-140219-8K1',
+    codigoSociedad: 'ANX-400',
+    pais: 'México',
+    moneda: 'USD',
+  },
+  {
+    id: 'anx-ent-5',
+    alias: 'Anitox Brasil',
+    nombreOficial: 'Anitox do Brasil Ltda.',
+    nit: '18.420.910/0001-44',
+    codigoSociedad: 'ANX-500',
+    pais: 'Brasil',
+    moneda: 'USD',
+  },
+  {
+    id: 'anx-ent-6',
+    alias: 'Premex Corp',
+    nombreOficial: 'Premex Corp',
+    nit: 'US-84-219043',
+    codigoSociedad: 'ANX-600',
+    pais: 'Estados Unidos',
+    moneda: 'USD',
+  },
+];
+
+export const getInitialEntitiesForScope = (
+  scope: ReconciliationScope
+): EntityMapping[] => {
+  if (scope === 'nacionales') return INITIAL_NACIONALES_ENTITIES;
+  if (scope === 'anitox') return INITIAL_ANITOX_ENTITIES;
+  return INITIAL_ENTITIES;
 };

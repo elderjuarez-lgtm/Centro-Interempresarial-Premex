@@ -22,7 +22,7 @@ const SWITCHER_ITEMS: SwitcherItem[] = [
   {
     id: 'intercompany',
     title: 'Conciliación Intercompany',
-    subtitle: 'Matrices CxC / CxP y diferencias Anitox',
+    subtitle: 'Internacionales, Nacionales y Anitox',
     active: true,
     target: 'intercompany',
   },
