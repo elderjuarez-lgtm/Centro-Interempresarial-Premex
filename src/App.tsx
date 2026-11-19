@@ -20,6 +20,7 @@ import {
   ReconciliationScope,
   DirectorySyncState,
   BankAccount,
+  BankClosedReconciliation,
   BankSociety,
   BankStatementItem,
   BookLedgerItem,
@@ -71,6 +72,7 @@ import {
   emailToPermissionDocId,
   ensureSuperAdminRecord,
   filterBankByPermissions,
+  filterClosedBankReconciliationsByPermissions,
   filterIntercompanyByPermissions,
   normalizeCompanyKey,
   normalizeEmail,
@@ -160,6 +162,9 @@ const BANK_STORAGE_KEYS = {
   LEDGER: 'premex_bancos_ledger_v1',
   MATCHES: 'premex_bancos_matches_v1',
   SELECTED_ACCOUNT: 'premex_bancos_selected_account_v2',
+  SELECTED_MONTH: 'premex_bancos_selected_month_v2',
+  OPEN_PERIOD: 'premex_bancos_open_period_v2',
+  CLOSED_RECONCILIATIONS: 'premex_bancos_closed_reconciliations_v2',
   DOC_ID: 'premex_bancos_doc_id_v1',
 };
 const VIATICOS_STORAGE_KEYS = {
@@ -395,12 +400,41 @@ function loadInitialBankWorkspace(): BankWorkspaceData {
     return DEFAULT_BANK_REC_ID;
   })();
 
+  const closedReconciliations = readJsonStorage<BankClosedReconciliation[]>(
+    BANK_STORAGE_KEYS.CLOSED_RECONCILIATIONS,
+    []
+  );
+
   const firstMonth =
     sapOpenItems[0]?.mes ||
     sapBalanceRows[0]?.mes ||
     (accounts[0]?.saldosPorMes ? Object.keys(accounts[0].saldosPorMes)[0] : '') ||
     statementItems[0]?.mes ||
     'Octubre 2026';
+
+  const savedSelectedMonth = (() => {
+    try {
+      const m = localStorage.getItem(BANK_STORAGE_KEYS.SELECTED_MONTH);
+      if (m && m.trim() && m !== 'ALL') return m.trim();
+    } catch {
+      // ignore
+    }
+    return firstMonth;
+  })();
+
+  const savedOpenPeriod: string | null = (() => {
+    try {
+      const raw = localStorage.getItem(BANK_STORAGE_KEYS.OPEN_PERIOD);
+      if (raw === '__NONE__') return null;
+      if (raw && raw.trim()) return raw.trim();
+    } catch {
+      // ignore
+    }
+    const alreadyClosed = closedReconciliations.some(
+      (c) => c.period.trim().toLowerCase() === savedSelectedMonth.trim().toLowerCase()
+    );
+    return alreadyClosed ? null : savedSelectedMonth;
+  })();
 
   return {
     docId: savedDocId,
@@ -412,7 +446,9 @@ function loadInitialBankWorkspace(): BankWorkspaceData {
     ledgerItems,
     matches,
     selectedAccountId: savedAccId,
-    selectedMonth: firstMonth,
+    selectedMonth: savedOpenPeriod || savedSelectedMonth,
+    openPeriod: savedOpenPeriod,
+    closedReconciliations: Array.isArray(closedReconciliations) ? closedReconciliations : [],
     lastSavedAtIso: null,
     hasUnsavedChanges: false,
   };
@@ -1036,6 +1072,18 @@ export default function App() {
         BANK_STORAGE_KEYS.SELECTED_ACCOUNT,
         bankWorkspace.selectedAccountId
       );
+      localStorage.setItem(
+        BANK_STORAGE_KEYS.SELECTED_MONTH,
+        bankWorkspace.selectedMonth
+      );
+      localStorage.setItem(
+        BANK_STORAGE_KEYS.OPEN_PERIOD,
+        bankWorkspace.openPeriod ? bankWorkspace.openPeriod : '__NONE__'
+      );
+      localStorage.setItem(
+        BANK_STORAGE_KEYS.CLOSED_RECONCILIATIONS,
+        JSON.stringify(bankWorkspace.closedReconciliations)
+      );
       localStorage.setItem(BANK_STORAGE_KEYS.DOC_ID, bankWorkspace.docId);
     } catch (e) {
       console.warn('Failed to save Bank workspace:', e);
@@ -1062,6 +1110,24 @@ export default function App() {
             (savedDoc.societies && savedDoc.societies.length > 0) ||
             (savedDoc.sapOpenItems && savedDoc.sapOpenItems.length > 0) ||
             (savedDoc.sapBalanceRows && savedDoc.sapBalanceRows.length > 0);
+          const nextClosed =
+            savedDoc.closedReconciliations && savedDoc.closedReconciliations.length > 0
+              ? savedDoc.closedReconciliations
+              : savedDoc.openPeriod !== undefined
+              ? savedDoc.closedReconciliations || []
+              : prev.closedReconciliations;
+          const nextMonth =
+            savedDoc.selectedMonth && savedDoc.selectedMonth !== 'ALL'
+              ? savedDoc.selectedMonth
+              : prev.selectedMonth;
+          const nextOpenPeriod =
+            savedDoc.openPeriod !== undefined
+              ? savedDoc.openPeriod
+              : nextClosed.some(
+                  (c) => c.period.trim().toLowerCase() === nextMonth.trim().toLowerCase()
+                )
+              ? null
+              : nextMonth;
           return {
             ...prev,
             societies: nextSocieties,
@@ -1071,7 +1137,9 @@ export default function App() {
             statementItems: savedDoc.statementItems,
             ledgerItems: savedDoc.ledgerItems,
             matches: savedDoc.matches,
-            selectedMonth: savedDoc.selectedMonth || prev.selectedMonth,
+            selectedMonth: nextMonth,
+            openPeriod: nextOpenPeriod,
+            closedReconciliations: nextClosed,
             selectedAccountId:
               savedDoc.selectedAccountId &&
               nextAccounts.some((a) => a.id === savedDoc.selectedAccountId)
@@ -1307,24 +1375,27 @@ export default function App() {
     }
   }, [effectivePermissions.isReadOnly, activeTab]);
 
-  const handleSaveBankToCloud = async () => {
+  const handleSaveBankToCloud = async (overrideData?: BankWorkspaceData) => {
     if (!effectivePermissions.canOperate) {
       throw new Error(
         'Tu perfil tiene permisos de Solo Consulta y no puede guardar cambios en la nube.'
       );
     }
+    const source = overrideData || bankWorkspace;
     const result = await saveBankReconciliationToCloud({
-      targetId: bankWorkspace.docId,
-      title: `Conciliación Bancaria Premex - ${bankWorkspace.selectedMonth}`,
-      selectedMonth: bankWorkspace.selectedMonth,
-      selectedAccountId: bankWorkspace.selectedAccountId,
-      societies: bankWorkspace.societies,
-      accounts: bankWorkspace.accounts,
-      sapOpenItems: bankWorkspace.sapOpenItems,
-      sapBalanceRows: bankWorkspace.sapBalanceRows,
-      statementItems: bankWorkspace.statementItems,
-      ledgerItems: bankWorkspace.ledgerItems,
-      matches: bankWorkspace.matches,
+      targetId: source.docId,
+      title: `Conciliación Bancaria Premex - ${source.selectedMonth}`,
+      selectedMonth: source.selectedMonth,
+      selectedAccountId: source.selectedAccountId,
+      openPeriod: source.openPeriod,
+      closedReconciliations: source.closedReconciliations,
+      societies: source.societies,
+      accounts: source.accounts,
+      sapOpenItems: source.sapOpenItems,
+      sapBalanceRows: source.sapBalanceRows,
+      statementItems: source.statementItems,
+      ledgerItems: source.ledgerItems,
+      matches: source.matches,
     });
     setBankWorkspace((prev) => ({
       ...prev,
@@ -1849,6 +1920,10 @@ export default function App() {
       bankWorkspace.sapOpenItems,
       bankWorkspace.sapBalanceRows
     );
+    const filteredClosed = filterClosedBankReconciliationsByPermissions(
+      bankWorkspace.closedReconciliations,
+      effectivePermissions
+    );
     const selectedValid = filtered.accounts.some(
       (a) => a.id === bankWorkspace.selectedAccountId
     );
@@ -1861,6 +1936,7 @@ export default function App() {
       statementItems: filtered.statementItems,
       ledgerItems: filtered.ledgerItems,
       matches: filtered.matches,
+      closedReconciliations: filteredClosed,
       selectedAccountId: selectedValid
         ? bankWorkspace.selectedAccountId
         : filtered.accounts[0]?.id || '',

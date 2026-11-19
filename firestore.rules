@@ -295,6 +295,8 @@ service cloud.firestore {
           'title',
           'selectedMonth',
           'selectedAccountId',
+          'openPeriod',
+          'closedReconciliations',
           'societies',
           'accounts',
           'sapOpenItems',
@@ -313,6 +315,8 @@ service cloud.firestore {
         data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
         data.selectedMonth is string && data.selectedMonth.size() >= 1 && data.selectedMonth.size() <= 60 &&
         (!('selectedAccountId' in data) || (data.selectedAccountId is string && data.selectedAccountId.size() <= 128)) &&
+        (!('openPeriod' in data) || (data.openPeriod is string && data.openPeriod.size() <= 60)) &&
+        (!('closedReconciliations' in data) || (data.closedReconciliations is list && data.closedReconciliations.size() <= 60 && (data.closedReconciliations.size() == 0 || data.closedReconciliations[0] is map))) &&
         (!('societies' in data) || (data.societies is list && data.societies.size() <= 100 && (data.societies.size() == 0 || data.societies[0] is map))) &&
         data.accounts is list && data.accounts.size() <= 300 &&
         (data.accounts.size() == 0 || data.accounts[0] is map) &&
@@ -638,6 +642,8 @@ service cloud.firestore {
           'title',
           'selectedMonth',
           'selectedAccountId',
+          'openPeriod',
+          'closedReconciliations',
           'societies',
           'accounts',
           'sapOpenItems',
@@ -650,6 +656,14 @@ service cloud.firestore {
           'ledgerCount',
           'updatedAt'
         ]) &&
+        (
+          isAdmin() ||
+          !('closedReconciliations' in existing()) ||
+          (
+            'closedReconciliations' in incoming() &&
+            incoming().closedReconciliations.size() >= existing().closedReconciliations.size()
+          )
+        ) &&
         (isAdmin() || canOperateModule('bancos'));
 
       // Only verified admins or active bank owners can delete their bank reconciliation

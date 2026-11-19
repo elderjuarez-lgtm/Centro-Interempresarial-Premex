@@ -19,6 +19,7 @@ import {
 import { handleFirestoreError, OperationType } from './reconciliationStore';
 import {
   BankAccount,
+  BankClosedReconciliation,
   BankMatchGroup,
   BankSociety,
   BankStatementItem,
@@ -37,6 +38,9 @@ export interface SavedBankReconciliationDoc {
   title: string;
   selectedMonth: string;
   selectedAccountId?: string;
+  /** undefined = legacy doc without field; null = explicitly closed/no open period; string = active open period */
+  openPeriod?: string | null;
+  closedReconciliations: BankClosedReconciliation[];
   societies: BankSociety[];
   accounts: BankAccount[];
   sapOpenItems: SapOpenItem[];
@@ -284,6 +288,55 @@ const sanitizeMatches = (matches: BankMatchGroup[]): BankMatchGroup[] =>
     return clean;
   });
 
+const sanitizeClosedReconciliations = (
+  list: BankClosedReconciliation[]
+): BankClosedReconciliation[] =>
+  (Array.isArray(list) ? list : []).slice(0, 60).map((item, idx) => {
+    const period = String(item.period || 'Periodo').trim().slice(0, 60);
+    const compactAccounts = sanitizeAccounts(item.accounts || []).map((acc) => {
+      const monthOnly =
+        acc.saldosPorMes && acc.saldosPorMes[period]
+          ? { [period]: acc.saldosPorMes[period] }
+          : undefined;
+      const copy: BankAccount = { ...acc };
+      if (monthOnly) copy.saldosPorMes = monthOnly;
+      else delete copy.saldosPorMes;
+      return copy;
+    });
+    const clean: BankClosedReconciliation = {
+      id: String(item.id || `bclose-${idx + 1}`).slice(0, 128),
+      period,
+      closedAtIso: String(item.closedAtIso || new Date().toISOString()).slice(0, 60),
+      closedByName: String(item.closedByName || 'Usuario').slice(0, 120),
+      societiesCount: Number.isFinite(Number(item.societiesCount))
+        ? Math.max(0, Math.round(Number(item.societiesCount)))
+        : (item.societies || []).length,
+      accountsCount: Number.isFinite(Number(item.accountsCount))
+        ? Math.max(0, Math.round(Number(item.accountsCount)))
+        : compactAccounts.length,
+      squaredAccountsCount: Number.isFinite(Number(item.squaredAccountsCount))
+        ? Math.max(0, Math.round(Number(item.squaredAccountsCount)))
+        : 0,
+      diffAccountsCount: Number.isFinite(Number(item.diffAccountsCount))
+        ? Math.max(0, Math.round(Number(item.diffAccountsCount)))
+        : 0,
+      openItemsCount: Number.isFinite(Number(item.openItemsCount))
+        ? Math.max(0, Math.round(Number(item.openItemsCount)))
+        : (item.sapOpenItems || []).length,
+      societies: sanitizeSocieties(item.societies || []),
+      accounts: compactAccounts,
+      sapOpenItems: sanitizeSapOpenItems((item.sapOpenItems || []).slice(0, 1500)),
+      sapBalanceRows: sanitizeSapBalanceRows((item.sapBalanceRows || []).slice(0, 1000)),
+    };
+    if (item.closedByEmail && String(item.closedByEmail).trim()) {
+      clean.closedByEmail = String(item.closedByEmail).trim().slice(0, 160);
+    }
+    if (item.notes && String(item.notes).trim()) {
+      clean.notes = String(item.notes).trim().slice(0, 500);
+    }
+    return clean;
+  });
+
 const toFirestoreValue = (val: unknown): unknown => {
   if (val === null || val === undefined) return { nullValue: null };
   if (typeof val === 'boolean') return { booleanValue: val };
@@ -355,6 +408,13 @@ const fetchBankDocViaRest = async (docId: string): Promise<SavedBankReconciliati
     title: String(parsed.title || 'Conciliación Bancaria Premex'),
     selectedMonth: String(parsed.selectedMonth || 'Octubre 2026'),
     selectedAccountId: parsed.selectedAccountId ? String(parsed.selectedAccountId) : undefined,
+    openPeriod:
+      'openPeriod' in parsed
+        ? String(parsed.openPeriod || '').trim() || null
+        : undefined,
+    closedReconciliations: Array.isArray(parsed.closedReconciliations)
+      ? parsed.closedReconciliations
+      : [],
     societies: Array.isArray(parsed.societies) ? parsed.societies : [],
     accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
     sapOpenItems: Array.isArray(parsed.sapOpenItems) ? parsed.sapOpenItems : [],
@@ -405,6 +465,13 @@ export const subscribeToBankReconciliation = (
         title: String(data.title || 'Conciliación Bancaria Premex'),
         selectedMonth: String(data.selectedMonth || 'Octubre 2026'),
         selectedAccountId: data.selectedAccountId ? String(data.selectedAccountId) : undefined,
+        openPeriod:
+          'openPeriod' in data
+            ? String(data.openPeriod || '').trim() || null
+            : undefined,
+        closedReconciliations: Array.isArray(data.closedReconciliations)
+          ? data.closedReconciliations
+          : [],
         societies: Array.isArray(data.societies) ? data.societies : [],
         accounts: Array.isArray(data.accounts) ? data.accounts : [],
         sapOpenItems: Array.isArray(data.sapOpenItems) ? data.sapOpenItems : [],
@@ -439,6 +506,8 @@ export const saveBankReconciliationToCloud = async (params: {
   title: string;
   selectedMonth: string;
   selectedAccountId: string;
+  openPeriod: string | null;
+  closedReconciliations: BankClosedReconciliation[];
   societies: BankSociety[];
   accounts: BankAccount[];
   sapOpenItems: SapOpenItem[];
@@ -456,6 +525,8 @@ export const saveBankReconciliationToCloud = async (params: {
     ? params.targetId
     : DEFAULT_BANK_REC_ID;
 
+  const cleanOpenPeriod = params.openPeriod ? String(params.openPeriod).trim().slice(0, 60) : '';
+  const cleanClosedReconciliations = sanitizeClosedReconciliations(params.closedReconciliations);
   const cleanSocieties = sanitizeSocieties(params.societies);
   const cleanAccounts = sanitizeAccounts(params.accounts);
   const cleanSapOpenItems = sanitizeSapOpenItems(params.sapOpenItems);
@@ -479,6 +550,8 @@ export const saveBankReconciliationToCloud = async (params: {
       title: cleanTitle,
       selectedMonth: cleanMonth,
       selectedAccountId: cleanAccountId,
+      openPeriod: cleanOpenPeriod,
+      closedReconciliations: cleanClosedReconciliations,
       societies: cleanSocieties,
       accounts: cleanAccounts,
       sapOpenItems: cleanSapOpenItems,
@@ -514,6 +587,8 @@ export const saveBankReconciliationToCloud = async (params: {
           'title',
           'selectedMonth',
           'selectedAccountId',
+          'openPeriod',
+          'closedReconciliations',
           'societies',
           'accounts',
           'sapOpenItems',
@@ -573,6 +648,8 @@ export const saveBankReconciliationToCloud = async (params: {
           title: cleanTitle,
           selectedMonth: cleanMonth,
           selectedAccountId: cleanAccountId,
+          openPeriod: cleanOpenPeriod,
+          closedReconciliations: cleanClosedReconciliations,
           societies: cleanSocieties,
           accounts: cleanAccounts,
           sapOpenItems: cleanSapOpenItems,
@@ -603,6 +680,8 @@ export const saveBankReconciliationToCloud = async (params: {
         title: cleanTitle,
         selectedMonth: cleanMonth,
         selectedAccountId: cleanAccountId,
+        openPeriod: cleanOpenPeriod,
+        closedReconciliations: cleanClosedReconciliations,
         societies: cleanSocieties,
         accounts: cleanAccounts,
         sapOpenItems: cleanSapOpenItems,

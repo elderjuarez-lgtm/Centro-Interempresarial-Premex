@@ -24,6 +24,7 @@ interface BankHeaderProps {
   selectedMonth: string;
   setSelectedMonth: (month: string) => void;
   availableMonths: string[];
+  closedPeriodKeys: Set<string>;
   onOpenPrintPreview: () => void;
   onExportExcel: () => void;
   onSaveCloud: () => void;
@@ -41,7 +42,7 @@ const BANK_TAB_LABEL: Record<BankTab, string> = {
   pendientes: 'Partidas Abiertas SAP (FBL3N)',
   cuentas: 'Maestro de Sociedades y Cuentas Bancarias',
   carga: 'Carga Masiva SAP (Catálogo, Balance 00/01/02 y FBL3N)',
-  cruce: 'Cruce Bilateral Extracto vs Auxiliar',
+  historial: 'Historial de Conciliaciones Cerradas',
 };
 
 export const BankHeader: React.FC<BankHeaderProps> = ({
@@ -53,6 +54,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
   selectedMonth,
   setSelectedMonth,
   availableMonths,
+  closedPeriodKeys,
   onOpenPrintPreview,
   onExportExcel,
   onSaveCloud,
@@ -148,12 +150,21 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
               onChange={(e) => setSelectedMonth(e.target.value)}
               className="bg-transparent font-bold text-[#132B63] focus:outline-hidden cursor-pointer"
             >
-              <option value="ALL">Todos los Meses</option>
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
+              {availableMonths.map((m) => {
+                const isClosed = closedPeriodKeys.has(
+                  m
+                    .trim()
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/\s+/g, ' ')
+                );
+                return (
+                  <option key={m} value={m}>
+                    {isClosed ? `${m} (Cerrada)` : m}
+                  </option>
+                );
+              })}
             </select>
           </div>
 

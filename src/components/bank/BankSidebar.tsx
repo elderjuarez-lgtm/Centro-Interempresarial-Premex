@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   LayoutDashboard,
-  ArrowLeftRight,
+  History,
   AlertCircle,
   Landmark,
   UploadCloud,
@@ -23,6 +23,8 @@ interface BankSidebarProps {
   accountsCount: number;
   openItemsCount: number;
   squaredAccountsCount: number;
+  closedCount: number;
+  openPeriod: string | null;
   onSwitchModule: (moduleId: ActiveModuleId) => void;
   permissions: EffectivePermissions;
 }
@@ -37,6 +39,8 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
   accountsCount,
   openItemsCount,
   squaredAccountsCount,
+  closedCount,
+  openPeriod,
   onSwitchModule,
   permissions,
 }) => {
@@ -76,11 +80,11 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
       counter: null,
     },
     {
-      id: 'cruce',
-      label: 'Cruce Bilateral',
-      description: 'Emparejamiento extracto vs auxiliar',
-      icon: ArrowLeftRight,
-      counter: null,
+      id: 'historial',
+      label: 'Historial de Conciliaciones',
+      description: 'Consulta de periodos cerrados y PDF/Excel',
+      icon: History,
+      counter: closedCount > 0 ? String(closedCount) : null,
     },
   ];
 
@@ -163,6 +167,9 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
                 ? `Cta 00: ${selectedAccount.cuentaMayor00}`
                 : selectedAccount.numeroCuenta}{' '}
               · {selectedAccount.moneda}
+            </div>
+            <div className="text-[11px] mt-1.5 pt-1.5 border-t border-white/10 text-sky-200/90 truncate">
+              {openPeriod ? `Ciclo abierto · ${openPeriod}` : 'Sin conciliación abierta'}
             </div>
           </div>
         )}

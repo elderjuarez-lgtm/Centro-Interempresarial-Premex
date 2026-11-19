@@ -250,6 +250,15 @@
           "description": "Selected corporate bank account ID",
           "maxLength": 128
         },
+        "openPeriod": {
+          "type": "string",
+          "description": "Active open reconciliation period label, or empty string when closed and awaiting a new reconciliation opening",
+          "maxLength": 60
+        },
+        "closedReconciliations": {
+          "type": "array",
+          "description": "Bounded archive (max 60) of closed monthly bank reconciliation snapshots including frozen societies, accounts, SAP 00/01/02 balances, and FBL3N open items"
+        },
         "societies": {
           "type": "array",
           "description": "Catalog of SAP corporate societies (codigoSociedad, nombre, pais, moneda, nit) configured for bank treasury reconciliations"

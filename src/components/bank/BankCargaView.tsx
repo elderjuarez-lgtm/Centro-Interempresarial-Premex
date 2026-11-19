@@ -8,27 +8,23 @@ import {
   Building2,
   Layers,
   ListChecks,
-  ArrowLeftRight,
   Loader2,
   X,
+  Lock,
+  FolderPlus,
 } from 'lucide-react';
 import {
   BankAccount,
   BankSociety,
-  BankStatementItem,
-  BookLedgerItem,
   EffectivePermissions,
 } from '../../types';
 import {
-  ParsedBankImportResult,
   ParsedSapBalanceResult,
   ParsedSapCatalogResult,
   ParsedSapFbl3nResult,
-  downloadBankExcelTemplate,
   downloadSapBalanceTemplate,
   downloadSapCatalogTemplate,
   downloadSapFbl3nTemplate,
-  parseBankExcelFile,
   parseSapBalance000102File,
   parseSapCatalogFile,
   parseSapFbl3nOpenItemsFile,
@@ -40,7 +36,7 @@ import {
   getSapDocumentClassLabel,
 } from '../../utils/bankReconciliation';
 
-type UploadTab = 'balance' | 'fbl3n' | 'catalogo' | 'bilateral';
+type UploadTab = 'balance' | 'fbl3n' | 'catalogo';
 
 interface BankCargaViewProps {
   societies: BankSociety[];
@@ -49,14 +45,12 @@ interface BankCargaViewProps {
   selectedMonth: string;
   permissions: EffectivePermissions;
   isReadOnly?: boolean;
+  isPeriodClosed?: boolean;
+  openPeriod?: string | null;
+  onRequestOpenReconciliation?: () => void;
   onApplySapCatalogImport: (result: ParsedSapCatalogResult) => void;
   onApplySapBalanceImport: (result: ParsedSapBalanceResult) => void;
   onApplySapFbl3nImport: (result: ParsedSapFbl3nResult, mode: 'replace' | 'append') => void;
-  onConfirmBilateralImport: (payload: {
-    statementItems: BankStatementItem[];
-    ledgerItems: BookLedgerItem[];
-    mode: 'replace' | 'append';
-  }) => void;
 }
 
 export const BankCargaView: React.FC<BankCargaViewProps> = ({
@@ -66,10 +60,12 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
   selectedMonth,
   permissions,
   isReadOnly = false,
+  isPeriodClosed = false,
+  openPeriod = null,
+  onRequestOpenReconciliation,
   onApplySapCatalogImport,
   onApplySapBalanceImport,
   onApplySapFbl3nImport,
-  onConfirmBilateralImport,
 }) => {
   const [activeMode, setActiveMode] = useState<UploadTab>('balance');
   const [isParsing, setIsParsing] = useState(false);
@@ -80,7 +76,6 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
   const [catalogPreview, setCatalogPreview] = useState<ParsedSapCatalogResult | null>(null);
   const [balancePreview, setBalancePreview] = useState<ParsedSapBalanceResult | null>(null);
   const [fbl3nPreview, setFbl3nPreview] = useState<ParsedSapFbl3nResult | null>(null);
-  const [bilateralPreview, setBilateralPreview] = useState<ParsedBankImportResult | null>(null);
   const [excludedCompaniesWarning, setExcludedCompaniesWarning] = useState<string[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -90,7 +85,6 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
     setCatalogPreview(null);
     setBalancePreview(null);
     setFbl3nPreview(null);
-    setBilateralPreview(null);
     setParseError(null);
     setLoadedFileName(null);
     setExcludedCompaniesWarning([]);
@@ -155,12 +149,6 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
           return ok;
         });
         setFbl3nPreview({ ...res, items: allowedItems });
-      } else {
-        if (!selectedAccount) {
-          throw new Error('Selecciona una cuenta bancaria en la barra superior antes de importar.');
-        }
-        const res = await parseBankExcelFile(file, selectedAccount.id, effectiveMonth, 'auto');
-        setBilateralPreview(res);
       }
 
       if (blocked.size > 0) {
@@ -179,6 +167,36 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
     return (
       <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-500">
         Tu perfil es de solo consulta y no tiene permisos para ejecutar cargas masivas SAP.
+      </div>
+    );
+  }
+
+  if (isPeriodClosed) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-4">
+        <div className="w-12 h-12 rounded-xl bg-slate-100 text-[#132B63] flex items-center justify-center mx-auto">
+          <Lock className="w-6 h-6" />
+        </div>
+        <div className="space-y-1 max-w-md mx-auto">
+          <h3 className="text-sm font-bold text-slate-900">
+            Periodo {effectiveMonth} cerrado · Carga masiva bloqueada
+          </h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            {openPeriod
+              ? `Estás visualizando un periodo cerrado. Selecciona el periodo abierto (${openPeriod}) para cargar archivos SAP.`
+              : 'No existe una conciliación abierta actualmente. Abre una nueva conciliación para cargar el Balance SAP 00/01/02 y las Partidas Abiertas FBL3N del siguiente mes.'}
+          </p>
+        </div>
+        {!openPeriod && onRequestOpenReconciliation && (
+          <button
+            type="button"
+            onClick={onRequestOpenReconciliation}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <FolderPlus className="w-4 h-4" />
+            <span>Abrir Nueva Conciliación</span>
+          </button>
+        )}
       </div>
     );
   }
@@ -207,18 +225,12 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
       subtitle: 'Importación masiva del maestro bancario 00 / 01 / 02',
       icon: Building2,
     },
-    {
-      id: 'bilateral',
-      title: 'Extracto y Auxiliar (Opcional)',
-      subtitle: 'Movimientos detallados para Mesa de Cruce Bilateral',
-      icon: ArrowLeftRight,
-    },
   ];
 
   return (
     <div className="space-y-5">
       {/* Mode Selector Cards */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const active = activeMode === tab.id;
@@ -274,8 +286,7 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
               if (activeMode === 'catalogo') downloadSapCatalogTemplate(societies, accounts);
               else if (activeMode === 'balance')
                 downloadSapBalanceTemplate(accounts, effectiveMonth);
-              else if (activeMode === 'fbl3n') downloadSapFbl3nTemplate(accounts, effectiveMonth);
-              else downloadBankExcelTemplate(selectedAccount);
+              else downloadSapFbl3nTemplate(accounts, effectiveMonth);
             }}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#132B63] bg-slate-100 hover:bg-slate-200/80 rounded-xl transition-colors cursor-pointer shrink-0"
           >
@@ -330,10 +341,6 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
                   'Columnas FBL3N: Sociedad, Cuenta de mayor, Clave referencia 1 y 3 (Tercero), Referencia, Nº documento, Clase de documento, Fecha de documento, Fe.contabilización, Importe en moneda local, Moneda local y Texto.'}
                 {activeMode === 'catalogo' &&
                   'Hojas esperadas: Sociedades (Codigo_Sociedad, Nombre, Pais, Moneda, NIT) y Cuentas_Bancarias (Banco, Numero_Cuenta, Cuenta_Mayor_00/01/02).'}
-                {activeMode === 'bilateral' &&
-                  `Carga hojas de Extracto y Auxiliar para la cuenta activa (${
-                    selectedAccount?.banco || 'selecciona cuenta arriba'
-                  }).`}
               </p>
             </div>
           )}
@@ -654,80 +661,6 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
               </tbody>
             </table>
           </div>
-        </section>
-      )}
-
-      {/* ==================== PREVIEW 4: BILATERAL EXTRACTO + AUXILIAR ==================== */}
-      {activeMode === 'bilateral' && bilateralPreview && (
-        <section className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-bold text-slate-900">
-                Vista Previa Cruce Bilateral · {bilateralPreview.statementItems.length} mov.
-                Extracto y {bilateralPreview.ledgerItems.length} mov. Auxiliar
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Cuenta destino: <strong>{selectedAccount?.banco}</strong> (
-                {selectedAccount?.numeroCuenta})
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="inline-flex bg-slate-200/70 p-0.5 rounded-lg text-xs">
-                <button
-                  type="button"
-                  onClick={() => setImportMergeMode('replace')}
-                  className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
-                    importMergeMode === 'replace'
-                      ? 'bg-white text-[#132B63] shadow-2xs'
-                      : 'text-slate-600'
-                  }`}
-                >
-                  Reemplazar cuenta
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setImportMergeMode('append')}
-                  className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
-                    importMergeMode === 'append'
-                      ? 'bg-white text-[#132B63] shadow-2xs'
-                      : 'text-slate-600'
-                  }`}
-                >
-                  Acumular
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={clearPreviews}
-                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-lg cursor-pointer"
-              >
-                Descartar
-              </button>
-              <button
-                type="button"
-                disabled={
-                  bilateralPreview.statementItems.length === 0 &&
-                  bilateralPreview.ledgerItems.length === 0
-                }
-                onClick={() =>
-                  onConfirmBilateralImport({
-                    statementItems: bilateralPreview.statementItems,
-                    ledgerItems: bilateralPreview.ledgerItems,
-                    mode: importMergeMode,
-                  })
-                }
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl transition-colors cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Aplicar y abrir Cruce Bilateral</span>
-              </button>
-            </div>
-          </div>
-          {bilateralPreview.warnings.length > 0 && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
-              {bilateralPreview.warnings.join(' ')}
-            </div>
-          )}
         </section>
       )}
     </div>

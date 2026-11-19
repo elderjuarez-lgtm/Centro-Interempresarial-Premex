@@ -1,9 +1,20 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { User } from 'firebase/auth';
-import { CheckCircle2, Cloud, AlertTriangle, X, Building2 } from 'lucide-react';
+import {
+  CheckCircle2,
+  Cloud,
+  AlertTriangle,
+  X,
+  Building2,
+  Lock,
+  LockOpen,
+  FolderPlus,
+  History,
+} from 'lucide-react';
 import {
   ActiveModuleId,
   BankAccount,
+  BankClosedReconciliation,
   BankMatchGroup,
   BankReconcilingSection,
   BankSociety,
@@ -20,8 +31,8 @@ import {
   computeBankReconciliationSummary,
   deriveSapSubaccounts,
   inferCutoffDateFromMonth,
+  normalizePeriodKey,
   resolveAccountBalancesForMonth,
-  runAutoBankMatch,
 } from '../../utils/bankReconciliation';
 import {
   ParsedSapBalanceResult,
@@ -33,12 +44,17 @@ import { exportSapDeliverableWorkbook } from '../../utils/bankOfficialExport';
 import { BankSidebar } from './BankSidebar';
 import { BankHeader } from './BankHeader';
 import { BankResumenView } from './BankResumenView';
-import { BankCruceView } from './BankCruceView';
+import { BankHistorialView } from './BankHistorialView';
 import { BankPendientesView } from './BankPendientesView';
 import { BankCuentasView } from './BankCuentasView';
 import { BankCargaView } from './BankCargaView';
 import { AddReconcilingItemPayload } from './BankOfficialSheet';
 import { BankPrintPreviewModal } from './BankPrintPreviewModal';
+import {
+  BlockedOpenNoticeModal,
+  CloseReconciliationModal,
+  OpenReconciliationModal,
+} from './BankCycleModals';
 
 export interface BankWorkspaceData {
   docId: string;
@@ -51,6 +67,10 @@ export interface BankWorkspaceData {
   matches: BankMatchGroup[];
   selectedAccountId: string;
   selectedMonth: string;
+  /** Periodo actualmente abierto. null indica que la última conciliación ya fue cerrada y se requiere abrir una nueva. */
+  openPeriod: string | null;
+  /** Archivo inmutable de conciliaciones cerradas (más reciente primero). */
+  closedReconciliations: BankClosedReconciliation[];
   lastSavedAtIso: string | null;
   hasUnsavedChanges: boolean;
 }
@@ -61,7 +81,7 @@ interface BankModuleWorkspaceProps {
     updater: (prev: BankWorkspaceData) => BankWorkspaceData,
     markUnsaved?: boolean
   ) => void;
-  onSaveToCloud: () => Promise<void>;
+  onSaveToCloud: (overrideData?: BankWorkspaceData) => Promise<void>;
   currentUser: User | null;
   onSignInWithGoogle: () => void;
   onSignOut: () => void;
@@ -100,6 +120,9 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSavingCloud, setIsSavingCloud] = useState(false);
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
+  const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
+  const [isOpenModalOpen, setIsOpenModalOpen] = useState(false);
+  const [isBlockedOpenModalOpen, setIsBlockedOpenModalOpen] = useState(false);
   const [pendingAccountFilterId, setPendingAccountFilterId] = useState<string | undefined>(
     undefined
   );
@@ -126,9 +149,16 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
     [data.accounts, data.selectedAccountId]
   );
 
-  // Collect all periods across per-month balances, SAP balance rows, SAP open items, and bilateral items
+  const closedPeriodKeys = useMemo(
+    () => new Set(data.closedReconciliations.map((c) => normalizePeriodKey(c.period))),
+    [data.closedReconciliations]
+  );
+
+  // Collect all periods across open period, closed history, per-month balances, and SAP rows
   const availableMonths = useMemo(() => {
     const set = new Set<string>();
+    if (data.openPeriod) set.add(data.openPeriod);
+    data.closedReconciliations.forEach((c) => c.period && set.add(c.period));
     data.accounts.forEach((acc) => {
       if (acc.saldosPorMes) {
         Object.keys(acc.saldosPorMes).forEach((m) => m && set.add(m));
@@ -136,22 +166,28 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
     });
     data.sapBalanceRows.forEach((r) => r.mes && set.add(r.mes));
     data.sapOpenItems.forEach((i) => i.mes && set.add(i.mes));
-    data.statementItems.forEach((i) => i.mes && set.add(i.mes));
-    data.ledgerItems.forEach((i) => i.mes && set.add(i.mes));
     if (set.size === 0) set.add('Octubre 2026');
-    return Array.from(set).sort();
+    return Array.from(set);
   }, [
+    data.openPeriod,
+    data.closedReconciliations,
     data.accounts,
     data.sapBalanceRows,
     data.sapOpenItems,
-    data.statementItems,
-    data.ledgerItems,
   ]);
 
   const effectiveMonth =
-    data.selectedMonth === 'ALL'
-      ? availableMonths[0] || 'Octubre 2026'
+    data.selectedMonth === 'ALL' || !data.selectedMonth
+      ? data.openPeriod || availableMonths[0] || 'Octubre 2026'
       : data.selectedMonth;
+
+  const isSelectedPeriodClosed = useMemo(() => {
+    if (closedPeriodKeys.has(normalizePeriodKey(effectiveMonth))) return true;
+    if (!data.openPeriod) return true;
+    return normalizePeriodKey(effectiveMonth) !== normalizePeriodKey(data.openPeriod);
+  }, [closedPeriodKeys, effectiveMonth, data.openPeriod]);
+
+  const isOperationalReadOnly = permissions.isReadOnly || isSelectedPeriodClosed;
 
   const summary = useMemo(
     () =>
@@ -160,7 +196,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
         data.statementItems,
         data.ledgerItems,
         data.matches,
-        data.selectedMonth,
+        effectiveMonth,
         data.sapOpenItems
       ),
     [
@@ -168,42 +204,50 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
       data.statementItems,
       data.ledgerItems,
       data.matches,
-      data.selectedMonth,
+      effectiveMonth,
       data.sapOpenItems,
     ]
   );
 
-  const sidebarMetrics = useMemo(() => {
-    let squaredCount = 0;
-    let totalOpenItems = 0;
-    data.accounts.forEach((acc) => {
-      const s = computeBankReconciliationSummary(
+  const openPeriodAccountSummaries = useMemo(() => {
+    const targetPeriod = data.openPeriod || effectiveMonth;
+    return data.accounts.map((acc) => ({
+      account: acc,
+      summary: computeBankReconciliationSummary(
         acc,
         data.statementItems,
         data.ledgerItems,
         data.matches,
-        data.selectedMonth,
+        targetPeriod,
         data.sapOpenItems
-      );
-      if (Math.abs(s.diferenciaNeta) <= 1) squaredCount += 1;
-      totalOpenItems += s.sapItemsCount;
-    });
-    return { squaredCount, totalOpenItems };
+      ),
+    }));
   }, [
     data.accounts,
     data.statementItems,
     data.ledgerItems,
     data.matches,
-    data.selectedMonth,
+    data.openPeriod,
+    effectiveMonth,
     data.sapOpenItems,
   ]);
+
+  const sidebarMetrics = useMemo(() => {
+    let squaredCount = 0;
+    let totalOpenItems = 0;
+    openPeriodAccountSummaries.forEach(({ summary: s }) => {
+      if (Math.abs(s.diferenciaNeta) <= 1) squaredCount += 1;
+      totalOpenItems += s.sapItemsCount;
+    });
+    return { squaredCount, totalOpenItems };
+  }, [openPeriodAccountSummaries]);
 
   // ============================================================================
   // Live Saldo Extracto Edit & Sync to Subcuenta 00
   // ============================================================================
 
   const handleUpdateSaldoExtracto = (accountId: string, newExtracto: number) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     const nowIso = new Date().toISOString();
     const rounded = Math.round(newExtracto * 100) / 100;
 
@@ -243,7 +287,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   };
 
   const handleSyncExtractoToCta00 = (accountId: string) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     const targetAcc = data.accounts.find((a) => a.id === accountId);
     if (!targetAcc) return;
     const resolved = resolveAccountBalancesForMonth(targetAcc, effectiveMonth);
@@ -265,7 +309,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
       fechaCorte: string;
     }
   ) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     const nowIso = new Date().toISOString();
     const hasSap =
       patch.saldoCuenta00 !== undefined ||
@@ -324,7 +368,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
     accountId: string,
     payload: AddReconcilingItemPayload
   ) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     const acc = data.accounts.find((a) => a.id === accountId);
     if (!acc) return;
 
@@ -373,7 +417,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   };
 
   const handleAddSapOpenItem = (itemData: Omit<SapOpenItem, 'id' | 'seccionAuto'>) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     const seccionAuto = classifySapOpenItem(
       itemData.claseDocumento,
       itemData.importeMonedaLocal
@@ -394,7 +438,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   };
 
   const handleUpdateSapOpenItem = (itemId: string, patch: Partial<SapOpenItem>) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     onUpdateData(
       (prev) => ({
         ...prev,
@@ -409,7 +453,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
     itemId: string,
     manualSection?: BankReconcilingSection
   ) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     onUpdateData(
       (prev) => ({
         ...prev,
@@ -428,7 +472,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   };
 
   const handleDeleteSapOpenItem = (itemId: string) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     onUpdateData(
       (prev) => ({
         ...prev,
@@ -440,7 +484,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   };
 
   const handleDeleteLineItem = (source: 'sap' | 'bank' | 'ledger', itemId: string) => {
-    if (permissions.isReadOnly) return;
+    if (isOperationalReadOnly) return;
     if (source === 'sap') {
       handleDeleteSapOpenItem(itemId);
       return;
@@ -624,7 +668,17 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   };
 
   const handleApplySapBalanceImport = (result: ParsedSapBalanceResult) => {
-    if (permissions.isReadOnly || result.groups.length === 0) return;
+    if (isOperationalReadOnly || result.groups.length === 0) return;
+    const closedTarget = result.groups.find((g) =>
+      closedPeriodKeys.has(normalizePeriodKey(g.mes))
+    );
+    if (closedTarget) {
+      showFeedback(
+        'error',
+        `No se puede cargar Balance en el periodo "${closedTarget.mes}" porque ya se encuentra cerrado.`
+      );
+      return;
+    }
     let createdCount = 0;
     let updatedCount = 0;
 
@@ -772,7 +826,17 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
     result: ParsedSapFbl3nResult,
     mode: 'replace' | 'append'
   ) => {
-    if (permissions.isReadOnly || result.items.length === 0) return;
+    if (isOperationalReadOnly || result.items.length === 0) return;
+    const closedTarget = result.items.find((row) =>
+      closedPeriodKeys.has(normalizePeriodKey(row.mes))
+    );
+    if (closedTarget) {
+      showFeedback(
+        'error',
+        `No se pueden cargar partidas FBL3N en el periodo "${closedTarget.mes}" porque ya se encuentra cerrado.`
+      );
+      return;
+    }
 
     onUpdateData((prev) => {
       const nextSocieties = [...prev.societies];
@@ -896,89 +960,255 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   };
 
   // ============================================================================
-  // Cruce Bilateral Handlers (preserved intact)
+  // Reconciliation Lifecycle: Close Current & Open Next (with Strict Lock)
   // ============================================================================
 
-  const handleRunAutoMatch = () => {
-    if (permissions.isReadOnly || !selectedAccount) return;
-    const { newMatches, byRefCount, byAmountCount } = runAutoBankMatch(
-      selectedAccount.id,
-      data.selectedMonth,
-      data.statementItems,
-      data.ledgerItems,
-      data.matches
-    );
-
-    if (newMatches.length === 0) {
-      showFeedback(
-        'info',
-        'No se encontraron nuevos cruces automáticos exactos. Puedes realizar emparejamientos manuales (1 a N) en Cruce Bilateral.'
-      );
+  const handleRequestOpenReconciliation = () => {
+    if (permissions.isReadOnly) return;
+    // Strict sequential lock: never allow opening while a previous reconciliation is still open
+    if (data.openPeriod) {
+      setIsBlockedOpenModalOpen(true);
       return;
     }
-
-    onUpdateData(
-      (prev) => ({
-        ...prev,
-        matches: [...prev.matches, ...newMatches],
-      }),
-      true
-    );
-
-    showFeedback(
-      'success',
-      `Cruce bilateral completado: ${newMatches.length} emparejamiento(s) nuevo(s) (${byRefCount} por referencia y ${byAmountCount} por valor/fecha).`
-    );
+    setIsOpenModalOpen(true);
   };
 
-  const handleCreateManualMatch = (
-    bankIds: string[],
-    ledgerIds: string[],
-    note?: string
-  ) => {
-    if (
-      permissions.isReadOnly ||
-      !selectedAccount ||
-      bankIds.length === 0 ||
-      ledgerIds.length === 0
-    ) {
-      return;
-    }
-    const newGroup: BankMatchGroup = {
-      id: `bm-man-${Date.now()}`,
-      cuentaId: selectedAccount.id,
-      mes: effectiveMonth,
-      bankItemIds: bankIds,
-      ledgerItemIds: ledgerIds,
-      method: 'manual',
-      matchedAt: new Date().toISOString(),
-      note,
+  const handleConfirmCloseReconciliation = async (notes: string) => {
+    if (permissions.isReadOnly || !data.openPeriod) return;
+    const closingPeriod = data.openPeriod;
+    const nowIso = new Date().toISOString();
+    const targetPeriodKey = normalizePeriodKey(closingPeriod);
+
+    // Freeze accounts strictly with resolved balances for the closed period
+    const frozenAccounts: BankAccount[] = data.accounts.map((acc) => {
+      const resolved = resolveAccountBalancesForMonth(acc, closingPeriod);
+      const frozenMonthEntry = {
+        saldoLibros: resolved.saldoLibros,
+        saldoExtracto: resolved.saldoExtracto,
+        saldoCuenta00: resolved.saldoCuenta00,
+        saldoCuenta01: resolved.saldoCuenta01,
+        saldoCuenta02: resolved.saldoCuenta02,
+        saldoExtractoManual: resolved.saldoExtractoManual,
+        fechaCorte: resolved.fechaCorte,
+        fuenteLibros: resolved.monthEntry?.fuenteLibros || 'Balance SAP 00/01/02',
+        fuenteExtracto:
+          resolved.monthEntry?.fuenteExtracto ||
+          (resolved.saldoExtractoManual ? 'Edición directa en formato' : 'Precarga Cta 00 SAP'),
+        updatedAtIso: nowIso,
+      };
+      return {
+        ...acc,
+        fechaCorte: resolved.fechaCorte,
+        saldoCuenta00: resolved.saldoCuenta00,
+        saldoCuenta01: resolved.saldoCuenta01,
+        saldoCuenta02: resolved.saldoCuenta02,
+        saldoFinalLibros: resolved.saldoLibros,
+        saldoFinalExtracto: resolved.saldoExtracto,
+        saldoExtractoManual: resolved.saldoExtractoManual,
+        saldosPorMes: { [closingPeriod]: frozenMonthEntry },
+      };
+    });
+
+    const frozenOpenItems = data.sapOpenItems.filter(
+      (i) => !i.mes || normalizePeriodKey(i.mes) === targetPeriodKey
+    );
+    const frozenBalanceRows = data.sapBalanceRows.filter(
+      (r) => !r.mes || normalizePeriodKey(r.mes) === targetPeriodKey
+    );
+
+    let squaredCount = 0;
+    let diffCount = 0;
+    frozenAccounts.forEach((acc) => {
+      const s = computeBankReconciliationSummary(
+        acc,
+        [],
+        [],
+        [],
+        closingPeriod,
+        frozenOpenItems
+      );
+      if (Math.abs(s.diferenciaNeta) <= 1) squaredCount += 1;
+      else diffCount += 1;
+    });
+
+    const snapshot: BankClosedReconciliation = {
+      id: `bank-close-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      period: closingPeriod,
+      closedAtIso: nowIso,
+      closedByName:
+        currentUser?.displayName || permissions.displayName || currentUser?.email || 'Usuario',
+      closedByEmail: currentUser?.email || permissions.email || undefined,
+      notes: notes || undefined,
+      societiesCount: data.societies.length,
+      accountsCount: frozenAccounts.length,
+      squaredAccountsCount: squaredCount,
+      diffAccountsCount: diffCount,
+      openItemsCount: frozenOpenItems.length,
+      societies: data.societies.map((s) => ({ ...s })),
+      accounts: frozenAccounts,
+      sapOpenItems: frozenOpenItems.map((i) => ({ ...i, mes: closingPeriod })),
+      sapBalanceRows: frozenBalanceRows.map((r) => ({ ...r, mes: closingPeriod })),
+    };
+
+    const nextClosedList = [
+      snapshot,
+      ...data.closedReconciliations.filter(
+        (c) => normalizePeriodKey(c.period) !== targetPeriodKey
+      ),
+    ];
+
+    const nextDataSnapshot: BankWorkspaceData = {
+      ...data,
+      openPeriod: null,
+      selectedMonth: closingPeriod,
+      closedReconciliations: nextClosedList,
+      hasUnsavedChanges: true,
     };
 
     onUpdateData(
       (prev) => ({
         ...prev,
-        matches: [...prev.matches, newGroup],
+        openPeriod: null,
+        selectedMonth: closingPeriod,
+        closedReconciliations: [
+          snapshot,
+          ...prev.closedReconciliations.filter(
+            (c) => normalizePeriodKey(c.period) !== targetPeriodKey
+          ),
+        ],
       }),
       true
     );
 
+    setIsCloseModalOpen(false);
     showFeedback(
       'success',
-      `Emparejamiento manual registrado (${bankIds.length} extracto × ${ledgerIds.length} auxiliar).`
+      `Conciliación de ${closingPeriod} cerrada y archivada en el Historial. Ya puedes abrir una nueva conciliación.`
     );
+
+    // Best-effort automatic cloud backup when signed in
+    if (currentUser) {
+      setIsSavingCloud(true);
+      try {
+        await onSaveToCloud(nextDataSnapshot);
+      } catch {
+        // Unsaved flag remains true so user can retry manual sync
+      } finally {
+        setIsSavingCloud(false);
+      }
+    }
   };
 
-  const handleDeleteMatch = (matchId: string) => {
+  const handleConfirmOpenReconciliation = async (payload: {
+    period: string;
+    carryOverOpenItems: boolean;
+  }) => {
     if (permissions.isReadOnly) return;
+    // Double-check strict sequential lock and duplicate period guard
+    if (data.openPeriod) {
+      setIsOpenModalOpen(false);
+      setIsBlockedOpenModalOpen(true);
+      return;
+    }
+    const targetKey = normalizePeriodKey(payload.period);
+    if (data.closedReconciliations.some((c) => normalizePeriodKey(c.period) === targetKey)) {
+      showFeedback(
+        'error',
+        `El periodo "${payload.period}" ya se encuentra cerrado en el Historial. Selecciona un periodo nuevo.`
+      );
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const nextCutoff = inferCutoffDateFromMonth(payload.period);
+    const latestClosed = data.closedReconciliations[0] || null;
+
+    const preparedAccounts: BankAccount[] = data.accounts.map((acc) => ({
+      ...acc,
+      fechaCorte: nextCutoff,
+      saldoCuenta00: 0,
+      saldoCuenta01: 0,
+      saldoCuenta02: 0,
+      saldoFinalLibros: 0,
+      saldoFinalExtracto: 0,
+      saldoExtractoManual: false,
+      saldosPorMes: {
+        ...(acc.saldosPorMes || {}),
+        [payload.period]: {
+          saldoLibros: 0,
+          saldoExtracto: 0,
+          saldoCuenta00: 0,
+          saldoCuenta01: 0,
+          saldoCuenta02: 0,
+          saldoExtractoManual: false,
+          fechaCorte: nextCutoff,
+          fuenteLibros: 'Apertura de periodo',
+          fuenteExtracto: 'Pendiente carga SAP',
+          updatedAtIso: nowIso,
+        },
+      },
+    }));
+
+    const carriedOpenItems: SapOpenItem[] =
+      payload.carryOverOpenItems && latestClosed
+        ? latestClosed.sapOpenItems.map((item, idx) => ({
+            ...item,
+            id: `sap-carry-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+            mes: payload.period,
+          }))
+        : [];
+
+    const retainedOpenItems = data.sapOpenItems.filter(
+      (i) => normalizePeriodKey(i.mes) !== targetKey
+    );
+    const nextOpenItems = [...retainedOpenItems, ...carriedOpenItems];
+    const nextBalanceRows = data.sapBalanceRows.filter(
+      (r) => normalizePeriodKey(r.mes) !== targetKey
+    );
+
+    const nextDataSnapshot: BankWorkspaceData = {
+      ...data,
+      accounts: preparedAccounts,
+      sapOpenItems: nextOpenItems,
+      sapBalanceRows: nextBalanceRows,
+      openPeriod: payload.period,
+      selectedMonth: payload.period,
+      hasUnsavedChanges: true,
+    };
+
     onUpdateData(
       (prev) => ({
         ...prev,
-        matches: prev.matches.filter((m) => m.id !== matchId),
+        accounts: preparedAccounts,
+        sapOpenItems: nextOpenItems,
+        sapBalanceRows: nextBalanceRows,
+        openPeriod: payload.period,
+        selectedMonth: payload.period,
       }),
       true
     );
-    showFeedback('info', 'Cruce bilateral deshecho.');
+
+    setIsOpenModalOpen(false);
+    setActiveTab('resumen');
+    showFeedback(
+      'success',
+      `Nueva conciliación «${payload.period}» abierta correctamente${
+        carriedOpenItems.length > 0
+          ? ` con ${carriedOpenItems.length} partida(s) abierta(s) arrastrada(s).`
+          : '. Lista para cargar Balance SAP 00/01/02 y FBL3N.'
+      }`
+    );
+
+    if (currentUser) {
+      setIsSavingCloud(true);
+      try {
+        await onSaveToCloud(nextDataSnapshot);
+      } catch {
+        // Keep unsaved flag so user can retry manual sync
+      } finally {
+        setIsSavingCloud(false);
+      }
+    }
   };
 
   // ============================================================================
@@ -1004,24 +1234,25 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
             data.statementItems,
             data.ledgerItems,
             data.matches,
-            data.selectedMonth,
+            effectiveMonth,
             data.sapOpenItems
           )
       );
 
       const scopedAccountIds = new Set(centerSummaries.map((s) => s.account?.id).filter(Boolean));
+      const targetMonthKey = normalizePeriodKey(effectiveMonth);
       const scopedSapItems = data.sapOpenItems.filter(
         (i) =>
           scopedAccountIds.has(i.cuentaId) &&
-          (data.selectedMonth === 'ALL' || !i.mes || i.mes === data.selectedMonth)
+          (!i.mes || normalizePeriodKey(i.mes) === targetMonthKey)
       );
       const scopedBalanceRows = data.sapBalanceRows.filter(
-        (r) => data.selectedMonth === 'ALL' || !r.mes || r.mes === data.selectedMonth
+        (r) => !r.mes || normalizePeriodKey(r.mes) === targetMonthKey
       );
       const scopedMatches = data.matches.filter(
         (m) =>
           scopedAccountIds.has(m.cuentaId) &&
-          (data.selectedMonth === 'ALL' || m.mes === data.selectedMonth)
+          normalizePeriodKey(m.mes) === targetMonthKey
       );
 
       const scopeLabel =
@@ -1037,7 +1268,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
         statementItems: data.statementItems,
         ledgerItems: data.ledgerItems,
         matches: scopedMatches,
-        selectedMonth: data.selectedMonth,
+        selectedMonth: effectiveMonth,
         scopeLabel,
       });
 
@@ -1095,6 +1326,8 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
         accountsCount={data.accounts.length}
         openItemsCount={sidebarMetrics.totalOpenItems}
         squaredAccountsCount={sidebarMetrics.squaredCount}
+        closedCount={data.closedReconciliations.length}
+        openPeriod={data.openPeriod}
         onSwitchModule={onSwitchModule}
         permissions={permissions}
       />
@@ -1108,11 +1341,12 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
           onSelectAccountId={(id) =>
             onUpdateData((prev) => ({ ...prev, selectedAccountId: id }), false)
           }
-          selectedMonth={data.selectedMonth}
+          selectedMonth={effectiveMonth}
           setSelectedMonth={(month) =>
             onUpdateData((prev) => ({ ...prev, selectedMonth: month }), false)
           }
           availableMonths={availableMonths}
+          closedPeriodKeys={closedPeriodKeys}
           onOpenPrintPreview={() => setIsPrintPreviewOpen(true)}
           onExportExcel={() => void handleExportDeliverableExcel('ALL')}
           onSaveCloud={handleSaveCloudClick}
@@ -1125,11 +1359,160 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
           permissions={permissions}
         />
 
-        {/* Feedback / Scope / Cloud Sync Banners (hidden on print) */}
+        {/* Reconciliation Lifecycle Control Bar (Close / Open Sequential Control) */}
+        <div className="bg-white border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 py-2.5 print:hidden">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            {/* Left: Current Period Status */}
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs min-w-0">
+              {data.openPeriod ? (
+                <>
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 whitespace-nowrap">
+                    <LockOpen className="w-3.5 h-3.5 shrink-0" />
+                    <span>Conciliación abierta</span>
+                  </span>
+                  <span className="text-slate-300" aria-hidden="true">·</span>
+                  <span className="font-bold text-slate-900 whitespace-nowrap">
+                    {data.openPeriod}
+                  </span>
+                  <span className="text-slate-300 hidden sm:inline" aria-hidden="true">·</span>
+                  <span className="text-slate-500 font-mono tabular-nums hidden sm:inline whitespace-nowrap">
+                    {sidebarMetrics.squaredCount}/{data.accounts.length} cuadradas
+                  </span>
+                  {isSelectedPeriodClosed && (
+                    <>
+                      <span className="text-slate-300" aria-hidden="true">·</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onUpdateData(
+                            (prev) => ({
+                              ...prev,
+                              selectedMonth: prev.openPeriod || effectiveMonth,
+                            }),
+                            false
+                          )
+                        }
+                        className="font-semibold text-[#1E60A8] hover:underline whitespace-nowrap cursor-pointer"
+                      >
+                        Volver a {data.openPeriod}
+                      </button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700 whitespace-nowrap">
+                    <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span>Conciliación cerrada</span>
+                  </span>
+                  <span className="text-slate-300" aria-hidden="true">·</span>
+                  <span className="text-slate-600 whitespace-nowrap">
+                    {data.closedReconciliations[0]
+                      ? `Último cierre: ${data.closedReconciliations[0].period}`
+                      : 'Sin periodo abierto actualmente'}
+                  </span>
+                </>
+              )}
+            </div>
+
+            {/* Right: Close Reconciliation, Open Reconciliation, Historial */}
+            <div className="flex items-center gap-2 shrink-0">
+              {!permissions.isReadOnly && (
+                <>
+                  <button
+                    type="button"
+                    disabled={!data.openPeriod}
+                    onClick={() => setIsCloseModalOpen(true)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
+                      data.openPeriod
+                        ? 'bg-[#132B63] hover:bg-[#0E224D] text-white cursor-pointer'
+                        : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                    }`}
+                    title={
+                      data.openPeriod
+                        ? `Cerrar y archivar la conciliación de ${data.openPeriod}`
+                        : 'No hay una conciliación abierta por cerrar'
+                    }
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>{data.openPeriod ? 'Cerrar Conciliación' : 'Conciliación Cerrada'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleRequestOpenReconciliation}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      data.openPeriod
+                        ? 'bg-slate-100 text-slate-600 hover:bg-slate-200/80 border border-slate-200'
+                        : 'bg-[#1E60A8] hover:bg-[#132B63] text-white'
+                    }`}
+                    title={
+                      data.openPeriod
+                        ? `Bloqueado: cierra ${data.openPeriod} antes de abrir una nueva conciliación`
+                        : 'Abrir un nuevo periodo de conciliación bancaria'
+                    }
+                  >
+                    {data.openPeriod ? (
+                      <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    ) : (
+                      <FolderPlus className="w-3.5 h-3.5" />
+                    )}
+                    <span>Abrir Conciliación</span>
+                  </button>
+                </>
+              )}
+
+              {activeTab !== 'historial' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('historial')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <History className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Historial ({data.closedReconciliations.length})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Feedback / Scope / Closed Period / Cloud Sync Banners (hidden on print) */}
         {(feedbackBanner ||
+          (isSelectedPeriodClosed && activeTab !== 'historial' && activeTab !== 'cuentas') ||
           permissions.getModuleCompanyScope('bancos') === 'selected' ||
           (!permissions.isReadOnly && data.hasUnsavedChanges)) && (
           <div className="px-4 sm:px-6 lg:px-8 pt-4 max-w-7xl mx-auto w-full space-y-2 print:hidden">
+            {isSelectedPeriodClosed && activeTab !== 'historial' && activeTab !== 'cuentas' && (
+              <div className="px-4 py-2.5 rounded-xl border border-slate-300 bg-slate-100/90 text-slate-800 text-xs flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Lock className="w-4 h-4 text-[#132B63] shrink-0" />
+                  <span>
+                    El periodo <strong>{effectiveMonth}</strong> está cerrado (modo solo lectura).
+                    {!data.openPeriod &&
+                      ' Abre una nueva conciliación para iniciar el siguiente periodo.'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('historial')}
+                    className="px-3 py-1 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                  >
+                    Ver en Historial
+                  </button>
+                  {!permissions.isReadOnly && !data.openPeriod && (
+                    <button
+                      type="button"
+                      onClick={handleRequestOpenReconciliation}
+                      className="px-3 py-1 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      Abrir Nueva Conciliación
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {permissions.getModuleCompanyScope('bancos') === 'selected' && (
               <div className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs flex items-center gap-2">
                 <Building2 className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
@@ -1208,7 +1591,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               statementItems={data.statementItems}
               ledgerItems={data.ledgerItems}
               matches={data.matches}
-              selectedMonth={data.selectedMonth}
+              selectedMonth={effectiveMonth}
               onNavigateTab={setActiveTab}
               onOpenAccountPartidas={handleOpenAccountPartidas}
               onUpdateSaldoExtracto={handleUpdateSaldoExtracto}
@@ -1218,7 +1601,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               onDeleteLineItem={handleDeleteLineItem}
               onOpenPrintPreview={() => setIsPrintPreviewOpen(true)}
               onExportDeliverableExcel={(socKey) => void handleExportDeliverableExcel(socKey)}
-              isReadOnly={permissions.isReadOnly}
+              isReadOnly={isOperationalReadOnly}
             />
           )}
 
@@ -1227,7 +1610,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               societies={data.societies}
               accounts={data.accounts}
               sapOpenItems={data.sapOpenItems}
-              selectedMonth={data.selectedMonth}
+              selectedMonth={effectiveMonth}
               initialAccountFilterId={pendingAccountFilterId}
               onClearInitialAccountFilter={() => setPendingAccountFilterId(undefined)}
               onAddSapOpenItem={handleAddSapOpenItem}
@@ -1236,7 +1619,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               onDeleteSapOpenItem={handleDeleteSapOpenItem}
               onExportExcel={() => void handleExportDeliverableExcel('ALL')}
               onNavigateTab={setActiveTab}
-              isReadOnly={permissions.isReadOnly}
+              isReadOnly={isOperationalReadOnly}
             />
           )}
 
@@ -1245,7 +1628,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               societies={data.societies}
               accounts={data.accounts}
               selectedAccountId={selectedAccount?.id || ''}
-              selectedMonth={data.selectedMonth}
+              selectedMonth={effectiveMonth}
               onSelectAccountAndOpen={(id) => {
                 onUpdateData((prev) => ({ ...prev, selectedAccountId: id }), false);
                 setActiveTab('resumen');
@@ -1305,74 +1688,27 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               societies={data.societies}
               accounts={data.accounts}
               selectedAccount={selectedAccount}
-              selectedMonth={data.selectedMonth}
+              selectedMonth={effectiveMonth}
               permissions={permissions}
               isReadOnly={permissions.isReadOnly}
+              isPeriodClosed={isSelectedPeriodClosed}
+              openPeriod={data.openPeriod}
+              onRequestOpenReconciliation={handleRequestOpenReconciliation}
               onApplySapCatalogImport={handleApplySapCatalogImport}
               onApplySapBalanceImport={handleApplySapBalanceImport}
               onApplySapFbl3nImport={handleApplySapFbl3nImport}
-              onConfirmBilateralImport={({
-                statementItems: newBank,
-                ledgerItems: newLedger,
-                mode,
-              }) => {
-                if (permissions.isReadOnly || !selectedAccount) return;
-                const targetId = selectedAccount.id;
-                onUpdateData((prev) => {
-                  const nextStatements =
-                    mode === 'replace' && newBank.length > 0
-                      ? [
-                          ...prev.statementItems.filter((i) => i.cuentaId !== targetId),
-                          ...newBank,
-                        ]
-                      : [...prev.statementItems, ...newBank];
-
-                  const nextLedgers =
-                    mode === 'replace' && newLedger.length > 0
-                      ? [
-                          ...prev.ledgerItems.filter((i) => i.cuentaId !== targetId),
-                          ...newLedger,
-                        ]
-                      : [...prev.ledgerItems, ...newLedger];
-
-                  const nextMatches =
-                    mode === 'replace'
-                      ? prev.matches.filter((m) => m.cuentaId !== targetId)
-                      : prev.matches;
-
-                  const firstImportedMonth =
-                    newBank[0]?.mes || newLedger[0]?.mes || prev.selectedMonth;
-
-                  return {
-                    ...prev,
-                    statementItems: nextStatements,
-                    ledgerItems: nextLedgers,
-                    matches: nextMatches,
-                    selectedMonth: firstImportedMonth,
-                  };
-                }, true);
-
-                showFeedback(
-                  'success',
-                  `Importación bilateral completada: ${newBank.length} registros Extracto y ${newLedger.length} Auxiliar.`
-                );
-                setActiveTab('cruce');
-              }}
             />
           )}
 
-          {activeTab === 'cruce' && (
-            <BankCruceView
-              account={selectedAccount}
-              selectedMonth={data.selectedMonth}
-              statementItems={data.statementItems}
-              ledgerItems={data.ledgerItems}
-              matches={data.matches}
-              summary={summary}
-              onRunAutoMatch={handleRunAutoMatch}
-              onCreateManualMatch={handleCreateManualMatch}
-              onDeleteMatch={handleDeleteMatch}
+          {activeTab === 'historial' && (
+            <BankHistorialView
+              closedReconciliations={data.closedReconciliations}
+              openPeriod={data.openPeriod}
               isReadOnly={permissions.isReadOnly}
+              onRequestOpenReconciliation={handleRequestOpenReconciliation}
+              onRequestCloseCurrent={() => setIsCloseModalOpen(true)}
+              onGoToCentroCuadre={() => setActiveTab('resumen')}
+              onNotify={showFeedback}
             />
           )}
         </main>
@@ -1383,9 +1719,41 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
         isOpen={isPrintPreviewOpen}
         onClose={() => setIsPrintPreviewOpen(false)}
         summary={summary}
-        selectedMonth={data.selectedMonth}
+        selectedMonth={effectiveMonth}
         onExportFullExcel={() => handleExportDeliverableExcel('ALL')}
       />
+
+      {/* Close Reconciliation Confirmation Modal */}
+      {data.openPeriod && (
+        <CloseReconciliationModal
+          isOpen={isCloseModalOpen}
+          onClose={() => setIsCloseModalOpen(false)}
+          period={data.openPeriod}
+          societiesCount={data.societies.length}
+          accountSummaries={openPeriodAccountSummaries}
+          openItemsCount={sidebarMetrics.totalOpenItems}
+          onConfirmClose={(notes) => void handleConfirmCloseReconciliation(notes)}
+        />
+      )}
+
+      {/* Open New Reconciliation Modal (enabled only when previous reconciliation is closed) */}
+      <OpenReconciliationModal
+        isOpen={isOpenModalOpen}
+        onClose={() => setIsOpenModalOpen(false)}
+        latestClosedPeriod={data.closedReconciliations[0]?.period || effectiveMonth}
+        closedReconciliations={data.closedReconciliations}
+        onConfirmOpen={(payload) => void handleConfirmOpenReconciliation(payload)}
+      />
+
+      {/* Sequential Lock Notice Modal */}
+      {data.openPeriod && (
+        <BlockedOpenNoticeModal
+          isOpen={isBlockedOpenModalOpen}
+          onClose={() => setIsBlockedOpenModalOpen(false)}
+          openPeriod={data.openPeriod}
+          onProceedToCloseCurrent={() => setIsCloseModalOpen(true)}
+        />
+      )}
     </div>
   );
 };

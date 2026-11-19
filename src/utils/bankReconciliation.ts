@@ -1028,3 +1028,88 @@ export const runAutoBankMatch = (
 
   return { newMatches, byRefCount, byAmountCount };
 };
+
+// ============================================================================
+// Period Lifecycle Helpers (Close / Open Sequential Lock)
+// ============================================================================
+
+export const SPANISH_MONTHS = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre',
+] as const;
+
+export const normalizePeriodKey = (period: string): string =>
+  String(period || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+
+export const parseMonthPeriod = (
+  period: string
+): { monthIndex: number; year: number } | null => {
+  const norm = normalizePeriodKey(period);
+  if (!norm) return null;
+
+  // Match "Octubre 2026" or "Octubre de 2026"
+  for (let i = 0; i < SPANISH_MONTHS.length; i += 1) {
+    const mNorm = normalizePeriodKey(SPANISH_MONTHS[i]);
+    if (norm.includes(mNorm)) {
+      const yearMatch = norm.match(/\b(20\d{2})\b/);
+      const year = yearMatch ? Number(yearMatch[1]) : new Date().getFullYear();
+      return { monthIndex: i, year };
+    }
+  }
+
+  // Match YYYY-MM
+  const isoMatch = norm.match(/\b(20\d{2})[-/](\d{1,2})\b/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const monthIndex = Number(isoMatch[2]) - 1;
+    if (monthIndex >= 0 && monthIndex <= 11) {
+      return { monthIndex, year };
+    }
+  }
+
+  return null;
+};
+
+export const formatPeriodLabel = (monthIndex: number, year: number): string => {
+  const safeIdx = ((monthIndex % 12) + 12) % 12;
+  return `${SPANISH_MONTHS[safeIdx]} ${year}`;
+};
+
+export const getNextMonthPeriod = (
+  currentPeriod?: string | null
+): { monthIndex: number; year: number; label: string } => {
+  const parsed = currentPeriod ? parseMonthPeriod(currentPeriod) : null;
+  if (parsed) {
+    const nextIdx = (parsed.monthIndex + 1) % 12;
+    const nextYear = parsed.monthIndex === 11 ? parsed.year + 1 : parsed.year;
+    return {
+      monthIndex: nextIdx,
+      year: nextYear,
+      label: formatPeriodLabel(nextIdx, nextYear),
+    };
+  }
+  const now = new Date();
+  const nextIdx = now.getMonth();
+  const nextYear = now.getFullYear();
+  return {
+    monthIndex: nextIdx,
+    year: nextYear,
+    label: formatPeriodLabel(nextIdx, nextYear),
+  };
+};
+

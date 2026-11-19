@@ -659,3 +659,42 @@ export const filterBankByPermissions = (
     ),
   };
 };
+
+/**
+ * Filters closed bank reconciliation snapshots strictly to the user's allowed companies
+ * for the `bancos` module so historical consultation respects per-society RBAC.
+ */
+export const filterClosedBankReconciliationsByPermissions = (
+  closedReconciliations: import('../types').BankClosedReconciliation[],
+  perms: EffectivePermissions
+): import('../types').BankClosedReconciliation[] => {
+  if (perms.isAdmin || perms.getModuleCompanyScope('bancos') === 'all') {
+    return closedReconciliations;
+  }
+
+  return closedReconciliations
+    .map((rec) => {
+      const scoped = filterBankByPermissions(
+        rec.accounts,
+        [],
+        [],
+        [],
+        perms,
+        rec.societies,
+        rec.sapOpenItems,
+        rec.sapBalanceRows
+      );
+      return {
+        ...rec,
+        societies: scoped.societies,
+        accounts: scoped.accounts,
+        sapOpenItems: scoped.sapOpenItems,
+        sapBalanceRows: scoped.sapBalanceRows,
+        societiesCount: scoped.societies.length,
+        accountsCount: scoped.accounts.length,
+        openItemsCount: scoped.sapOpenItems.length,
+      };
+    })
+    .filter((rec) => rec.accounts.length > 0 || rec.societies.length > 0);
+};
+

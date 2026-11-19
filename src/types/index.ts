@@ -237,7 +237,7 @@ export interface EffectivePermissions {
   previewEmail: string | null;
 }
 
-export type BankTab = 'resumen' | 'pendientes' | 'cuentas' | 'carga' | 'cruce';
+export type BankTab = 'resumen' | 'pendientes' | 'cuentas' | 'carga' | 'historial';
 
 export type BankCurrency = 'USD' | 'COP' | 'GTQ' | 'MXN' | 'EUR';
 
@@ -481,6 +481,25 @@ export interface BankReconciliationSummary {
   consignacionesPendientesItems: BookLedgerItem[];
   matchedBankIds: Set<string>;
   matchedLedgerIds: Set<string>;
+}
+
+export interface BankClosedReconciliation {
+  id: string;
+  period: string;
+  closedAtIso: string;
+  closedByName: string;
+  closedByEmail?: string;
+  notes?: string;
+  societiesCount: number;
+  accountsCount: number;
+  squaredAccountsCount: number;
+  diffAccountsCount: number;
+  openItemsCount: number;
+  /** Instantánea congelada del periodo para consulta inmutable y descarga Excel/PDF */
+  societies: BankSociety[];
+  accounts: BankAccount[];
+  sapOpenItems: SapOpenItem[];
+  sapBalanceRows: SapBalanceRow[];
 }
 
 // ============================================================================
