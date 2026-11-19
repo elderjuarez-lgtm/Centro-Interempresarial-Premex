@@ -292,9 +292,6 @@ export const CargaArchivosView: React.FC<CargaArchivosViewProps> = ({
           <h3 className="text-lg font-bold text-slate-900">
             Carga de Archivo Excel Multilibro
           </h3>
-          <p className="text-xs text-slate-500">
-            Cargue su archivo de trabajo con las hojas requeridas: <strong>Cuentas por cobrar</strong> y <strong>Cuentas por pagar</strong>.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -318,41 +315,40 @@ export const CargaArchivosView: React.FC<CargaArchivosViewProps> = ({
 
       {/* Closed months protection info banner */}
       {hasAnyClosedMonths && (
-        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs flex items-start gap-2.5">
-          <Lock className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-          <div>
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs flex items-center gap-2.5">
+          <Lock className="w-4 h-4 text-emerald-700 shrink-0" />
+          <span>
             <strong>Meses cerrados protegidos ({Object.keys(closedMonths).join(', ')}):</strong>{' '}
-            Puedes cargar el archivo Excel del nuevo mes actual con tranquilidad; el historial de los meses cerrados se conservará intacto y no se verá afectado.
-          </div>
+            el historial cerrado no se sobrescribe.
+          </span>
         </div>
       )}
 
       {/* Specifications Card */}
       <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200/70 text-xs text-blue-900 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           <div className="font-bold flex items-center gap-1.5">
             <FileSpreadsheet className="w-4 h-4 text-blue-600" />
-            <span>Hojas requeridas en el archivo Excel:</span>
+            <span>Hojas requeridas</span>
           </div>
-          <ul className="list-disc pl-5 space-y-0.5 text-blue-800">
-            <li><strong>Cuentas por cobrar:</strong> contiene las partidas que la sociedad reporta cobrar a filiales.</li>
-            <li><strong>Cuentas por pagar:</strong> contiene las partidas que la sociedad reporta pagar a filiales.</li>
-          </ul>
+          <p className="text-blue-800">
+            <strong>Cuentas por cobrar</strong> y <strong>Cuentas por pagar</strong>.
+          </p>
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           <div className="font-bold flex items-center gap-1.5">
             <Info className="w-4 h-4 text-blue-600" />
-            <span>Reconocimiento por NIT y columnas requeridas:</span>
+            <span>Columnas admitidas</span>
           </div>
           <p className="text-blue-800 leading-relaxed">
-            Usa <code className="bg-indigo-100 text-indigo-900 font-bold px-1 py-0.5 rounded font-mono text-[11px]">nit_sociedad</code> y{' '}
-            <code className="bg-indigo-100 text-indigo-900 font-bold px-1 py-0.5 rounded font-mono text-[11px]">nit_contraparte</code> (o coloca el NIT directamente en{' '}
-            <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">sociedad</code> /{' '}
-            <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">contraparte</code>): el sistema asociará cada NIT con el nombre oficial de la sociedad para toda la reportería. Incluye{' '}
+            <code className="bg-indigo-100 text-indigo-900 font-bold px-1 py-0.5 rounded font-mono text-[11px]">nit_sociedad</code>,{' '}
+            <code className="bg-indigo-100 text-indigo-900 font-bold px-1 py-0.5 rounded font-mono text-[11px]">nit_contraparte</code>{' '}
+            (o <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">sociedad</code> /{' '}
+            <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">contraparte</code>),{' '}
             <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">fecha_factura</code>,{' '}
             <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">factura</code>,{' '}
             <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">valor</code>,{' '}
-            <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">tipo</code> (CXC/CXP) y{' '}
+            <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-[11px]">tipo</code> y{' '}
             <code className="bg-emerald-100 text-emerald-900 font-bold px-1 py-0.5 rounded font-mono text-[11px]">mes a conciliar</code>.
           </p>
         </div>
@@ -385,8 +381,8 @@ export const CargaArchivosView: React.FC<CargaArchivosViewProps> = ({
         <h4 className="text-base font-bold text-slate-800">
           Arrastra tu archivo Excel aquí o haz clic para seleccionarlo
         </h4>
-        <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-          Formatos compatibles: libros de Microsoft Excel (.xlsx, .xls). Soporta hojas con acentos y múltiples filas.
+        <p className="text-xs text-slate-500 mt-1">
+          Formatos compatibles: .xlsx, .xls
         </p>
 
         {selectedFileName && (
@@ -506,8 +502,8 @@ export const CargaArchivosView: React.FC<CargaArchivosViewProps> = ({
             <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-950 text-xs flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
               <span>
-                <strong>Reconocimiento automático por NIT:</strong> Se asociaron{' '}
-                <strong>{parsedData.resolvedByNitCount}</strong> referencia(s) de NIT con su nombre oficial de sociedad para mantener intactos todos los filtros y reportes.
+                <strong>Reconocimiento por NIT:</strong>{' '}
+                <strong>{parsedData.resolvedByNitCount}</strong> referencia(s) asociadas al catálogo oficial.
               </span>
             </div>
           )}

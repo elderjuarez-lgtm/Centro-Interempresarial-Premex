@@ -352,9 +352,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           <h2 className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
             Descarga Contable y Distribución por Centro de Costo
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Consolida automáticamente lo ingresado por todos los liquidadores con su Centro de Costo asignado y genera asientos cuadrados (Debe / Haber) listos para importar en Odoo.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -424,14 +421,9 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           <div className="px-5 py-3.5 bg-sky-50/70 border-b border-sky-200/80 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <BookOpen className="w-4 h-4 text-[#1E60A8]" />
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
-                  Configuración Contable de Cuentas y Diario para Odoo
-                </h3>
-                <p className="text-[11px] text-slate-600">
-                  Ajusta los códigos contables de tu catálogo en Odoo; los cambios se aplican inmediatamente a la vista previa y a las descargas.
-                </p>
-              </div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
+                Configuración de Cuentas y Diario Odoo
+              </h3>
             </div>
             <button
               type="button"
@@ -726,9 +718,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                   .map((m) => m.consultorNombre)
                   .join(', ')}
                 .
-              </span>{' '}
-              <span className="text-amber-800">
-                Asígnalo aquí para que se cargue automáticamente en el reporte contable de Odoo.
               </span>
             </div>
           </div>
@@ -951,9 +940,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="font-bold text-slate-900">
               Detalle Consolidado de Gastos ({dataset.expenseRows.length} comprobantes)
-            </span>
-            <span className="text-[11px] text-slate-500">
-              Incluye el Centro de Costo y la cuenta contable Odoo asignada a cada categoría
             </span>
           </div>
 
@@ -1207,9 +1193,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               <h3 className="text-sm font-bold text-slate-900">
                 Distribución Analítica por Centro de Costo
               </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Totales agrupados por el Centro de Costo configurado en cada usuario liquidador
-              </p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
@@ -1278,15 +1261,10 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           {/* Liquidation Batch Selector Table */}
           <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
             <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Liquidaciones de Todos los Liquidadores ({selectedLiquidaciones.length} de{' '}
-                  {filteredLiquidaciones.length} seleccionadas para descarga)
-                </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Marca o desmarca las liquidaciones que deseas incluir en la exportación contable a Odoo
-                </p>
-              </div>
+              <h3 className="text-sm font-bold text-slate-900">
+                Liquidaciones en Lote ({selectedLiquidaciones.length} de{' '}
+                {filteredLiquidaciones.length} seleccionadas)
+              </h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -1468,10 +1446,10 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
 
             <form onSubmit={handleSaveCostCenterEdit} className="p-5 space-y-4">
               <div className="text-xs text-slate-600">
-                Asigna el Centro de Costo para{' '}
+                Centro de Costo para{' '}
                 <strong className="text-slate-900">{editingCC.consultorNombre}</strong> (
                 <span className="font-mono">{editingCC.consultorEmail || editingCC.empresa}</span>
-                ). Se guardará en el perfil del consultor y se cargará automáticamente en la reportería contable.
+                ).
               </div>
 
               <div>

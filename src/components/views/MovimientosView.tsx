@@ -522,9 +522,6 @@ export const MovimientosView: React.FC<MovimientosViewProps> = ({
           <h3 className="text-lg font-bold text-slate-900">
             Movimientos y Conciliación por Documento
           </h3>
-          <p className="text-xs text-slate-500">
-            Identifique factura por factura qué documentos concilian y el origen exacto de las variaciones reportadas en la Matriz y Diferencias.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
@@ -816,9 +813,6 @@ export const MovimientosView: React.FC<MovimientosViewProps> = ({
               >
                 {formatCurrency(docSummary.diferenciaGlobal)}
               </div>
-              <div className="text-[11px] text-slate-600 mt-0.5">
-                Cuadra con Matriz y tabla de Diferencias
-              </div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
@@ -847,7 +841,7 @@ export const MovimientosView: React.FC<MovimientosViewProps> = ({
           </div>
 
           {/* DUAL TABLES WHEN SOCIEDAD AND CONTRAPARTE ARE SELECTED */}
-          {hasBothPairSelected ? (
+          {hasBothPairSelected && (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 px-1">
                 <h4 className="text-sm font-bold text-slate-900">
@@ -883,26 +877,14 @@ export const MovimientosView: React.FC<MovimientosViewProps> = ({
                 )}
               </div>
             </div>
-          ) : (
-            <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-900 flex flex-wrap items-center justify-between gap-2">
-              <span>
-                <strong>Tip:</strong> Selecciona una <strong>Sociedad</strong> y una{' '}
-                <strong>Contraparte</strong> arriba (o haz clic en cualquier par de la tabla comparativa) para abrir las dos tablas frente a frente con lo que reportó cada empresa.
-              </span>
-            </div>
           )}
 
           {/* COMPARATIVE DOCUMENT RECONCILIATION TABLE */}
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
             <div className="px-5 py-3.5 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">
-                  Tabla Comparativa por Documento (Factura)
-                </h4>
-                <p className="text-[11px] text-slate-500">
-                  Cruce exclusivo 1 a 1: primero por número de documento y luego por valor exacto (cada documento conciliado queda bloqueado).
-                </p>
-              </div>
+              <h4 className="text-sm font-bold text-slate-900">
+                Tabla Comparativa por Documento (Factura)
+              </h4>
               <span className="text-xs font-semibold text-slate-600">
                 Mostrando {filteredDocRows.length} de {docSummary.total} documento(s)
               </span>

@@ -187,40 +187,33 @@ export const isRecoverableFirestoreSdkError = (err: unknown): boolean => {
 export const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/tasks',
 ];
 
-const provider = new GoogleAuthProvider();
-SCOPES.forEach((scope) => provider.addScope(scope));
-provider.setCustomParameters({ prompt: 'select_account' });
-
-const TOKEN_STORAGE_KEY = 'centro_interempresarial_google_token_v1';
-
-const readStoredToken = (): string | null => {
-  try {
-    if (typeof sessionStorage !== 'undefined') {
-      return sessionStorage.getItem(TOKEN_STORAGE_KEY);
-    }
-  } catch {
-    // ignore storage errors
+const buildGoogleProvider = (
+  forceConsent: boolean,
+  loginHint?: string | null
+): GoogleAuthProvider => {
+  const nextProvider = new GoogleAuthProvider();
+  SCOPES.forEach((scope) => nextProvider.addScope(scope));
+  const customParams: Record<string, string> = {
+    prompt: forceConsent && loginHint ? 'consent' : 'select_account consent',
+    include_granted_scopes: 'true',
+  };
+  if (loginHint && loginHint.includes('@')) {
+    customParams.login_hint = loginHint;
   }
-  return null;
+  nextProvider.setCustomParameters(customParams);
+  return nextProvider;
 };
 
-const writeStoredToken = (token: string | null) => {
-  try {
-    if (typeof sessionStorage !== 'undefined') {
-      if (token) {
-        sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
-      } else {
-        sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-      }
-    }
-  } catch {
-    // ignore storage errors
-  }
-};
+// Primary provider requests Google profile + Sheets/Drive + Gmail + Tasks in one step at sign-in
+const provider = buildGoogleProvider(false);
 
-let cachedAccessToken: string | null = readStoredToken();
+// Strictly in-memory OAuth access token cache (never stored in localStorage/sessionStorage)
+let cachedAccessToken: string | null = null;
+let isSigningInFlag = false;
 
 export const initAuth = (
   onAuthChange?: (user: User | null, token: string | null) => void
@@ -228,7 +221,8 @@ export const initAuth = (
   return onAuthStateChanged(auth, (user: User | null) => {
     if (!user) {
       cachedAccessToken = null;
-      writeStoredToken(null);
+    } else if (!cachedAccessToken && !isSigningInFlag) {
+      cachedAccessToken = null;
     }
     if (onAuthChange) {
       onAuthChange(user, user ? cachedAccessToken : null);
@@ -236,14 +230,22 @@ export const initAuth = (
   });
 };
 
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+export const googleSignIn = async (options?: {
+  forceConsent?: boolean;
+  loginHint?: string | null;
+}): Promise<{ user: User; accessToken: string } | null> => {
   try {
-    const result = await signInWithPopup(auth, provider);
+    isSigningInFlag = true;
+    const activeProvider =
+      options?.forceConsent || options?.loginHint
+        ? buildGoogleProvider(Boolean(options?.forceConsent), options?.loginHint)
+        : provider;
+
+    const result = await signInWithPopup(auth, activeProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const token = credential?.accessToken || '';
     if (token) {
       cachedAccessToken = token;
-      writeStoredToken(token);
     }
     return {
       user: result.user,
@@ -258,7 +260,15 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
     console.error('Error al iniciar sesión con Google:', error);
     throw error;
+  } finally {
+    isSigningInFlag = false;
   }
+};
+
+export const reconnectGoogleWorkspace = async (): Promise<string | null> => {
+  const hint = auth.currentUser?.email || null;
+  const res = await googleSignIn({ forceConsent: true, loginHint: hint });
+  return res?.accessToken || null;
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
@@ -267,7 +277,6 @@ export const getAccessToken = async (): Promise<string | null> => {
 
 export const setAccessToken = (token: string | null) => {
   cachedAccessToken = token;
-  writeStoredToken(token);
 };
 
 export const logout = async () => {
@@ -276,5 +285,4 @@ export const logout = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await signOut(auth);
   cachedAccessToken = null;
-  writeStoredToken(null);
 };

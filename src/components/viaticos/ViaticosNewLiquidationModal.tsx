@@ -135,17 +135,14 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Parallel open liquidations reassurance */}
           {openLiquidacionesCount > 0 && (
-            <div className="px-3.5 py-2.5 rounded-xl bg-sky-50/80 border border-sky-200/80 text-xs text-slate-700 flex items-start gap-2.5">
-              <Layers className="w-4 h-4 text-[#1E60A8] shrink-0 mt-0.5" />
+            <div className="px-3.5 py-2 rounded-xl bg-sky-50/80 border border-sky-200/80 text-xs text-slate-700 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-[#1E60A8] shrink-0" />
               <span>
-                Actualmente tienes{' '}
+                Liquidaciones abiertas actualmente:{' '}
                 <strong className="font-bold text-[#132B63] tabular-nums">
-                  {openLiquidacionesCount}{' '}
-                  {openLiquidacionesCount === 1
-                    ? 'liquidación abierta'
-                    : 'liquidaciones abiertas'}
+                  {openLiquidacionesCount}
                 </strong>
-                . Todas permanecerán abiertas en paralelo para que cambies entre semanas o monedas mientras las concluyes.
+                .
               </span>
             </div>
           )}
@@ -226,11 +223,6 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
                 </option>
               ))}
             </select>
-            {isLockedToOwnConsultor && (
-              <p className="text-[11px] text-slate-500 mt-1">
-                Asignado automáticamente según tu correo corporativo.
-              </p>
-            )}
           </div>
 
           {/* Sociedad / Empresa + Centro de Costo */}

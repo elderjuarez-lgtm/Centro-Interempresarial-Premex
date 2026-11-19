@@ -622,47 +622,29 @@ export const BankExportModal: React.FC<BankExportModalProps> = ({
             </div>
           )}
 
-          {/* Output Summary Explanation */}
-          <div className="rounded-xl bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-[11px] text-slate-600 leading-relaxed">
+          {/* Output Summary */}
+          <div className="rounded-xl bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-[11px] text-slate-600">
             {format === 'excel' ? (
               mode === 'individual' ? (
                 <>
-                  <strong className="text-slate-900">Contenido del Excel Individual:</strong> 1 hoja
-                  oficial <span className="font-semibold">CONCILIACION DE BANCOS</span> con fórmulas
-                  vivas de la cuenta elegida, más sus pestañas filtradas de{' '}
-                  <span className="font-semibold">Partidas Abiertas SAP</span> y{' '}
-                  <span className="font-semibold">Balance 00-01-02</span>.
+                  <strong className="text-slate-900">Excel Individual:</strong> hoja oficial + Partidas SAP + Balance 00/01/02.
                 </>
               ) : (
                 <>
-                  <strong className="text-slate-900">Contenido del Excel Masivo:</strong> 1 libro
-                  corporativo con <span className="font-semibold">Centro Conciliaciones</span>{' '}
-                  consolidado +{' '}
-                  <span className="font-semibold font-mono tabular-nums">
-                    {effectiveSelection.length}
-                  </span>{' '}
-                  pestaña(s) oficial(es) individuales con fórmulas vivas +{' '}
-                  <span className="font-semibold">Partidas Abiertas SAP</span> +{' '}
-                  <span className="font-semibold">Balance 00-01-02</span>.
+                  <strong className="text-slate-900">Excel Masivo:</strong> consolidado +{' '}
+                  <span className="font-semibold font-mono tabular-nums">{effectiveSelection.length}</span>{' '}
+                  hoja(s) oficial(es) + Partidas SAP + Balance 00/01/02.
                 </>
               )
             ) : mode === 'individual' ? (
               <>
-                <strong className="text-slate-900">Contenido del PDF Individual:</strong> 1 página
-                horizontal tamaño carta con el formato oficial{' '}
-                <span className="font-semibold">CONCILIACION DE BANCOS</span> y firmas de la cuenta
-                seleccionada.
+                <strong className="text-slate-900">PDF Individual:</strong> 1 página horizontal con firmas.
               </>
             ) : (
               <>
-                <strong className="text-slate-900">Contenido del PDF Masivo:</strong> 1 documento PDF
-                horizontal con{' '}
-                <span className="font-semibold font-mono tabular-nums">
-                  {effectiveSelection.length}
-                </span>{' '}
-                página(s) numeradas (1 hoja oficial{' '}
-                <span className="font-semibold">CONCILIACION DE BANCOS</span> con firmas por cada
-                cuenta seleccionada).
+                <strong className="text-slate-900">PDF Masivo:</strong>{' '}
+                <span className="font-semibold font-mono tabular-nums">{effectiveSelection.length}</span>{' '}
+                página(s) horizontal(es) numerada(s) con firmas.
               </>
             )}
           </div>

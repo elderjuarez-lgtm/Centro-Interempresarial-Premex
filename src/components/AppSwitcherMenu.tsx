@@ -41,6 +41,13 @@ const SWITCHER_ITEMS: SwitcherItem[] = [
     target: 'viaticos',
   },
   {
+    id: 'actividades',
+    title: 'Panel de Actividades',
+    subtitle: 'Matriz contable, Gmail y Google Tasks',
+    active: true,
+    target: 'actividades',
+  },
+  {
     id: 'anticipos',
     title: 'Anticipos',
     subtitle: 'Próximamente en hoja de ruta',

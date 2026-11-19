@@ -153,12 +153,19 @@ export interface DirectorySyncState {
 // Modular Platform & Bank Reconciliation Types
 // ============================================================================
 
-export type ActiveModuleId = 'launcher' | 'intercompany' | 'bancos' | 'viaticos' | 'ajustes';
+export type ActiveModuleId =
+  | 'launcher'
+  | 'intercompany'
+  | 'bancos'
+  | 'viaticos'
+  | 'actividades'
+  | 'ajustes';
 
 export type FunctionalModuleId =
   | 'intercompany'
   | 'bancos'
   | 'viaticos'
+  | 'actividades'
   | 'anticipos'
   | 'cxc'
   | 'cxp';
@@ -623,5 +630,102 @@ export interface ViaticosWorkspaceData {
   hasUnsavedChanges: boolean;
 }
 
+// ============================================================================
+// Panel de Actividades (Cierre Contable, Gmail & Google Tasks Sync)
+// ============================================================================
 
+export type ActivitiesTab = 'matriz' | 'pendientes' | 'sincronizacion' | 'configuracion';
 
+export type ActivityPeriodicity = 'MENSUAL' | 'TRIMESTRAL' | 'SEMANAL' | 'ANUAL';
+
+export type ActivityStatus = 'pendiente' | 'realizada';
+
+export interface ActivitySociety {
+  id: string;
+  codigo: string;
+  nombre: string;
+  /** Uno o varios responsables asignados directamente a esta sociedad */
+  responsablesIds?: string[];
+  activa: boolean;
+}
+
+export interface ActivityResponsible {
+  id: string;
+  nombre: string;
+  email: string;
+  cargo?: string;
+  activo: boolean;
+}
+
+export interface ActivityTemplate {
+  id: string;
+  nombre: string;
+  periodicidad: ActivityPeriodicity;
+  /** Día sugerido del mes para cumplimiento (1..28/31) */
+  diaSugerido: number;
+  descripcion?: string;
+  /** Mapa codigoSociedad -> lista de responsibleIds (vacío si no aplica a esa sociedad) */
+  responsablesPorSociedad: Record<string, string[]>;
+  /** Correos adicionales específicos de esta actividad para notificar cumplimiento */
+  notificarAdicionales?: string[];
+  activa: boolean;
+}
+
+export interface ActivityGoogleTaskLink {
+  taskId: string;
+  taskListId: string;
+  syncedAtIso: string;
+}
+
+export interface ActivityExecutionRecord {
+  id: string; // `${periodKey}__${activityId}__${societyCode}`
+  periodKey: string; // YYYY-MM (ej. '2026-11')
+  activityId: string;
+  societyCode: string;
+  responsibleId: string;
+  responsibleName: string;
+  responsibleEmail: string;
+  responsibleIds?: string[];
+  responsibleNames?: string[];
+  responsibleEmails?: string[];
+  fechaSugerida: string; // YYYY-MM-DD
+  estado: ActivityStatus;
+  completadaAtIso?: string;
+  completadaPorNombre?: string;
+  completadaPorEmail?: string;
+  origenConfirmacion?: 'panel' | 'google_tasks';
+  comentarioCierre?: string;
+  ultimoRecordatorioIso?: string;
+  recordatoriosEnviadosCount?: number;
+  notificacionCierreEnviadaIso?: string;
+  notificacionCierreDestinatarios?: string[];
+  googleTaskId?: string;
+  googleTaskListId?: string;
+  googleTaskOwnerEmail?: string;
+  googleTaskSyncedAtIso?: string;
+  /** Mapa claveSeguraDeCorreo -> enlace de Google Task por cuenta Gmail */
+  googleTasksByEmail?: Record<string, ActivityGoogleTaskLink>;
+}
+
+export interface ActivityNotificationRecipient {
+  id: string;
+  nombre: string;
+  email: string;
+  tipo: 'administrador' | 'designado';
+  activo: boolean;
+}
+
+export interface ActivitiesWorkspaceData {
+  docId: string;
+  selectedPeriod: string; // YYYY-MM
+  societies: ActivitySociety[];
+  responsibles: ActivityResponsible[];
+  activities: ActivityTemplate[];
+  executions: Record<string, ActivityExecutionRecord>;
+  notificationRecipients: ActivityNotificationRecipient[];
+  notifyAdminsAutomatically: boolean;
+  subtleReminderDaysBefore: number;
+  lastGoogleTasksSyncIso: string | null;
+  lastSavedAtIso: string | null;
+  hasUnsavedChanges: boolean;
+}

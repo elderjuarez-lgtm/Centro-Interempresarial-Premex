@@ -362,7 +362,7 @@
         },
         "moduleCompanyAccess": {
           "type": "object",
-          "description": "Per-module company access rules mapping functional module IDs (intercompany, bancos, viaticos, anticipos, cxc, cxp) to { scope: 'all' | 'selected', companies: string[] }"
+          "description": "Per-module company access rules mapping functional module IDs (intercompany, bancos, viaticos, actividades, anticipos, cxc, cxp) to { scope: 'all' | 'selected', companies: string[] }"
         },
         "active": {
           "type": "boolean",
@@ -545,12 +545,12 @@
     },
     "ModuleCompanyDirectory": {
       "title": "ModuleCompanyDirectory",
-      "description": "Independent master database of companies/societies dedicated to a specific functional module (bancos, viaticos, anticipos, cxc, cxp), containing no personal PII.",
+      "description": "Independent master database of companies/societies dedicated to a specific functional module (bancos, viaticos, actividades, anticipos, cxc, cxp), containing no personal PII.",
       "type": "object",
       "properties": {
         "moduleId": {
           "type": "string",
-          "enum": ["bancos", "viaticos", "anticipos", "cxc", "cxp"],
+          "enum": ["bancos", "viaticos", "actividades", "anticipos", "cxc", "cxp"],
           "description": "Target functional module identifier",
           "minLength": 1,
           "maxLength": 40
@@ -591,6 +591,99 @@
         "companies",
         "companiesCount",
         "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ActivityWorkspace": {
+      "title": "ActivityWorkspace",
+      "description": "Corporate accounting closing activities matrix (Panel de Actividades) storing societies, responsibles directory, activity templates, per-period execution records with Google Tasks sync metadata, and completion confirmation notification recipients.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the workspace creator",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of the last user who saved the workspace",
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "description": "Descriptive title of the activities panel",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "selectedPeriod": {
+          "type": "string",
+          "description": "Active period key in YYYY-MM format",
+          "minLength": 4,
+          "maxLength": 20
+        },
+        "societies": {
+          "type": "array",
+          "description": "Bounded catalog (max 100) of societies shown as columns in the activity matrix"
+        },
+        "responsibles": {
+          "type": "array",
+          "description": "Bounded directory (max 200) of responsible team members and their Gmail addresses"
+        },
+        "activities": {
+          "type": "array",
+          "description": "Bounded catalog (max 200) of recurring activities, periodicities, suggested due days, and per-society assignments"
+        },
+        "executions": {
+          "type": "object",
+          "description": "Map (max 3000) of per-period activity execution records including suggested dates, completion confirmations, Gmail reminder logs, and Google Tasks sync links"
+        },
+        "notificationRecipients": {
+          "type": "array",
+          "description": "Bounded list (max 100) of administrators and designated recipients notified via Gmail upon completion"
+        },
+        "notifyAdminsAutomatically": {
+          "type": "boolean",
+          "description": "Whether active suite administrators are automatically included in completion confirmation notifications"
+        },
+        "subtleReminderDaysBefore": {
+          "type": "integer",
+          "description": "Number of days prior to suggested due date used to highlight upcoming activities (0-30)"
+        },
+        "societiesCount": {
+          "type": "integer",
+          "description": "Total number of configured societies"
+        },
+        "activitiesCount": {
+          "type": "integer",
+          "description": "Total number of configured activities"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "selectedPeriod",
+        "societies",
+        "responsibles",
+        "activities",
+        "executions",
+        "notificationRecipients",
+        "notifyAdminsAutomatically",
+        "subtleReminderDaysBefore",
+        "societiesCount",
+        "activitiesCount",
         "createdAt",
         "updatedAt"
       ]
@@ -639,11 +732,17 @@
       },
       "description": "Stores corporate travel expense settlements (Liquidación de Viáticos) and consultants catalog; readable only by verified users authorized for viaticos."
     },
+    "/activity_workspaces/{workspaceId}": {
+      "schema": {
+        "$ref": "#/entities/ActivityWorkspace"
+      },
+      "description": "Stores Panel de Actividades workspaces including activity matrix, responsibles, completion confirmations, Gmail recipients, and Google Tasks sync links; restricted to verified users authorized for actividades."
+    },
     "/module_company_directories/{moduleId}": {
       "schema": {
         "$ref": "#/entities/ModuleCompanyDirectory"
       },
-      "description": "Stores independent master company/society catalogs for each functional module (bancos, viaticos, anticipos, cxc, cxp); readable by verified users and writable strictly by verified administrators."
+      "description": "Stores independent master company/society catalogs for each functional module (bancos, viaticos, actividades, anticipos, cxc, cxp); readable by verified users and writable strictly by verified administrators."
     }
   }
 }

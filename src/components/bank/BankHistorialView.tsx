@@ -816,17 +816,11 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
     <div className="space-y-5">
       {/* Top Action & Filter Bar */}
       <section className="bg-white rounded-2xl border border-slate-200/90 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <History className="w-4 h-4 text-[#1E60A8]" />
-            <h3 className="text-sm font-bold text-slate-900">
-              Historial de Conciliaciones Cerradas
-            </h3>
-          </div>
-          <p className="text-xs text-slate-500">
-            Archivo permanente de periodos cerrados con instantáneas de saldos 00/01/02, partidas
-            FBL3N y descarga individual o masiva en Excel y PDF.
-          </p>
+        <div className="flex items-center gap-2">
+          <History className="w-4 h-4 text-[#1E60A8]" />
+          <h3 className="text-sm font-bold text-slate-900">
+            Historial de Conciliaciones Cerradas
+          </h3>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -895,8 +889,8 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
             </h4>
             <p className="text-xs text-slate-500 leading-relaxed">
               {openPeriod
-                ? `La conciliación actual (${openPeriod}) permanece abierta. Cuando finalices el cuadre, utiliza el botón «Cerrar Conciliación» para archivarla aquí y habilitar la apertura del siguiente periodo.`
-                : 'Cierra una conciliación mensual para conservar su entregable oficial y consultarlo en cualquier momento.'}
+                ? `Periodo actual (${openPeriod}) abierto. Cierra la conciliación para archivarla aquí.`
+                : 'No hay periodos archivados.'}
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2 pt-1">

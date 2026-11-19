@@ -5,7 +5,6 @@ import {
   ReceiptText, 
   Grid3X3, 
   AlertTriangle,
-  FileSpreadsheet,
   Building2,
   ChevronRight,
   Layers,
@@ -302,10 +301,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span>Volver al Portal de Módulos</span>
             </button>
           )}
-          <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-[11px] text-sky-200/80">
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="truncate">Sincronización Google Sheets disponible</span>
-          </div>
         </div>
       </aside>
     </>

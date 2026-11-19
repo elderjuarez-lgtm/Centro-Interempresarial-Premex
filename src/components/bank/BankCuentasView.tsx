@@ -346,12 +346,8 @@ export const BankCuentasView: React.FC<BankCuentasViewProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-bold text-[#132B63]">
-                    {editingAccountId ? 'Editar Cuenta Bancaria SAP' : 'Nueva Cuenta Bancaria SAP'}
+                    {editingAccountId ? 'Editar Cuenta Bancaria' : 'Nueva Cuenta Bancaria'}
                   </h4>
-                  <p className="text-xs text-slate-500">
-                    Al ingresar la Cuenta Mayor terminación 00, se completan automáticamente las
-                    subcuentas 01 (Ingresos) y 02 (Egresos).
-                  </p>
                 </div>
                 <button
                   type="button"

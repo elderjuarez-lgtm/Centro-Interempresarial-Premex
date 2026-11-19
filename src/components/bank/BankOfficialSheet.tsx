@@ -382,14 +382,8 @@ export const BankOfficialSheet: React.FC<BankOfficialSheetProps> = ({
           className="px-5 py-4 bg-blue-50/70 border-b border-blue-200 space-y-3 print:hidden"
         >
           <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs font-bold text-[#132B63]">
-                Ajuste de Subcuentas SAP (00 / 01 / 02) y Saldo Extracto ({monthBanner})
-              </div>
-              <p className="text-[11px] text-slate-600">
-                Saldo en Libros se calcula automáticamente como Subcuenta 00 + Subcuenta 01 +
-                Subcuenta 02.
-              </p>
+            <div className="text-xs font-bold text-[#132B63]">
+              Ajuste de Subcuentas SAP (00 / 01 / 02) y Saldo Extracto ({monthBanner})
             </div>
             <button
               type="button"
@@ -1133,11 +1127,6 @@ export const BankOfficialSheet: React.FC<BankOfficialSheetProps> = ({
                 {menosChq.length + masCons.length}
               </strong>
             </span>
-            {!isReadOnly && (
-              <span className="text-slate-400 print:hidden">
-                Haz clic sobre la celda verde de Saldo en Extracto para editarlo en vivo.
-              </span>
-            )}
           </div>
           <div className="font-mono font-bold tabular-nums">
             Diferencia (Libros − Extracto):{' '}

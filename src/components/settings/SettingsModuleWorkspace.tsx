@@ -265,12 +265,14 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     'intercompany',
     'bancos',
     'viaticos',
+    'actividades',
   ]);
   const [formModuleCompanyAccess, setFormModuleCompanyAccess] =
     useState<ModuleCompanyScopeMap>({
       intercompany: { scope: 'all', companies: [] },
       bancos: { scope: 'all', companies: [] },
       viaticos: { scope: 'all', companies: [] },
+      actividades: { scope: 'all', companies: [] },
     });
   const [activeConfigModule, setActiveConfigModule] =
     useState<FunctionalModuleId>('intercompany');
@@ -467,11 +469,12 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setFormEmail('');
     setFormName('');
     setFormRole('operador');
-    setFormModules(['intercompany', 'bancos', 'viaticos']);
+    setFormModules(['intercompany', 'bancos', 'viaticos', 'actividades']);
     setFormModuleCompanyAccess({
       intercompany: { scope: 'all', companies: [] },
       bancos: { scope: 'all', companies: [] },
       viaticos: { scope: 'all', companies: [] },
+      actividades: { scope: 'all', companies: [] },
     });
     setActiveConfigModule('intercompany');
     setFormActive(true);
@@ -1546,11 +1549,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                 <div className="px-5 py-3.5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-bold text-slate-900">
-                      Directorio de Permisos por Correo Electrónico
+                      Directorio de Permisos por Correo
                     </h3>
-                    <p className="text-[11px] text-slate-500">
-                      Cada correo define los módulos autorizados y las sociedades permitidas dentro de la base de datos de cada módulo
-                    </p>
                   </div>
                   <span className="text-xs text-slate-500 tabular-nums">
                     {filteredRecords.length} de {records.length} usuarios
@@ -1564,7 +1564,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                         <th className="py-3 px-5">Usuario y Correo</th>
                         <th className="py-3 px-4">Rol</th>
                         <th className="py-3 px-4">
-                          Módulos y Sociedades Autorizadas (Independiente por Módulo)
+                          Módulos y Sociedades Autorizadas
                         </th>
                         <th className="py-3 px-5 text-right">Acciones</th>
                       </tr>
@@ -1845,22 +1845,12 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                           /{activeDbFirestorePath}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-600 mt-1">
-                        {isIntercompanyDbSelected
-                          ? INTERCOMPANY_SCOPE_META[selectedIntercompanyScope].description
-                          : selectedDbMeta.description}
-                      </p>
-                      <div className="text-[11px] text-slate-400 mt-1">
-                        {selectedDbSync.lastSyncedAtIso
-                          ? `Última sincronización en Firestore: ${formatShortDate(
-                              selectedDbSync.lastSyncedAtIso
-                            )}${
-                              selectedDbSync.updatedByName
-                                ? ` · ${selectedDbSync.updatedByName}`
-                                : ''
-                            }`
-                          : 'Los cambios se sincronizan automáticamente en Firestore cuando estás autenticado como Administrador.'}
-                      </div>
+                      {selectedDbSync.lastSyncedAtIso && (
+                        <div className="text-[11px] text-slate-400 mt-1">
+                          Sincronizado: {formatShortDate(selectedDbSync.lastSyncedAtIso)}
+                          {selectedDbSync.updatedByName ? ` · ${selectedDbSync.updatedByName}` : ''}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -2116,7 +2106,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                         </label>
                       ) : (
                         <span className="text-[11px] text-slate-500">
-                          Las sociedades de {activeDbShortName} se sincronizan directamente con la vista Empresas de Conciliación Intercompany.
+                          Sincronizado con {activeDbShortName}.
                         </span>
                       )}
 
@@ -2339,7 +2329,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
               <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-100">
                   <h4 className="text-sm font-bold text-slate-900">
-                    Comparativa Detallada de Permisos Aplicados en Frontend y Firestore
+                    Comparativa de Permisos por Rol
                   </h4>
                 </div>
                 <div className="overflow-x-auto">
@@ -2401,12 +2391,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                         Modo Estricto por Lista Autorizada
                       </h3>
                       <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                        Cuando está activado, cualquier usuario que inicie sesión con un
-                        correo de Google que <strong>no esté registrado</strong> en el
-                        Directorio de Permisos verá una pantalla de acceso restringido hasta
-                        que un administrador lo autorice. Si está desactivado, los correos
-                        no listados entran en modo <strong>Solo Consulta</strong> (sin
-                        capacidad de edición).
+                        Activo: solo ingresan correos registrados. Desactivado: correos no listados entran en <strong>Solo Consulta</strong>.
                       </p>
                     </div>
                   </div>
@@ -2481,9 +2466,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                       <h3 className="text-sm font-bold text-slate-900">
                         Conexión Activa con Firebase y Google Cloud
                       </h3>
-                      <p className="text-xs text-slate-600 mt-0.5">
-                        Configuración de solo lectura utilizada para compartir en tiempo real
-                        conciliaciones, permisos por correo y bases de sociedades por módulo.
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Entorno Firestore y enlace compartido de la plataforma.
                       </p>
                     </div>
                   </div>
@@ -2634,36 +2618,6 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                     })}
                   </div>
                 </div>
-
-                {/* Team Sharing Checklist */}
-                <div className="pt-4 border-t border-slate-100 space-y-2 text-xs text-slate-600">
-                  <div className="font-bold text-slate-800">
-                    Pasos recomendados al compartir la plataforma en Firebase / Google Cloud
-                  </div>
-                  <ol className="list-decimal list-inside space-y-1 text-[11px] leading-relaxed">
-                    <li>
-                      Inicia sesión con la cuenta administradora ({SUPER_ADMIN_EMAIL}) y
-                      verifica las sociedades de cada módulo en{' '}
-                      <strong>BD Empresas por Módulo</strong>.
-                    </li>
-                    <li>
-                      Registra cada correo corporativo en{' '}
-                      <strong>Usuarios y Permisos</strong> asignando su rol, módulos y las
-                      sociedades permitidas en cada módulo.
-                    </li>
-                    <li>
-                      Presiona <strong>Publicar Todo en Firestore</strong> para sincronizar
-                      reglas y catálogos antes de compartir el enlace con tu equipo.
-                    </li>
-                    <li>
-                      Si desplegas en un dominio propio en Google Cloud / Firebase Hosting,
-                      agrega ese dominio en{' '}
-                      <em>Firebase Console → Authentication → Authorized domains</em> y
-                      activa el <strong>Modo Estricto</strong> cuando todos los correos
-                      estén registrados.
-                    </li>
-                  </ol>
-                </div>
               </section>
             </div>
           )}
@@ -2686,12 +2640,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                 <h3 className="text-base font-bold text-[#132B63]">
                   {isEditingExisting
                     ? 'Editar Permisos de Usuario'
-                    : 'Asignar Permisos por Correo Electrónico'}
+                    : 'Asignar Permisos por Correo'}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Asigna el rol, habilita los módulos permitidos y selecciona qué sociedades
-                  de cada módulo puede consultar este correo
-                </p>
               </div>
               <button
                 type="button"
@@ -2854,9 +2804,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                 <div className="flex items-center justify-between mb-2">
                   <label className="font-semibold text-slate-700 flex items-center gap-1.5">
                     <Building2 className="w-3.5 h-3.5 text-[#1E60A8]" />
-                    <span>
-                      2. Sociedades Permitidas por Módulo (cada módulo usa su propia BD)
-                    </span>
+                    <span>2. Sociedades Permitidas por Módulo</span>
                   </label>
                 </div>
 
@@ -3010,7 +2958,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
 
                           <div className="flex items-center justify-between text-[11px] text-slate-500">
                             <span>
-                              Marca las sociedades autorizadas exclusivamente para{' '}
+                              Sociedades en{' '}
                               <strong className="text-slate-700">
                                 {MODULE_COMPANY_DB_META[effectiveActiveConfigModule].shortName}
                               </strong>

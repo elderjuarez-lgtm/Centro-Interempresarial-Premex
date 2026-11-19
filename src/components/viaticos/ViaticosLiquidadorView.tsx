@@ -1202,9 +1202,6 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     )}
                     {liquidation.closedBy ? ` por ${liquidation.closedBy}` : ''}.
                   </span>
-                  <div className="text-[11px] text-slate-500 mt-0.5">
-                    Puedes consultar cada factura y comprobante, descargar el Excel o el PDF, o iniciar una nueva liquidación.
-                  </div>
                 </>
               ) : (
                 <span>
@@ -1288,16 +1285,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       {!isLocked && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
           <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">
-                {editingItemId
-                  ? 'Editar Factura Seleccionada'
-                  : 'Cargar Factura (Foto o PDF) y Digitar Datos Comerciales'}
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                Sube una foto o PDF: la aplicación extrae fecha, serie, número, NIT, proveedor, moneda, valor e impuestos automáticamente y permite ajustar cualquier campo.
-              </p>
-            </div>
+            <h3 className="text-sm font-bold text-slate-900">
+              {editingItemId
+                ? 'Editar Factura Seleccionada'
+                : 'Registro de Factura y Comprobante'}
+            </h3>
 
             {uploadQueue.length > 0 && (
               <span className="text-xs font-semibold text-[#1E60A8] tabular-nums">
@@ -1473,10 +1465,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         <Upload className="w-5 h-5 hidden sm:block" />
                       </div>
                       <p className="text-sm sm:text-xs font-bold text-slate-800">
-                        Toma foto o sube cualquier factura o PDF
+                        Subir factura o comprobante
                       </p>
-                      <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                        Lee tickets térmicos, facturas tamaño carta/cambiarias, hoteles, combustible, boletos aéreos y recibos digitales. Todo se compila en el PDF final.
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        JPG, PNG, WEBP, HEIC o PDF
                       </p>
 
                       <div className="mt-4 grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-center gap-2">
@@ -1573,7 +1565,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-[#132B63]">
-                    Datos de la Factura (Lectura Automática / Editable)
+                    Datos de la Factura
                   </span>
                   {form.extractedByAi && (
                     <span className="text-[11px] font-semibold text-emerald-700 inline-flex items-center gap-1">
@@ -1654,7 +1646,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
                   <div className="sm:col-span-3">
                     <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                      Moneda (Modificable)
+                      Moneda
                     </label>
                     <select
                       value={form.moneda}
@@ -1828,7 +1820,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <div className="space-y-3 pt-1">
                 <div className="border-b border-slate-100 pb-1.5">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-[#132B63]">
-                    Detalle Comercial y Gasto (Digitado por Liquidador)
+                    Detalle Comercial y Gasto
                   </span>
                 </div>
 
@@ -2233,8 +2225,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             {/* Official Footer Total Row */}
             <tfoot>
               <tr className="border-t-2 border-slate-800 bg-slate-50">
-                <td colSpan={5} className="py-3 px-3 text-[11px] text-slate-500">
-                  Formato oficial Premex · Listo para descarga Excel y compilación PDF
+                <td colSpan={5} className="py-3 px-3 text-[11px] font-medium text-slate-500">
+                  Premex Corp · Planilla de Liquidación
                 </td>
                 <td
                   colSpan={3}

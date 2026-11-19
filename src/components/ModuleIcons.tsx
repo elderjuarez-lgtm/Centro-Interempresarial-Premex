@@ -283,6 +283,52 @@ export const ViaticosModuleLogo: React.FC<ModuleIconProps> = ({ className = 'w-1
   </svg>
 );
 
+/**
+ * 8. Panel de Actividades
+ * Bespoke Emerald-Sapphire schedule checklist + subtle notification pulse emblem.
+ */
+export const ActividadesModuleLogo: React.FC<ModuleIconProps> = ({ className = 'w-14 h-14' }) => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden="true">
+    <defs>
+      <linearGradient id="act_bg" x1="4" y1="4" x2="60" y2="60" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#10B981" />
+        <stop offset="50%" stopColor="#0F766E" />
+        <stop offset="100%" stopColor="#132B63" />
+      </linearGradient>
+      <linearGradient id="act_glint" x1="8" y1="4" x2="50" y2="52" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#A7F3D0" stopOpacity="0.35" />
+        <stop offset="100%" stopColor="#132B63" stopOpacity="0" />
+      </linearGradient>
+    </defs>
+    <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#act_bg)" />
+    <path d="M2 18C2 9.163 9.163 2 18 2H46C38 20 24 38 2 45V18Z" fill="url(#act_glint)" />
+    {/* Calendar Header Pins */}
+    <rect x="20" y="11" width="4" height="7" rx="2" fill="#D1FAE5" />
+    <rect x="34" y="11" width="4" height="7" rx="2" fill="#D1FAE5" />
+    {/* Schedule Checklist Board */}
+    <rect x="13" y="15" width="32" height="35" rx="5.5" fill="#FFFFFF" fillOpacity="0.96" />
+    <rect x="13" y="15" width="32" height="8" rx="5.5" fill="#CCFBF1" />
+    <rect x="13" y="19" width="32" height="4" fill="#CCFBF1" />
+    {/* Checklist Rows */}
+    <path d="M18.5 29.5L20.3 31.3L23.5 27.8" stroke="#0F766E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <rect x="26.5" y="28.3" width="13.5" height="2.6" rx="1.3" fill="#0F766E" fillOpacity="0.85" />
+    <path d="M18.5 36.5L20.3 38.3L23.5 34.8" stroke="#10B981" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <rect x="26.5" y="35.3" width="11" height="2.6" rx="1.3" fill="#99F6E4" />
+    <circle cx="20.5" cy="43.5" r="2" fill="#CBD5E1" />
+    <rect x="26.5" y="42.2" width="9" height="2.6" rx="1.3" fill="#CBD5E1" />
+    {/* Sync / Notification Seal */}
+    <circle cx="46" cy="42" r="10.5" fill="#0C214D" />
+    <circle cx="46" cy="42" r="8.5" fill="#34D399" />
+    <path
+      d="M42.3 42.3L44.8 44.8L50 39.4"
+      stroke="#064E3B"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 export const ModuleEmblem: React.FC<{ moduleId: SuiteModuleId; className?: string }> = ({
   moduleId,
   className = 'w-14 h-14',
@@ -294,6 +340,8 @@ export const ModuleEmblem: React.FC<{ moduleId: SuiteModuleId; className?: strin
       return <BancosModuleLogo className={className} />;
     case 'viaticos':
       return <ViaticosModuleLogo className={className} />;
+    case 'actividades':
+      return <ActividadesModuleLogo className={className} />;
     case 'anticipos':
       return <AnticiposModuleLogo className={className} />;
     case 'cxc':

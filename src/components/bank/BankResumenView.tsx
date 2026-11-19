@@ -245,8 +245,7 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
             Aún no hay cuentas bancarias configuradas
           </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
-            Carga tu Balance SAP (00 / 01 / 02) o crea tus sociedades y cuentas bancarias para
-            generar automáticamente las conciliaciones oficiales.
+            Carga el Balance SAP o configura tus sociedades y cuentas bancarias para iniciar.
           </p>
         </div>
         {!isReadOnly && (
@@ -802,14 +801,8 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
               onClick={() => setIsConsolidatedOpen((v) => !v)}
               className="w-full px-5 py-3.5 flex items-center justify-between gap-3 bg-slate-50/80 hover:bg-slate-100/70 transition-colors text-left cursor-pointer"
             >
-              <div>
-                <div className="text-sm font-bold text-slate-900">
-                  Cuadro Tabular Consolidado del Centro ({societyScopedSummaries.length} cuentas)
-                </div>
-                <div className="text-xs text-slate-500 mt-0.5">
-                  Revisión en lote de subcuentas 00/01/02 y edición directa de Saldo Extracto por
-                  cuenta bancaria.
-                </div>
+              <div className="text-sm font-bold text-slate-900">
+                Cuadro Consolidado ({societyScopedSummaries.length} cuentas)
               </div>
               <div className="flex items-center gap-2 text-xs font-semibold text-[#1E60A8] shrink-0">
                 <span>{isConsolidatedOpen ? 'Ocultar tabla' : 'Desplegar tabla'}</span>

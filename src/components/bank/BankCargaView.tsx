@@ -183,8 +183,8 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
           </h3>
           <p className="text-xs text-slate-500 leading-relaxed">
             {openPeriod
-              ? `Estás visualizando un periodo cerrado. Selecciona el periodo abierto (${openPeriod}) para cargar archivos SAP.`
-              : 'No existe una conciliación abierta actualmente. Abre una nueva conciliación para cargar el Balance SAP 00/01/02 y las Partidas Abiertas FBL3N del siguiente mes.'}
+              ? `Selecciona el periodo abierto (${openPeriod}) para cargar archivos SAP.`
+              : 'Abre una nueva conciliación para cargar archivos SAP.'}
           </p>
         </div>
         {!openPeriod && onRequestOpenReconciliation && (
@@ -210,19 +210,19 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
     {
       id: 'balance',
       title: 'Balance SAP (00 / 01 / 02)',
-      subtitle: 'Agrupa por Sociedad + Raíz y precarga Extracto = Cta 00',
+      subtitle: 'Saldos por sociedad y cuenta raíz',
       icon: Layers,
     },
     {
       id: 'fbl3n',
       title: 'Partidas Abiertas SAP (FBL3N)',
-      subtitle: 'Clasificación automática CB / DZ / AB / KZ / KR / DC',
+      subtitle: 'Clases CB / DZ / AB / KZ / KR / DC',
       icon: ListChecks,
     },
     {
       id: 'catalogo',
       title: 'Catálogo Sociedades y Cuentas',
-      subtitle: 'Importación masiva del maestro bancario 00 / 01 / 02',
+      subtitle: 'Maestro bancario SAP',
       icon: Building2,
     },
   ];
@@ -335,12 +335,9 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
                   : 'Arrastra tu archivo SAP aquí o haz clic para seleccionarlo'}
               </div>
               <p className="text-xs text-slate-500 max-w-lg">
-                {activeMode === 'balance' &&
-                  'Columnas esperadas: Sociedad, Cta.mayor (terminación 00 / 01 / 02), Denominación cuenta, Nuevo Saldo y opcional Moneda.'}
-                {activeMode === 'fbl3n' &&
-                  'Columnas FBL3N: Sociedad, Cuenta de mayor, Clave referencia 1 y 3 (Tercero), Referencia, Nº documento, Clase de documento, Fecha de documento, Fe.contabilización, Importe en moneda local, Moneda local y Texto.'}
-                {activeMode === 'catalogo' &&
-                  'Hojas esperadas: Sociedades (Codigo_Sociedad, Nombre, Pais, Moneda, NIT) y Cuentas_Bancarias (Banco, Numero_Cuenta, Cuenta_Mayor_00/01/02).'}
+                {activeMode === 'balance' && 'Sociedad, Cta.mayor (00/01/02), Denominación y Nuevo Saldo'}
+                {activeMode === 'fbl3n' && 'Archivo FBL3N (Sociedad, Cuenta de mayor, Clase, Documento, Fecha, Importe)'}
+                {activeMode === 'catalogo' && 'Hojas Sociedades y Cuentas_Bancarias'}
               </p>
             </div>
           )}
@@ -369,18 +366,12 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
       {activeMode === 'balance' && balancePreview && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4 text-[#1E60A8]" />
-                <span>
-                  Vista Previa Balance SAP · {balancePreview.groups.length} banco(s) agrupados (
-                  {balancePreview.rawRows.length} filas)
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Saldo en Libros = Cta 00 + Cta 01 + Cta 02 · Saldo en Extracto se precarga con Cta
-                00.
-              </p>
+            <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4 text-[#1E60A8]" />
+              <span>
+                Vista Previa Balance · {balancePreview.groups.length} banco(s) (
+                {balancePreview.rawRows.length} filas)
+              </span>
             </div>
 
             <div className="flex items-center gap-2">
@@ -477,14 +468,8 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
       {activeMode === 'fbl3n' && fbl3nPreview && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-bold text-slate-900">
-                Vista Previa Partidas Abiertas FBL3N · {fbl3nPreview.items.length} partida(s)
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Clasificadas automáticamente por Clase de Documento (CB vs otras) y signo del
-                importe.
-              </p>
+            <div className="text-sm font-bold text-slate-900">
+              Vista Previa Partidas FBL3N · {fbl3nPreview.items.length} partida(s)
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -593,14 +578,9 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
       {activeMode === 'catalogo' && catalogPreview && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-bold text-slate-900">
-                Vista Previa Catálogo · {catalogPreview.societies.length} sociedad(es) y{' '}
-                {catalogPreview.accounts.length} cuenta(s) bancaria(s)
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Las sociedades y cuentas existentes se actualizan conservando sus saldos históricos.
-              </p>
+            <div className="text-sm font-bold text-slate-900">
+              Vista Previa Catálogo · {catalogPreview.societies.length} sociedad(es) y{' '}
+              {catalogPreview.accounts.length} cuenta(s)
             </div>
             <div className="flex items-center gap-2">
               <button

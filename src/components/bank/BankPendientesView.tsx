@@ -309,15 +309,9 @@ export const BankPendientesView: React.FC<BankPendientesViewProps> = ({
       {/* Top Action & Summary Strip */}
       <section className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">
-              Partidas Abiertas SAP (FBL3N) · Gestión y Reclasificación
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Filtra por sociedad, cuenta bancaria, clase de documento SAP o subcuenta (01 / 02).
-              Las reglas automáticas clasifican cada partida y permiten reclasificación manual.
-            </p>
-          </div>
+          <h3 className="text-sm font-bold text-slate-900">
+            Partidas Abiertas SAP (FBL3N)
+          </h3>
           <div className="flex flex-wrap items-center gap-2">
             {!isReadOnly && (
               <>
@@ -471,15 +465,9 @@ export const BankPendientesView: React.FC<BankPendientesViewProps> = ({
           className="bg-white rounded-2xl border border-blue-200 p-5 space-y-4 shadow-xs"
         >
           <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-sm font-bold text-[#132B63]">
-                Alta Manual de Partida Abierta SAP
-              </h4>
-              <p className="text-xs text-slate-500">
-                Usa importe negativo (-) o positivo (+) según la regla SAP FBL3N para clasificación
-                automática.
-              </p>
-            </div>
+            <h4 className="text-sm font-bold text-[#132B63]">
+              Nueva Partida Abierta SAP
+            </h4>
             <button
               type="button"
               onClick={() => setIsCreating(false)}

@@ -8,9 +8,6 @@ import {
   X,
   Check,
   Sparkles,
-  FileSpreadsheet,
-  ShieldCheck,
-  Layers,
 } from 'lucide-react';
 import { ActiveModuleId, EffectivePermissions, SuiteModuleId } from '../types';
 import { PremexBrandLogo, ModuleEmblem } from './ModuleIcons';
@@ -28,6 +25,10 @@ export interface LauncherLiveMetrics {
   viaticosLiquidacionesCount: number;
   viaticosOpenCount: number;
   viaticosTotalLabel: string;
+  activitiesTotalCount: number;
+  activitiesCompletedCount: number;
+  activitiesPendingCount: number;
+  activitiesPeriod: string;
   configuredUsersCount?: number;
 }
 
@@ -47,6 +48,7 @@ interface SuiteModuleDefinition {
     | 'Conciliación'
     | 'Tesorería'
     | 'Gastos y Viáticos'
+    | 'Seguimiento y Cierre'
     | 'Cartera y Proveedores'
     | 'Administración';
   shortDesc: string;
@@ -66,8 +68,7 @@ const SUITE_MODULES: SuiteModuleDefinition[] = [
     id: 'intercompany',
     name: 'Conciliación Intercompany',
     category: 'Conciliación',
-    shortDesc:
-      'Matrices bilaterales CxC vs CxP para Internacionales, Nacionales y Anitox, diferencias con comentarios, correos de ajuste y cierre mensual.',
+    shortDesc: 'Matrices CxC vs CxP, control de diferencias y cierre mensual.',
     status: 'active',
     targetModule: 'intercompany',
     accentBorderHover: 'hover:border-[#2169B5]/60',
@@ -76,8 +77,7 @@ const SUITE_MODULES: SuiteModuleDefinition[] = [
     id: 'bancos',
     name: 'Conciliación Bancaria',
     category: 'Tesorería',
-    shortDesc:
-      'Cruce automático y manual entre extractos bancarios y auxiliar contable, partidas en tránsito y cuadre formal en Excel.',
+    shortDesc: 'Conciliación bancaria SAP (00/01/02), partidas abiertas e historial.',
     status: 'active',
     targetModule: 'bancos',
     accentBorderHover: 'hover:border-teal-600/50',
@@ -86,93 +86,94 @@ const SUITE_MODULES: SuiteModuleDefinition[] = [
     id: 'viaticos',
     name: 'Liquidación de Viáticos',
     category: 'Gastos y Viáticos',
-    shortDesc:
-      'Carga de facturas por foto o PDF con lectura IA, registro comercial, detección de consultor por correo, cierre con Excel oficial Premex y PDF compilado.',
+    shortDesc: 'Registro de facturas, liquidación comercial y exportación contable.',
     status: 'active',
     targetModule: 'viaticos',
     accentBorderHover: 'hover:border-sky-600/50',
   },
   {
+    id: 'actividades',
+    name: 'Panel de Actividades',
+    category: 'Seguimiento y Cierre',
+    shortDesc: 'Matriz por sociedad y responsable con Gmail y Google Tasks.',
+    status: 'active',
+    targetModule: 'actividades',
+    accentBorderHover: 'hover:border-emerald-600/50',
+  },
+  {
     id: 'anticipos',
     name: 'Anticipos',
     category: 'Tesorería',
-    shortDesc:
-      'Control de anticipos otorgados a proveedores y empleados, seguimiento de legalizaciones y saldos abiertos por antigüedad.',
+    shortDesc: 'Control de anticipos, legalizaciones y antigüedad de saldos.',
     status: 'planned',
     accentBorderHover: 'hover:border-amber-500/50',
     roadmapDetails: {
       objective:
-        'Centralizar el ciclo de vida de anticipos a proveedores, contratistas y empleados desde el desembolso hasta su cruce con factura o legalización.',
+        'Centralizar el seguimiento de anticipos a proveedores, contratistas y empleados hasta su legalización.',
       inputs: [
-        'Auxiliar contable de cuentas de anticipos (proveedores y viáticos)',
-        'Relación de facturas aplicadas y comprobantes de legalización',
-        'Catálogo de terceros y centros de costo Premex',
+        'Auxiliar contable de cuentas de anticipos',
+        'Facturas aplicadas y soportes de legalización',
+        'Catálogo de terceros y centros de costo',
       ],
       outputs: [
-        'Matriz de antigüedad de anticipos sin legalizar (30 / 60 / 90+ días)',
-        'Alertas automáticas por responsable y proveedor',
-        'Reporte de depuración mensual exportable a Excel',
+        'Matriz de antigüedad (30 / 60 / 90+ días)',
+        'Alertas por responsable y proveedor',
+        'Reporte mensual exportable a Excel',
       ],
-      integrationNote:
-        'Se conectará con Conciliación Bancaria para vincular desembolsos y con Cuentas por Pagar para aplicar saldos automáticamente.',
+      integrationNote: 'Integración planificada con Conciliación Bancaria y Cuentas por Pagar.',
     },
   },
   {
     id: 'cxc',
     name: 'Cuentas por Cobrar',
     category: 'Cartera y Proveedores',
-    shortDesc:
-      'Conciliación de cartera comercial, cruces de recaudos contra facturación electrónica y análisis de vencimientos.',
+    shortDesc: 'Conciliación de cartera comercial y análisis de vencimientos.',
     status: 'planned',
     accentBorderHover: 'hover:border-indigo-500/50',
     roadmapDetails: {
       objective:
-        'Conciliar saldos del módulo comercial frente a la contabilidad general, identificar pagos no aplicados y depurar notas crédito pendientes.',
+        'Conciliar saldos comerciales frente a contabilidad e identificar recaudos pendientes de aplicar.',
       inputs: [
-        'Cartera detallada por cliente y factura (subledger comercial)',
-        'Mayor contable de cuentas por cobrar locales y del exterior',
-        'Recibos de caja y abonos identificados desde Bancos',
+        'Cartera detallada por cliente y factura',
+        'Mayor contable de cuentas por cobrar',
+        'Recibos de caja desde Bancos',
       ],
       outputs: [
-        'Conciliación submayor vs contabilidad con diferencias por NIT',
-        'Tablero de edades de cartera y partidas sin cruzar',
-        'Estados de cuenta consolidados listos para envío a clientes',
+        'Conciliación submayor vs contabilidad',
+        'Tablero de edades de cartera',
+        'Estados de cuenta consolidados',
       ],
-      integrationNote:
-        'Compartirá el directorio corporativo y recibirá los recaudos conciliados directamente desde el módulo de Conciliación Bancaria.',
+      integrationNote: 'Integración planificada con Conciliación Bancaria.',
     },
   },
   {
     id: 'cxp',
     name: 'Cuentas por Pagar',
     category: 'Cartera y Proveedores',
-    shortDesc:
-      'Cruce de estados de cuenta de proveedores contra libros contables, validación de retenciones y programación de pagos.',
+    shortDesc: 'Cruce de estados de cuenta de proveedores contra libros.',
     status: 'planned',
     accentBorderHover: 'hover:border-rose-500/50',
     roadmapDetails: {
       objective:
-        'Automatizar la circularización y conciliación de estados de cuenta enviados por proveedores frente a las facturas causadas en ERP.',
+        'Conciliar estados de cuenta de proveedores frente a las facturas registradas en ERP.',
       inputs: [
-        'Estado de cuenta Excel/CSV enviado por el proveedor',
-        'Auxiliar contable de cuentas por pagar y anticipos aplicados',
-        'Órdenes de compra y notas débito/crédito en trámite',
+        'Estado de cuenta del proveedor',
+        'Auxiliar contable de cuentas por pagar',
+        'Anticipos y notas en trámite',
       ],
       outputs: [
-        'Cruce factura a factura detectando facturas faltantes o diferencias de valor',
-        'Resumen de facturas aprobadas para lote de tesorería',
-        'Carta de respuesta estructurada con soporte para el proveedor',
+        'Cruce factura a factura con diferencias',
+        'Resumen de lote para tesorería',
+        'Respuesta consolidada para proveedor',
       ],
-      integrationNote:
-        'Integrado con Anticipos y Conciliación Bancaria para validar pagos ejecutados y evitar duplicidades.',
+      integrationNote: 'Integración planificada con Anticipos y Conciliación Bancaria.',
     },
   },
   {
     id: 'ajustes',
     name: 'Ajustes y Configuraciones',
     category: 'Administración',
-    shortDesc:
-      'Control de accesos por correo electrónico: define módulos habilitados, sociedades visibles y roles de Administrador, Operador o Solo Consulta.',
+    shortDesc: 'Gestión de usuarios, roles, módulos y alcance por sociedad.',
     status: 'active',
     targetModule: 'ajustes',
     accentBorderHover: 'hover:border-[#132B63]/60',
@@ -322,6 +323,21 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
       );
     }
 
+    if (mod.id === 'actividades') {
+      return (
+        <span className="text-xs text-slate-600 tabular-nums">
+          <strong className="font-semibold text-emerald-700">
+            {metrics.activitiesCompletedCount}/{metrics.activitiesTotalCount}
+          </strong>{' '}
+          realizadas ·{' '}
+          <strong className="font-semibold text-slate-900">
+            {metrics.activitiesPendingCount}
+          </strong>{' '}
+          pend. · {metrics.activitiesPeriod}
+        </span>
+      );
+    }
+
     if (mod.id === 'ajustes') {
       return (
         <span className="text-xs text-slate-600 tabular-nums">
@@ -336,9 +352,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
     const hasUserNote = Boolean(roadmapNotes[mod.id]?.trim());
     return (
       <span className="text-xs text-slate-500">
-        {hasUserNote
-          ? 'Requerimientos registrados · Próxima fase'
-          : `${mod.category} · Arquitectura lista para activar`}
+        {hasUserNote ? 'Notas registradas' : mod.category}
       </span>
     );
   };
@@ -476,12 +490,8 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
                 Ecosistema Financiero Premex · {roleLabel} · {companyScopeSummary}
               </p>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                Selecciona el módulo de conciliación
+                Módulos Financieros
               </h1>
-              <p className="text-sm text-blue-100/90 mt-2 leading-relaxed">
-                Accede de forma independiente a cada aplicativo financiero. Cada módulo mantiene su
-                propia lógica contable, carga de archivos, cuadres y control de permisos por correo y empresa.
-              </p>
             </div>
 
             {/* Live Search Field inside Hero */}
@@ -492,7 +502,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar módulo (viáticos, bancos, intercompany, ajustes...)"
+                  placeholder="Buscar módulo..."
                   aria-label="Buscar módulo financiero"
                   className="w-full pl-10 pr-9 py-2.5 bg-white text-slate-900 placeholder:text-slate-400 text-sm rounded-xl border border-white/20 focus:outline-hidden focus:ring-2 focus:ring-sky-300"
                 />
@@ -706,39 +716,6 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
             </div>
           </section>
         )}
-
-        {/* Concise Platform Architecture Footnote (Clean 3-column unboxed strip) */}
-        <section className="mt-10 pt-8 border-t border-slate-200/80 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="flex items-start gap-3">
-            <Layers className="w-5 h-5 text-[#1E60A8] shrink-0 mt-0.5" />
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">Arquitectura Escalable</h3>
-              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                Cada proceso financiero vive en su propio módulo independiente, listo para incorporar Anticipos, CxC y CxP sin afectar los módulos en producción.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3">
-            <FileSpreadsheet className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">Excel y Reportes Corporativos</h3>
-              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                Plantillas estandarizadas de carga y exportación multipestaña diseñadas para auditoría y cierres mensuales.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3">
-            <ShieldCheck className="w-5 h-5 text-[#132B63] shrink-0 mt-0.5" />
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">Sesión Única y Respaldo en Nube</h3>
-              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                Tu cuenta corporativa de Google sincroniza el trabajo en la nube y permite compartir conciliaciones con tu equipo.
-              </p>
-            </div>
-          </div>
-        </section>
       </main>
 
       {/* Planned Module Roadmap Modal (Ensures Zero Dead Clicks) */}

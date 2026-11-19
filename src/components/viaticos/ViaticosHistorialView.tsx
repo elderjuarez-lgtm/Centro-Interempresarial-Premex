@@ -371,9 +371,6 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               <h3 className="text-xs font-bold text-slate-900">
                 Archivo de Liquidaciones Cerradas ({filteredLiquidaciones.length})
               </h3>
-              <p className="text-[11px] text-slate-500 truncate">
-                Filtra por semana o moneda para consultar comprobantes y descargar Excel o PDF.
-              </p>
             </div>
           </div>
         ) : (
@@ -781,15 +778,10 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
       {!isClosedMode && subTab === 'consultores' && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
           <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Users className="w-4 h-4 text-[#1E60A8]" />
-                <span>Listado de Consultores Disponibles</span>
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                La aplicación detecta automáticamente el consultor que está liquidando cruzando su correo (<span className="font-mono">primerNombre.primerApellido@empresa</span>) y su nivel de permiso.
-              </p>
-            </div>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Users className="w-4 h-4 text-[#1E60A8]" />
+              <span>Listado de Consultores Disponibles</span>
+            </h3>
             {!permissions.isAdmin && (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500">
                 <Lock className="w-3.5 h-3.5" />
@@ -803,9 +795,9 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                   <th className="py-3 px-4">Consultor</th>
-                  <th className="py-3 px-4">Correo Corporativo (Vínculo)</th>
+                  <th className="py-3 px-4">Correo Corporativo</th>
                   <th className="py-3 px-4">Empresa / Sociedad</th>
-                  <th className="py-3 px-4">Centro de Costo (Contabilidad)</th>
+                  <th className="py-3 px-4">Centro de Costo</th>
                   <th className="py-3 px-4">Moneda Base</th>
                   <th className="py-3 px-4">Estado</th>
                   {permissions.isAdmin && (
@@ -930,7 +922,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Correo Corporativo (nombre.apellido@dominio) *
+                  Correo Corporativo *
                 </label>
                 <input
                   type="email"
@@ -945,7 +937,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Empresa / Sociedad (BD Viáticos)
+                    Empresa / Sociedad
                   </label>
                   <input
                     type="text"
@@ -984,7 +976,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Centro de Costo (se carga automáticamente en Contabilidad / Odoo)
+                  Centro de Costo
                 </label>
                 <input
                   type="text"

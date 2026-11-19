@@ -77,9 +77,6 @@ export const CloseReconciliationModal: React.FC<CloseReconciliationModalProps> =
               <h3 id="close-bank-rec-title" className="text-sm font-bold truncate">
                 Cerrar Conciliación Bancaria · {period}
               </h3>
-              <p className="text-[11px] text-sky-200/90 truncate">
-                El entregable quedará archivado en el Historial en modo solo lectura
-              </p>
             </div>
           </div>
           <button
@@ -189,10 +186,7 @@ export const CloseReconciliationModal: React.FC<CloseReconciliationModalProps> =
           </div>
 
           <p className="text-[11px] text-slate-500 leading-relaxed">
-            Al confirmar, la conciliación de <strong>{period}</strong> pasará al{' '}
-            <strong>Historial de Conciliaciones</strong> en modo de consulta inmutable y quedará
-            habilitado el botón <strong>Abrir Conciliación</strong> para iniciar el siguiente
-            periodo.
+            La conciliación de <strong>{period}</strong> se archivará en el Historial en modo solo lectura.
           </p>
         </div>
 
@@ -287,9 +281,6 @@ export const OpenReconciliationModal: React.FC<OpenReconciliationModalProps> = (
               <h3 id="open-bank-rec-title" className="text-sm font-bold truncate">
                 Abrir Nueva Conciliación Bancaria
               </h3>
-              <p className="text-[11px] text-sky-100 truncate">
-                Inicia un nuevo periodo mensual manteniendo el maestro de sociedades y cuentas
-              </p>
             </div>
           </div>
           <button
@@ -396,9 +387,7 @@ export const OpenReconciliationModal: React.FC<OpenReconciliationModalProps> = (
                 Arrastrar partidas abiertas SAP pendientes del cierre anterior
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Déjalo desmarcado si vas a cargar un nuevo archivo FBL3N limpio desde SAP para{' '}
-                {candidatePeriod}. El catálogo de sociedades y subcuentas 00/01/02 siempre se
-                conserva.
+                Desmarcado para cargar un nuevo FBL3N de {candidatePeriod}.
               </p>
             </div>
           </label>

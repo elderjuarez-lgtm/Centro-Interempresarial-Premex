@@ -225,9 +225,6 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
               Empresas a Conciliar ({symmetricMatrix.entities.length})
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Estructura bilateral idéntica al libro de control corporativo: CTAS X COBRAR y CTAS X PAGAR alimentada por tus Empresas a Conciliar.
-          </p>
         </div>
 
         {/* Action Buttons */}
@@ -325,24 +322,21 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
           
           <div className="flex items-center gap-1.5">
             <span className="w-4 h-4 rounded bg-[#bbf7d0] border border-emerald-400"></span>
-            <span className="text-slate-600 font-medium">Conciliado (Saldo recíproco coincide)</span>
+            <span className="text-slate-600 font-medium">Conciliado</span>
           </div>
 
           <div className="flex items-center gap-1.5">
             <span className="w-4 h-4 rounded bg-[#fef08a] border border-amber-400"></span>
-            <span className="text-slate-600 font-medium">Discrepancia / Diferencia</span>
+            <span className="text-slate-600 font-medium">Discrepancia</span>
           </div>
 
           <div className="flex items-center gap-1.5">
             <span className="w-4 h-4 rounded bg-[#fef3c7] border border-amber-200"></span>
-            <span className="text-slate-600 font-medium">Diagonal (Misma sociedad)</span>
+            <span className="text-slate-600 font-medium">Diagonal</span>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] text-slate-400 italic">
-            Haz clic en cualquier celda con valor para ver únicamente los documentos no conciliados (sociedad o contraparte).
-          </span>
           {onInspectDocuments && (docRecon.summary.noConciliados > 0 || differences.some((d) => d.estado !== 'conciliado')) && (
             <button
               type="button"
@@ -585,7 +579,8 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
                   <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                     <span>
-                      <strong>Sólo documentos no conciliados (Sociedad y Contraparte):</strong> Se muestran únicamente las facturas pendientes o con diferencia de valor. Diferencia neta en matriz: <strong>{formatCurrency(drilldownCell.difference || 0)}</strong>.
+                      Documentos pendientes o con diferencia de valor. Diferencia neta:{' '}
+                      <strong>{formatCurrency(drilldownCell.difference || 0)}</strong>.
                     </span>
                   </div>
 

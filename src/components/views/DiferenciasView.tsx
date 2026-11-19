@@ -613,11 +613,8 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
       <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h3 className="text-lg font-bold text-slate-900">
-            3. Tabla de Diferencias de Conciliación
+            Tabla de Diferencias de Conciliación
           </h3>
-          <p className="text-xs text-slate-500">
-            Fórmula de cálculo: <strong className="text-blue-900 font-mono">Diferencia = CxC - CxP de la contraparte</strong>. Selecciona una o varias líneas con diferencia para redactar un solo correo.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1155,7 +1152,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1.5">
-                    Enviar correo a (Todas las empresas)
+                    Destinatario (Empresa)
                   </label>
                   <div className="relative">
                     <UserCheck className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1262,7 +1259,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-bold text-slate-800">
-                    Diferencias a incluir en el correo (a discreción: {activeEmailRows.length} de {onlyDifferencePairs.length})
+                    Diferencias a incluir ({activeEmailRows.length} de {onlyDifferencePairs.length})
                   </span>
                   {modalPairIds.length > 0 && (
                     <button
@@ -1372,7 +1369,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="font-bold text-slate-700">
-                    Cuerpo del correo (se carga directo en Gmail)
+                    Cuerpo del correo
                   </label>
                   {isBodyEditedManually && (
                     <button

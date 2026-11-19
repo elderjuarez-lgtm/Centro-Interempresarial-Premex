@@ -6,7 +6,6 @@ import {
   CheckCircle, 
   AlertCircle, 
   Loader2, 
-  HelpCircle,
   Copy,
   Check
 } from 'lucide-react';
@@ -157,23 +156,23 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
               <span>Confirmación de Exportación de Datos</span>
             </div>
             <p>
-              Con tu confirmación, Centro Interempresarial creará o actualizará un libro en tu cuenta de Google Drive con las siguientes 5 pestañas:
+              Se creará o actualizará un libro en tu cuenta de Google Drive con 5 pestañas:
             </p>
             <ul className="list-disc pl-5 space-y-1 font-medium text-slate-700">
               <li>
-                <span className="font-semibold text-blue-900">Matrices Bilaterales:</span> Formato idéntico al reporte oficial con CTAS X COBRAR y CTAS X PAGAR apiladas y el listado de {orderedEntities.length} empresas a conciliar.
+                <span className="font-semibold text-blue-900">Matrices Bilaterales:</span> CTAS X COBRAR y CTAS X PAGAR ({orderedEntities.length} empresas).
               </li>
               <li>
-                <span className="font-semibold text-blue-900">Diferencias Conciliacion:</span> {differences.length} pares intercompany con fórmula (CxC - CxP) y comentarios editados.
+                <span className="font-semibold text-blue-900">Diferencias Conciliacion:</span> {differences.length} pares y comentarios.
               </li>
               <li>
-                <span className="font-semibold text-blue-900">Matriz CxC:</span> Matriz de Cuentas por Cobrar con totales por fila y columna.
+                <span className="font-semibold text-blue-900">Matriz CxC:</span> Cuentas por Cobrar con totales.
               </li>
               <li>
-                <span className="font-semibold text-blue-900">Matriz CxP:</span> Matriz de Cuentas por Pagar con totales por fila y columna.
+                <span className="font-semibold text-blue-900">Matriz CxP:</span> Cuentas por Pagar con totales.
               </li>
               <li>
-                <span className="font-semibold text-blue-900">Movimientos Detallados:</span> Listado completo de {movements.length} transacciones individuales.
+                <span className="font-semibold text-blue-900">Movimientos Detallados:</span> {movements.length} transacciones.
               </li>
             </ul>
           </div>
@@ -261,9 +260,6 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                   className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                   placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit"
                 />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Pega el ID o la URL completa de una hoja que ya tengas abierta en Google Drive.
-                </p>
               </div>
             )}
           </div>

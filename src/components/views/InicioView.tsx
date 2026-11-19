@@ -1,15 +1,10 @@
 import React from 'react';
 import { 
-  Building2, 
-  Receipt, 
   CheckCircle2, 
   AlertTriangle, 
-  TrendingUp, 
   ArrowRight, 
   UploadCloud, 
-  Grid3X3, 
   FileSpreadsheet,
-  Layers,
   ArrowUpRight,
   ArrowDownRight,
   Scale,
@@ -66,9 +61,6 @@ export const InicioView: React.FC<InicioViewProps> = ({
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight">
             Gestión y Conciliación Bilateral de Saldos
           </h1>
-          <p className="mt-2 text-sm sm:text-base text-blue-100/80 leading-relaxed">
-            Consolide movimientos de cuentas por cobrar y pagar entre entidades del grupo, identifique discrepancias y exporte matrices sincronizadas directamente a Google Sheets.
-          </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
             {!readOnly && (
@@ -226,9 +218,6 @@ export const InicioView: React.FC<InicioViewProps> = ({
               <h3 className="font-bold text-slate-900 text-base">
                 Discrepancias Principales a Conciliar
               </h3>
-              <p className="text-xs text-slate-500">
-                Pares intercompany con diferencia mayor calculada como (CxC - CxP de la contraparte)
-              </p>
             </div>
             <button
               onClick={() => setActiveTab('diferencias')}
@@ -301,7 +290,7 @@ export const InicioView: React.FC<InicioViewProps> = ({
               </div>
               <div>
                 <p className="font-semibold text-slate-800">Cargar Archivo Excel</p>
-                <p className="text-slate-500 mt-0.5">Sube el archivo con las pestañas "Cuentas por cobrar" y "Cuentas por pagar".</p>
+                <p className="text-slate-500 mt-0.5">Importar hojas de CxC y CxP.</p>
               </div>
             </div>
 
@@ -314,7 +303,7 @@ export const InicioView: React.FC<InicioViewProps> = ({
               </div>
               <div>
                 <p className="font-semibold text-slate-800">Empresas a Conciliar</p>
-                <p className="text-slate-500 mt-0.5">Define y agrega manualmente las empresas que alimentan y ordenan la matriz.</p>
+                <p className="text-slate-500 mt-0.5">Catálogo y orden de sociedades.</p>
               </div>
             </div>
 
@@ -327,7 +316,7 @@ export const InicioView: React.FC<InicioViewProps> = ({
               </div>
               <div>
                 <p className="font-semibold text-slate-800">Inspeccionar Matrices</p>
-                <p className="text-slate-500 mt-0.5">Examina la matriz de CxC y la matriz de CxP con sus totales cruzados.</p>
+                <p className="text-slate-500 mt-0.5">Matrices bilaterales de CxC y CxP.</p>
               </div>
             </div>
 
@@ -340,7 +329,7 @@ export const InicioView: React.FC<InicioViewProps> = ({
               </div>
               <div>
                 <p className="font-semibold text-slate-800">Ajustar Diferencias</p>
-                <p className="text-slate-500 mt-0.5">Escribe comentarios y explicaciones en las discrepancias detectadas.</p>
+                <p className="text-slate-500 mt-0.5">Revisión y notas de discrepancias.</p>
               </div>
             </div>
 
@@ -354,7 +343,7 @@ export const InicioView: React.FC<InicioViewProps> = ({
                 </div>
                 <div>
                   <p className="font-semibold text-emerald-900">Guardar en Google Sheets</p>
-                  <p className="text-emerald-700 mt-0.5">Sube el reporte final a la nube para los auditores y la gerencia.</p>
+                  <p className="text-emerald-700 mt-0.5">Exportar reporte a Google Sheets.</p>
                 </div>
               </div>
             )}

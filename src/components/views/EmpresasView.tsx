@@ -379,10 +379,6 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
               {entities.length} en la matriz
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            Las empresas registradas aquí (y su <strong>NIT</strong> para cruce automático en la carga de Excel) alimentan en este orden exacto la reportería de{' '}
-            <strong>{scopeLabel}</strong>.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -460,27 +456,27 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
             <div className="min-w-0">
               <div className="font-bold">
                 {directorySync?.status === 'saving'
-                  ? 'Guardando cambios de empresas en la nube...'
+                  ? 'Guardando cambios en la nube...'
                   : directorySync?.status === 'error'
-                  ? 'No se pudo guardar el directorio de empresas en la nube'
+                  ? 'Error al guardar el directorio en la nube'
                   : directorySync?.status === 'pending'
-                  ? 'Cambios de empresas guardados localmente — pendientes por sincronizar en la nube'
+                  ? 'Cambios locales pendientes por sincronizar'
                   : directorySync?.status === 'saved'
-                  ? 'Directorio de empresas sincronizado en la nube (independiente de cierres de mes)'
-                  : 'Catálogo de empresas independiente de cierres de mes'}
+                  ? 'Directorio sincronizado en la nube'
+                  : 'Directorio de empresas'}
               </div>
-              <p className="text-[11px] opacity-85 mt-0.5">
-                {directorySync?.status === 'error' && directorySync.errorMsg
-                  ? directorySync.errorMsg
-                  : directorySync?.status === 'saved' && directorySync.lastSyncedAtIso
-                  ? `Puedes editar correos, NIT u orden en cualquier momento aunque existan meses cerrados. Último guardado: ${new Date(
-                      directorySync.lastSyncedAtIso
-                    ).toLocaleString('es-CO', {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })}${directorySync.updatedByName ? ` por ${directorySync.updatedByName}` : ''}.`
-                  : 'Puedes editar correos, NIT, nombres u orden libremente sin afectar ni quedar bloqueado por los cierres de mes.'}
-              </p>
+              {directorySync?.status === 'error' && directorySync.errorMsg ? (
+                <p className="text-[11px] opacity-85 mt-0.5">{directorySync.errorMsg}</p>
+              ) : directorySync?.status === 'saved' && directorySync.lastSyncedAtIso ? (
+                <p className="text-[11px] opacity-85 mt-0.5">
+                  Último guardado:{' '}
+                  {new Date(directorySync.lastSyncedAtIso).toLocaleString('es-CO', {
+                    dateStyle: 'short',
+                    timeStyle: 'short',
+                  })}
+                  {directorySync.updatedByName ? ` por ${directorySync.updatedByName}` : ''}.
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -600,9 +596,6 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
             </div>
             <span>Agregar Sociedad Manualmente</span>
           </h4>
-          <span className="text-[11px] text-slate-400">
-            Se añadirá al final de la matriz y podrás reordenarla
-          </span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
@@ -641,7 +634,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
 
           <div className="lg:col-span-3">
             <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-              Correo Encargado <span className="font-normal text-slate-400">(para diferencias)</span>
+              Correo Encargado
             </label>
             <input
               type="email"
@@ -944,9 +937,6 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
                   <h4 className="font-bold text-base">
                     Carga Masiva de Sociedades ({scopeLabel})
                   </h4>
-                  <p className="text-xs text-blue-200">
-                    Conserva exactamente el orden de tu listado e incluye el NIT para cruce automático en movimientos
-                  </p>
                 </div>
               </div>
               <button
@@ -1071,7 +1061,7 @@ export const EmpresasView: React.FC<EmpresasViewProps> = ({
                     onChange={() => setBulkMode('replace')}
                   />
                   <span>
-                    <strong>Reemplazar listado</strong> (conserva orden exacto #1, #2, #3...)
+                    <strong>Reemplazar listado</strong> (conserva el orden del archivo)
                   </span>
                 </label>
                 <label className="flex items-center gap-1.5 cursor-pointer">

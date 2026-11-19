@@ -32,6 +32,12 @@ import {
   ViaticoConsultor,
   ViaticoLiquidation,
   ViaticosWorkspaceData,
+  ActivitiesWorkspaceData,
+  ActivitySociety,
+  ActivityResponsible,
+  ActivityTemplate,
+  ActivityExecutionRecord,
+  ActivityNotificationRecipient,
   FunctionalModuleId,
   ModuleCompaniesMap,
   ModuleCompanyEntry,
@@ -64,6 +70,18 @@ import {
   resolveViaticosConsultantScope,
 } from './utils/viaticos';
 import {
+  INITIAL_ACTIVITY_SOCIETIES,
+  INITIAL_ACTIVITY_RESPONSIBLES,
+  INITIAL_ACTIVITY_TEMPLATES,
+  INITIAL_ACTIVITY_NOTIFICATION_RECIPIENTS,
+  getCurrentPeriodKey,
+  formatPeriodLabel,
+  materializePeriodAssignments,
+  filterActivitiesWorkspaceForUser,
+  normalizeActivitySociety,
+  normalizeActivityTemplate,
+} from './utils/activities';
+import {
   ALL_SUITE_MODULES,
   INITIAL_ACCESS_POLICY,
   INITIAL_USER_PERMISSIONS,
@@ -90,6 +108,7 @@ import {
   auth,
   initAuth,
   googleSignIn,
+  reconnectGoogleWorkspace,
   logout,
   unsubscribeAllFirestoreListeners,
 } from './services/auth';
@@ -115,6 +134,11 @@ import {
   saveViaticosWorkspaceToCloud,
 } from './services/viaticosStore';
 import {
+  DEFAULT_ACTIVITIES_DOC_ID,
+  subscribeToActivitiesWorkspace,
+  saveActivitiesWorkspaceToCloud,
+} from './services/activitiesStore';
+import {
   saveUserPermissionAndRegistryToCloud,
   subscribeToAccessPolicy,
   subscribeToAdminAccessRegistry,
@@ -129,6 +153,7 @@ import { ModuleLauncher, LauncherLiveMetrics } from './components/ModuleLauncher
 import { LoginGateView } from './components/LoginGateView';
 import { BankModuleWorkspace, BankWorkspaceData } from './components/bank/BankModuleWorkspace';
 import { ViaticosModuleWorkspace } from './components/viaticos/ViaticosModuleWorkspace';
+import { ActivitiesModuleWorkspace } from './components/actividades/ActivitiesModuleWorkspace';
 import {
   SettingsModuleWorkspace,
   ModuleDbSyncState,
@@ -172,6 +197,16 @@ const VIATICOS_STORAGE_KEYS = {
   LIQUIDACIONES: 'premex_viaticos_liquidaciones_v1',
   ACTIVE_ID: 'premex_viaticos_active_id_v1',
   DOC_ID: 'premex_viaticos_doc_id_v1',
+};
+const ACTIVITIES_STORAGE_KEYS = {
+  DOC_ID: 'premex_actividades_doc_id_v1',
+  PERIOD: 'premex_actividades_period_v1',
+  SOCIETIES: 'premex_actividades_societies_v1',
+  RESPONSIBLES: 'premex_actividades_responsibles_v1',
+  TEMPLATES: 'premex_actividades_templates_v1',
+  EXECUTIONS: 'premex_actividades_executions_v1',
+  RECIPIENTS: 'premex_actividades_recipients_v1',
+  SETTINGS: 'premex_actividades_settings_v1',
 };
 
 const STORAGE_KEYS_BY_SCOPE: Record<
@@ -325,6 +360,7 @@ function getInitialModuleFromUrl(): ActiveModuleId {
   if (m === 'intercompany') return 'intercompany';
   if (m === 'bancos') return 'bancos';
   if (m === 'viaticos') return 'viaticos';
+  if (m === 'actividades') return 'actividades';
   if (m === 'ajustes') return 'ajustes';
   return 'launcher';
 }
@@ -492,6 +528,83 @@ function loadInitialViaticosWorkspace(): ViaticosWorkspaceData {
   };
 }
 
+function loadInitialActivitiesWorkspace(): ActivitiesWorkspaceData {
+  const savedDocId = (() => {
+    try {
+      const raw = localStorage.getItem(ACTIVITIES_STORAGE_KEYS.DOC_ID);
+      if (raw && /^[a-zA-Z0-9_-]{1,128}$/.test(raw)) return raw;
+    } catch {
+      // ignore
+    }
+    return DEFAULT_ACTIVITIES_DOC_ID;
+  })();
+
+  const savedPeriod = (() => {
+    try {
+      const raw = localStorage.getItem(ACTIVITIES_STORAGE_KEYS.PERIOD);
+      if (raw && /^\d{4}-\d{2}$/.test(raw)) return raw;
+    } catch {
+      // ignore
+    }
+    return getCurrentPeriodKey();
+  })();
+
+  const rawSocieties = readJsonStorage<ActivitySociety[]>(
+    ACTIVITIES_STORAGE_KEYS.SOCIETIES,
+    INITIAL_ACTIVITY_SOCIETIES
+  );
+  const societies =
+    Array.isArray(rawSocieties) && rawSocieties.length > 0
+      ? rawSocieties.map(normalizeActivitySociety)
+      : INITIAL_ACTIVITY_SOCIETIES;
+  const responsibles = readJsonStorage<ActivityResponsible[]>(
+    ACTIVITIES_STORAGE_KEYS.RESPONSIBLES,
+    INITIAL_ACTIVITY_RESPONSIBLES
+  );
+  const rawActivities = readJsonStorage<ActivityTemplate[]>(
+    ACTIVITIES_STORAGE_KEYS.TEMPLATES,
+    INITIAL_ACTIVITY_TEMPLATES
+  );
+  const activities =
+    Array.isArray(rawActivities) && rawActivities.length > 0
+      ? rawActivities.map(normalizeActivityTemplate)
+      : INITIAL_ACTIVITY_TEMPLATES;
+  const executions = readJsonStorage<Record<string, ActivityExecutionRecord>>(
+    ACTIVITIES_STORAGE_KEYS.EXECUTIONS,
+    {}
+  );
+  const notificationRecipients = readJsonStorage<ActivityNotificationRecipient[]>(
+    ACTIVITIES_STORAGE_KEYS.RECIPIENTS,
+    INITIAL_ACTIVITY_NOTIFICATION_RECIPIENTS
+  );
+  const settings = readJsonStorage<{
+    notifyAdminsAutomatically?: boolean;
+    subtleReminderDaysBefore?: number;
+    lastGoogleTasksSyncIso?: string | null;
+  }>(ACTIVITIES_STORAGE_KEYS.SETTINGS, {});
+
+  return {
+    docId: savedDocId,
+    selectedPeriod: savedPeriod,
+    societies,
+    responsibles: responsibles.length > 0 ? responsibles : INITIAL_ACTIVITY_RESPONSIBLES,
+    activities,
+    executions: executions && typeof executions === 'object' ? executions : {},
+    notificationRecipients:
+      notificationRecipients.length > 0
+        ? notificationRecipients
+        : INITIAL_ACTIVITY_NOTIFICATION_RECIPIENTS,
+    notifyAdminsAutomatically: settings.notifyAdminsAutomatically !== false,
+    subtleReminderDaysBefore:
+      typeof settings.subtleReminderDaysBefore === 'number'
+        ? settings.subtleReminderDaysBefore
+        : 3,
+    lastGoogleTasksSyncIso: settings.lastGoogleTasksSyncIso || null,
+    lastSavedAtIso: null,
+    hasUnsavedChanges: false,
+  };
+}
+
 function loadInitialStandaloneModuleCompanies(): Record<
   StandaloneCompanyDbModuleId,
   ModuleCompanyEntry[]
@@ -609,6 +722,7 @@ export default function App() {
   const canAccessIntercompany = effectivePermissions.canAccessModule('intercompany');
   const canAccessBancos = effectivePermissions.canAccessModule('bancos');
   const canAccessViaticos = effectivePermissions.canAccessModule('viaticos');
+  const canAccessActividades = effectivePermissions.canAccessModule('actividades');
 
   // Bank Reconciliation module workspace state
   const [bankWorkspace, setBankWorkspace] = useState<BankWorkspaceData>(() =>
@@ -624,7 +738,17 @@ export default function App() {
   const viaticosUnsavedRef = useRef<boolean>(false);
   viaticosUnsavedRef.current = viaticosWorkspace.hasUnsavedChanges;
 
-  // Independent per-module company databases (bancos, viaticos, anticipos, cxc, cxp)
+  // Panel de Actividades module workspace state
+  const [activitiesWorkspace, setActivitiesWorkspace] = useState<ActivitiesWorkspaceData>(() =>
+    loadInitialActivitiesWorkspace()
+  );
+  const [isSavingActivitiesCloud, setIsSavingActivitiesCloud] = useState<boolean>(false);
+  const activitiesWorkspaceRef = useRef<ActivitiesWorkspaceData>(activitiesWorkspace);
+  activitiesWorkspaceRef.current = activitiesWorkspace;
+  const activitiesUnsavedRef = useRef<boolean>(false);
+  activitiesUnsavedRef.current = activitiesWorkspace.hasUnsavedChanges;
+
+  // Independent per-module company databases (bancos, viaticos, actividades, anticipos, cxc, cxp)
   // Intercompany uses /company_directories/internacionales as its single source of truth.
   const [standaloneModuleCompanies, setStandaloneModuleCompanies] = useState<
     Record<StandaloneCompanyDbModuleId, ModuleCompanyEntry[]>
@@ -635,6 +759,7 @@ export default function App() {
   const pendingStandaloneDbSyncRef = useRef<Record<StandaloneCompanyDbModuleId, boolean>>({
     bancos: false,
     viaticos: false,
+    actividades: false,
     anticipos: false,
     cxc: false,
     cxp: false,
@@ -645,6 +770,7 @@ export default function App() {
   >({
     bancos: { status: 'idle' },
     viaticos: { status: 'idle' },
+    actividades: { status: 'idle' },
     anticipos: { status: 'idle' },
     cxc: { status: 'idle' },
     cxp: { status: 'idle' },
@@ -951,6 +1077,43 @@ export default function App() {
     });
   };
 
+  const handleUpdateActivitiesWorkspace = (
+    updater: (prev: ActivitiesWorkspaceData) => ActivitiesWorkspaceData
+  ) => {
+    setActivitiesWorkspace((prev) => {
+      const candidate = updater(prev);
+      const safeNext: ActivitiesWorkspaceData = effectivePermissions.isAdmin
+        ? candidate
+        : {
+            ...prev,
+            selectedPeriod: candidate.selectedPeriod,
+            executions: candidate.executions,
+            lastGoogleTasksSyncIso: candidate.lastGoogleTasksSyncIso,
+          };
+
+      const onlyPeriodChanged =
+        safeNext.selectedPeriod !== prev.selectedPeriod &&
+        safeNext.societies === prev.societies &&
+        safeNext.responsibles === prev.responsibles &&
+        safeNext.activities === prev.activities &&
+        safeNext.executions === prev.executions &&
+        safeNext.notificationRecipients === prev.notificationRecipients &&
+        safeNext.notifyAdminsAutomatically === prev.notifyAdminsAutomatically &&
+        safeNext.subtleReminderDaysBefore === prev.subtleReminderDaysBefore;
+
+      if (!onlyPeriodChanged && !effectivePermissions.canOperate) {
+        return prev;
+      }
+
+      const nextState: ActivitiesWorkspaceData = {
+        ...safeNext,
+        hasUnsavedChanges: onlyPeriodChanged ? prev.hasUnsavedChanges : true,
+      };
+      activitiesWorkspaceRef.current = nextState;
+      return nextState;
+    });
+  };
+
   // Three independent Intercompany scopes: Internacionales, Nacionales, and Anitox
   const [workspaces, setWorkspaces] = useState<Record<ReconciliationScope, ScopeWorkspaceState>>(() => {
     const intlWs = loadInitialWorkspace(
@@ -1216,6 +1379,81 @@ export default function App() {
     };
   }, [viaticosWorkspace.docId, canLoadCloudData, canAccessViaticos]);
 
+  // Persist Panel de Actividades workspace locally
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVITIES_STORAGE_KEYS.DOC_ID, activitiesWorkspace.docId);
+      localStorage.setItem(ACTIVITIES_STORAGE_KEYS.PERIOD, activitiesWorkspace.selectedPeriod);
+      localStorage.setItem(
+        ACTIVITIES_STORAGE_KEYS.SOCIETIES,
+        JSON.stringify(activitiesWorkspace.societies)
+      );
+      localStorage.setItem(
+        ACTIVITIES_STORAGE_KEYS.RESPONSIBLES,
+        JSON.stringify(activitiesWorkspace.responsibles)
+      );
+      localStorage.setItem(
+        ACTIVITIES_STORAGE_KEYS.TEMPLATES,
+        JSON.stringify(activitiesWorkspace.activities)
+      );
+      localStorage.setItem(
+        ACTIVITIES_STORAGE_KEYS.EXECUTIONS,
+        JSON.stringify(activitiesWorkspace.executions)
+      );
+      localStorage.setItem(
+        ACTIVITIES_STORAGE_KEYS.RECIPIENTS,
+        JSON.stringify(activitiesWorkspace.notificationRecipients)
+      );
+      localStorage.setItem(
+        ACTIVITIES_STORAGE_KEYS.SETTINGS,
+        JSON.stringify({
+          notifyAdminsAutomatically: activitiesWorkspace.notifyAdminsAutomatically,
+          subtleReminderDaysBefore: activitiesWorkspace.subtleReminderDaysBefore,
+          lastGoogleTasksSyncIso: activitiesWorkspace.lastGoogleTasksSyncIso,
+        })
+      );
+    } catch (e) {
+      console.warn('Failed to save Panel de Actividades locally:', e);
+    }
+  }, [activitiesWorkspace]);
+
+  // Subscribe to Panel de Actividades cloud document ONLY when authenticated & authorized
+  useEffect(() => {
+    if (!canLoadCloudData || !canAccessActividades) {
+      return;
+    }
+    const unsubscribe = subscribeToActivitiesWorkspace(
+      activitiesWorkspace.docId,
+      (savedDoc) => {
+        if (!savedDoc) return;
+        if (activitiesUnsavedRef.current) return;
+        setActivitiesWorkspace((prev) => ({
+          ...prev,
+          selectedPeriod: savedDoc.selectedPeriod || prev.selectedPeriod,
+          societies: savedDoc.societies.length > 0 ? savedDoc.societies : prev.societies,
+          responsibles:
+            savedDoc.responsibles.length > 0 ? savedDoc.responsibles : prev.responsibles,
+          activities: savedDoc.activities.length > 0 ? savedDoc.activities : prev.activities,
+          executions: savedDoc.executions || prev.executions,
+          notificationRecipients:
+            savedDoc.notificationRecipients.length > 0
+              ? savedDoc.notificationRecipients
+              : prev.notificationRecipients,
+          notifyAdminsAutomatically: savedDoc.notifyAdminsAutomatically,
+          subtleReminderDaysBefore: savedDoc.subtleReminderDaysBefore,
+          lastSavedAtIso: savedDoc.updatedAtIso || new Date().toISOString(),
+          hasUnsavedChanges: false,
+        }));
+      },
+      (err) => {
+        console.warn('Error loading cloud Panel de Actividades:', err);
+      }
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, [activitiesWorkspace.docId, canLoadCloudData, canAccessActividades]);
+
   // Persist RBAC permissions & policy locally
   useEffect(() => {
     try {
@@ -1425,6 +1663,49 @@ export default function App() {
       lastSavedAtIso: result.updatedAtIso,
       hasUnsavedChanges: false,
     }));
+  };
+
+  const handleSaveActivitiesToCloud = async (patch?: {
+    executionPatches?: Record<string, ActivityExecutionRecord>;
+    lastGoogleTasksSyncIso?: string;
+  }) => {
+    if (!effectivePermissions.canOperate) {
+      throw new Error(
+        'Tu perfil tiene permisos de Solo Consulta y no puede guardar cambios en la nube.'
+      );
+    }
+    const base = activitiesWorkspaceRef.current;
+    const mergedExecutions = patch?.executionPatches
+      ? { ...base.executions, ...patch.executionPatches }
+      : base.executions;
+
+    setIsSavingActivitiesCloud(true);
+    try {
+      const result = await saveActivitiesWorkspaceToCloud({
+        targetId: base.docId,
+        title: `Panel de Actividades Premex - ${formatPeriodLabel(base.selectedPeriod)}`,
+        selectedPeriod: base.selectedPeriod,
+        societies: base.societies,
+        responsibles: base.responsibles,
+        activities: base.activities,
+        executions: mergedExecutions,
+        notificationRecipients: base.notificationRecipients,
+        notifyAdminsAutomatically: base.notifyAdminsAutomatically,
+        subtleReminderDaysBefore: base.subtleReminderDaysBefore,
+      });
+      setActivitiesWorkspace((prev) => ({
+        ...prev,
+        docId: result.id,
+        executions: patch?.executionPatches
+          ? { ...prev.executions, ...patch.executionPatches }
+          : prev.executions,
+        lastGoogleTasksSyncIso: patch?.lastGoogleTasksSyncIso ?? prev.lastGoogleTasksSyncIso,
+        lastSavedAtIso: result.updatedAtIso,
+        hasUnsavedChanges: false,
+      }));
+    } finally {
+      setIsSavingActivitiesCloud(false);
+    }
   };
 
   // Keep unsaved refs in sync per scope
@@ -1698,6 +1979,18 @@ export default function App() {
     }
   };
 
+  const handleReconnectGoogleWorkspace = async (): Promise<string | null> => {
+    const token = await reconnectGoogleWorkspace();
+    if (token) {
+      if (auth.currentUser) {
+        setCurrentUser(auth.currentUser);
+      }
+      setAccessToken(token);
+      return token;
+    }
+    return null;
+  };
+
   const handleSignOut = async () => {
     try {
       // Unsubscribe every active Firestore listener BEFORE revoking Firebase auth state
@@ -1865,11 +2158,17 @@ export default function App() {
       ],
       'viat'
     );
+    const actividadesList = mergeRuntimeSocietyNames(
+      standaloneModuleCompanies.actividades,
+      activitiesWorkspace.societies.map((s) => ({ nombre: s.codigo })),
+      'act'
+    );
 
     return {
       intercompany: mergedIntercompany,
       bancos: bancosList,
       viaticos: viaticosList,
+      actividades: actividadesList,
       anticipos: standaloneModuleCompanies.anticipos,
       cxc: standaloneModuleCompanies.cxc,
       cxp: standaloneModuleCompanies.cxp,
@@ -1881,6 +2180,7 @@ export default function App() {
     bankWorkspace.accounts,
     viaticosWorkspace.consultores,
     viaticosWorkspace.liquidaciones,
+    activitiesWorkspace.societies,
   ]);
 
   const moduleDbSyncStatus = useMemo<Record<FunctionalModuleId, ModuleDbSyncState>>(() => {
@@ -1895,11 +2195,22 @@ export default function App() {
       intercompany: aggregateIntercompanySync,
       bancos: standaloneDbSyncStatus.bancos,
       viaticos: standaloneDbSyncStatus.viaticos,
+      actividades: standaloneDbSyncStatus.actividades,
       anticipos: standaloneDbSyncStatus.anticipos,
       cxc: standaloneDbSyncStatus.cxc,
       cxp: standaloneDbSyncStatus.cxp,
     };
   }, [directorySyncStatus, standaloneDbSyncStatus]);
+
+  const visibleActivitiesWorkspace = useMemo<ActivitiesWorkspaceData>(
+    () =>
+      filterActivitiesWorkspaceForUser(
+        activitiesWorkspace,
+        effectivePermissions,
+        effectivePermissions.email || currentUser?.email || null
+      ),
+    [activitiesWorkspace, effectivePermissions, currentUser?.email]
+  );
 
   // Apply non-destructive cross-module company scoping based on effectivePermissions
   const scopedIntercompany = useMemo(
@@ -2299,6 +2610,12 @@ export default function App() {
       ? formatViaticoAmount(primaryViat.totalLiquidacion, primaryViat.monedaBase, true)
       : 'Q 0.00';
 
+    const activityAssignments = materializePeriodAssignments(visibleActivitiesWorkspace);
+    const activitiesCompletedCount = activityAssignments.filter(
+      (a) => a.execution.estado === 'realizada'
+    ).length;
+    const activitiesTotalCount = activityAssignments.length;
+
     return {
       intercompanyEntitiesCount: visibleEntities.length,
       intercompanyMovementsCount: filteredMovements.length,
@@ -2311,6 +2628,10 @@ export default function App() {
       viaticosLiquidacionesCount: visibleViaticos.length,
       viaticosOpenCount,
       viaticosTotalLabel,
+      activitiesTotalCount,
+      activitiesCompletedCount,
+      activitiesPendingCount: Math.max(0, activitiesTotalCount - activitiesCompletedCount),
+      activitiesPeriod: formatPeriodLabel(visibleActivitiesWorkspace.selectedPeriod),
       configuredUsersCount: permissionRecords.length,
     };
   }, [
@@ -2321,6 +2642,7 @@ export default function App() {
     visibleBankWorkspace,
     viaticosWorkspace.consultores,
     viaticosWorkspace.liquidaciones,
+    visibleActivitiesWorkspace,
     effectivePermissions,
     permissionRecords.length,
   ]);
@@ -2345,7 +2667,8 @@ export default function App() {
                 if (
                   activeModule === 'intercompany' ||
                   activeModule === 'bancos' ||
-                  activeModule === 'viaticos'
+                  activeModule === 'viaticos' ||
+                  activeModule === 'actividades'
                 ) {
                   const modScope = effectivePermissions.getModuleCompanyScope(activeModule);
                   const modList =
@@ -2451,16 +2774,13 @@ export default function App() {
               <ShieldAlert className="w-6 h-6" />
             </div>
             <div className="space-y-1.5">
-              <h1 className="text-lg font-bold text-slate-900">
-                Acceso restringido a la Suite Premex
-              </h1>
+              <h1 className="text-lg font-bold text-slate-900">Acceso restringido</h1>
               <p className="text-xs text-slate-600 leading-relaxed">
                 El correo{' '}
                 <strong className="font-mono text-slate-900">
                   {effectivePermissions.email || currentUser?.email}
                 </strong>{' '}
-                no cuenta con acceso activo en el directorio corporativo de permisos. Solicita la
-                habilitación de módulos y sociedades al administrador{' '}
+                no tiene permisos activos. Contacta a{' '}
                 <strong className="text-[#132B63]">{SUPER_ADMIN_EMAIL}</strong>.
               </p>
             </div>
@@ -2597,6 +2917,36 @@ export default function App() {
             onSwitchModule={handleSwitchModule}
             permissions={effectivePermissions}
             moduleCompanies={moduleCompanyDatabases.viaticos}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // 4B. Panel de Actividades Module (Matriz corporativa + Gmail & Google Tasks)
+  if (activeModule === 'actividades') {
+    return (
+      <div className="min-h-screen flex flex-col">
+        {previewBanner}
+        <div className="flex-1">
+          <ActivitiesModuleWorkspace
+            data={visibleActivitiesWorkspace}
+            onUpdateWorkspace={handleUpdateActivitiesWorkspace}
+            onSaveToCloud={handleSaveActivitiesToCloud}
+            isSavingCloud={isSavingActivitiesCloud}
+            currentUser={currentUser}
+            accessToken={accessToken}
+            onSignInWithGoogle={() => {
+              handleSignInWithGoogle().catch((err) => {
+                console.error('Google sign in failed:', err);
+              });
+            }}
+            onReconnectWorkspace={handleReconnectGoogleWorkspace}
+            onInvalidateWorkspaceToken={() => setAccessToken(null)}
+            onSignOut={handleSignOut}
+            onSwitchModule={handleSwitchModule}
+            permissions={effectivePermissions}
+            permissionRecords={permissionRecords}
           />
         </div>
       </div>

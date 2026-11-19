@@ -142,9 +142,7 @@ export const SaveReconciliationModal: React.FC<SaveReconciliationModalProps> = (
               <h3 className="font-bold text-base sm:text-lg text-white">
                 Guardar y Compartir Conciliación
               </h3>
-              <p className="text-xs text-blue-200">
-                Guarda los saldos, empresas y comentarios para que cualquiera los vea al abrir el link
-              </p>
+              <p className="text-xs text-blue-200">{scopeLabel}</p>
             </div>
           </div>
           <button
@@ -185,7 +183,7 @@ export const SaveReconciliationModal: React.FC<SaveReconciliationModalProps> = (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
-                Tienes cambios locales pendientes por guardar en la nube. Haz clic en <strong>Guardar y Actualizar</strong> para reflejarlos en el enlace compartido.
+                Hay cambios locales pendientes por guardar en la nube.
               </span>
             </div>
           ) : formattedTime ? (
@@ -248,9 +246,6 @@ export const SaveReconciliationModal: React.FC<SaveReconciliationModalProps> = (
                   )}
                 </button>
               </div>
-              <p className="text-[11px] text-blue-800/80">
-                Los datos ya quedaron guardados en la nube. Si vas a compartir la app con otras personas desde AI Studio, recuerda publicarla primero con el botón <strong>Share / Deploy</strong> (la URL pública cargará automáticamente esta misma conciliación).
-              </p>
             </div>
           )}
 

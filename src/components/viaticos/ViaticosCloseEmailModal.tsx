@@ -294,14 +294,9 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
           {/* Step 1: Close & Download Package */}
           <div className="rounded-xl border border-slate-200 p-4 space-y-3 bg-slate-50/60">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
-                  1. Paquete de Adjuntos Oficiales (Excel + PDF)
-                </h4>
-                <p className="text-[11px] text-slate-600 mt-0.5">
-                  Descarga el formato oficial Premex en Excel (.xlsx) y el PDF compilado con todas las facturas e imágenes tomadas.
-                </p>
-              </div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
+                1. Paquete de Adjuntos Oficiales (Excel + PDF)
+              </h4>
               {!isDraft && permissions.isAdmin && onReopenLiquidation && (
                 <button
                   type="button"
@@ -431,14 +426,9 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
 
           {/* Step 2: Email Dispatch Draft */}
           <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-            <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
-                2. Enviar por Correo Electrónico
-              </h4>
-              <p className="text-[11px] text-slate-600 mt-0.5">
-                Preparamos el asunto y desglose completo con el total liquidado. Adjunta los dos archivos descargados en el mensaje de correo.
-              </p>
-            </div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
+              2. Enviar por Correo Electrónico
+            </h4>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>

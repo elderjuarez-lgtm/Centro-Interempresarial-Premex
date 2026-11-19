@@ -110,70 +110,50 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
           </div>
         </div>
 
-        {/* Central Value & Security Governance Statement */}
+        {/* Central Value Statement */}
         <div className="relative z-10 my-auto py-12 max-w-md space-y-8">
-          <div className="space-y-3.5">
+          <div className="space-y-3">
             <h1 className="text-3xl xl:text-[34px] font-bold tracking-tight leading-[1.15] text-white">
-              Acceso protegido a la Suite de Conciliaciones
+              Suite Financiera Premex
             </h1>
             <p className="text-sm text-blue-100/80 leading-relaxed">
-              Toda la información financiera, módulos operativos y directorios de
-              sociedades permanecen resguardados hasta validar tu cuenta
-              corporativa de Google.
+              Acceso unificado con tu cuenta corporativa de Google.
             </p>
           </div>
 
           <div className="border-t border-white/15 divide-y divide-white/10">
-            <div className="py-4 flex items-start gap-3.5">
-              <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0 mt-0.5">
+            <div className="py-3.5 flex items-center gap-3.5">
+              <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
                 <Lock className="w-4 h-4 text-sky-200" />
               </div>
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-white leading-snug">
-                  Autenticación corporativa obligatoria
-                </h2>
-                <p className="text-xs text-blue-100/75 mt-1 leading-relaxed">
-                  Al abrir cualquier enlace compartido debes iniciar sesión con
-                  Google antes de visualizar módulos o cifras.
-                </p>
-              </div>
+              <h2 className="text-sm font-medium text-white">
+                Sesión única con Google, Gmail y Tasks
+              </h2>
             </div>
 
-            <div className="py-4 flex items-start gap-3.5">
-              <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0 mt-0.5">
+            <div className="py-3.5 flex items-center gap-3.5">
+              <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-4 h-4 text-sky-200" />
               </div>
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-white leading-snug">
-                  Módulos filtrados por correo electrónico
-                </h2>
-                <p className="text-xs text-blue-100/75 mt-1 leading-relaxed">
-                  El sistema consulta tus permisos en tiempo real y habilita
-                  únicamente los aplicativos asignados a tu rol.
-                </p>
-              </div>
+              <h2 className="text-sm font-medium text-white">
+                Permisos por correo y rol operativo
+              </h2>
             </div>
 
-            <div className="py-4 flex items-start gap-3.5">
-              <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0 mt-0.5">
+            <div className="py-3.5 flex items-center gap-3.5">
+              <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
                 <Building2 className="w-4 h-4 text-sky-200" />
               </div>
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-white leading-snug">
-                  Alcance independiente por sociedades
-                </h2>
-                <p className="text-xs text-blue-100/75 mt-1 leading-relaxed">
-                  Cada módulo aplica automáticamente el filtro de empresas
-                  autorizadas para tu usuario.
-                </p>
-              </div>
+              <h2 className="text-sm font-medium text-white">
+                Alcance filtrado por sociedades asignadas
+              </h2>
             </div>
           </div>
         </div>
 
         {/* Quiet Brand Footer */}
         <div className="relative z-10 text-xs text-blue-200/70">
-          Administración de accesos ·{' '}
+          Soporte de accesos ·{' '}
           <span className="font-mono text-blue-100/90">{SUPER_ADMIN_EMAIL}</span>
         </div>
       </aside>
@@ -186,10 +166,10 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
             <PremexBrandLogo className="h-9 w-auto" />
             <div>
               <div className="text-sm font-bold text-[#132B63] leading-tight">
-                Suite de Conciliaciones
+                Suite Financiera Premex
               </div>
               <div className="text-[11px] text-slate-500">
-                Plataforma Financiera Premex
+                Plataforma Corporativa
               </div>
             </div>
           </div>
@@ -206,13 +186,12 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
                 <div className="w-11 h-11 rounded-xl bg-[#EEF4FB] border border-[#D4E4F7] text-[#1E60A8] flex items-center justify-center mx-auto">
                   <Loader2 className="w-5 h-5 animate-spin" />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-                    Verificando sesión corporativa
+                    Verificando sesión
                   </h2>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Comprobando si existe una sesión de Google activa antes de
-                    habilitar el acceso a la plataforma.
+                  <p className="text-xs text-slate-500">
+                    Comprobando credenciales activas...
                   </p>
                 </div>
               </div>
@@ -253,13 +232,12 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
                   <Loader2 className="w-5 h-5 animate-spin" />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-                    Identificando permisos autorizados
+                    Cargando permisos
                   </h2>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Validando módulos habilitados, rol operativo y sociedades
-                    asignadas a tu correo en Firebase.
+                  <p className="text-xs text-slate-500">
+                    Validando módulos y sociedades autorizadas...
                   </p>
                 </div>
 
@@ -270,7 +248,7 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
                     className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-[#132B63] transition-colors cursor-pointer"
                   >
                     <LogOut className="w-3.5 h-3.5" />
-                    <span>Cancelar y cambiar de cuenta</span>
+                    <span>Cambiar de cuenta</span>
                   </button>
                 </div>
               </div>
@@ -286,14 +264,10 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
                 </div>
                 <div className="space-y-1.5">
                   <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-                    Correo electrónico sin verificar
+                    Correo sin verificar
                   </h2>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    La cuenta{' '}
-                    <strong className="font-mono text-slate-900">{userEmail}</strong>{' '}
-                    no tiene verificación de correo confirmada por Google.
-                    Inicia sesión con una cuenta corporativa verificada para
-                    continuar.
+                    La cuenta <strong className="font-mono text-slate-900">{userEmail}</strong> no está verificada en Google.
                   </p>
                 </div>
                 <button
@@ -302,7 +276,7 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
                   className="w-full h-11 inline-flex items-center justify-center gap-2 px-4 rounded-xl bg-[#132B63] hover:bg-[#1E60A8] text-white text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
-                  <span>Cerrar sesión y elegir otra cuenta</span>
+                  <span>Usar otra cuenta</span>
                 </button>
               </div>
             )}
@@ -311,15 +285,13 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
               <div className="space-y-6">
                 <div className="space-y-2">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1E60A8]">
-                    Acceso restringido · Suite Premex
+                    Suite Premex
                   </div>
                   <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
                     Iniciar sesión
                   </h2>
                   <p className="text-sm text-slate-600 leading-relaxed">
-                    Ingresa con tu cuenta de Google autorizada. Al autenticarte,
-                    verás únicamente los módulos y sociedades asignados a tu
-                    correo electrónico.
+                    Ingresa con tu cuenta corporativa de Google para habilitar tus módulos, sociedades, Gmail y Google Tasks.
                   </p>
                 </div>
 
@@ -333,55 +305,40 @@ export const LoginGateView: React.FC<LoginGateViewProps> = ({
                   </div>
                 )}
 
-                <div className="space-y-3">
-                  <button
-                    type="button"
-                    onClick={onSignInWithGoogle}
-                    disabled={isSigningIn}
-                    className="w-full h-12 px-5 rounded-xl bg-[#132B63] hover:bg-[#1E60A8] active:bg-[#0F224D] disabled:opacity-65 disabled:cursor-not-allowed text-white text-sm font-semibold inline-flex items-center justify-center gap-3 transition-colors shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1E60A8] focus-visible:ring-offset-2 whitespace-nowrap cursor-pointer"
-                  >
-                    {isSigningIn ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                        <span>Conectando con Google...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="w-6 h-6 rounded-md bg-white flex items-center justify-center shrink-0">
-                          <GoogleColorMark />
-                        </span>
-                        <span>Continuar con Google</span>
-                      </>
-                    )}
-                  </button>
+                <button
+                  type="button"
+                  onClick={onSignInWithGoogle}
+                  disabled={isSigningIn}
+                  className="w-full h-12 px-5 rounded-xl bg-[#132B63] hover:bg-[#1E60A8] active:bg-[#0F224D] disabled:opacity-65 disabled:cursor-not-allowed text-white text-sm font-semibold inline-flex items-center justify-center gap-3 transition-colors shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1E60A8] focus-visible:ring-offset-2 whitespace-nowrap cursor-pointer"
+                >
+                  {isSigningIn ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      <span>Conectando con Google...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-6 h-6 rounded-md bg-white flex items-center justify-center shrink-0">
+                        <GoogleColorMark />
+                      </span>
+                      <span>Continuar con Google</span>
+                    </>
+                  )}
+                </button>
 
-                  <p className="text-[11px] text-slate-500 text-center leading-relaxed">
-                    Se abrirá la ventana oficial de selección de cuenta de Google.
-                  </p>
-                </div>
-
-                <div className="pt-5 border-t border-slate-100 space-y-2 text-xs text-slate-500 leading-relaxed">
-                  <p>
-                    Por política de seguridad financiera, los módulos y sus
-                    registros no son visibles antes de iniciar sesión.
-                  </p>
-                  <p>
-                    ¿Necesitas habilitación de módulos o sociedades? Contacta al
-                    administrador en{' '}
-                    <span className="font-mono font-medium text-[#132B63]">
-                      {SUPER_ADMIN_EMAIL}
-                    </span>
-                    .
-                  </p>
+                <div className="pt-4 border-t border-slate-100 text-xs text-slate-500">
+                  ¿Necesitas acceso? Contacta a{' '}
+                  <span className="font-mono font-medium text-[#132B63]">
+                    {SUPER_ADMIN_EMAIL}
+                  </span>
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Quiet Bottom Metadata */}
-        <footer className="text-center lg:text-left text-[11px] text-slate-500 pt-4">
-          Autenticación Google OAuth 2.0 · Verificación automática de permisos por correo
+        <footer className="text-center lg:text-left text-[11px] text-slate-400 pt-4">
+          Premex Corporativo
         </footer>
       </main>
     </div>

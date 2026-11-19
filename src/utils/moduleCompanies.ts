@@ -9,6 +9,7 @@ import { normalizeCompanyKey } from './permissions';
 export const STANDALONE_COMPANY_DB_MODULES: StandaloneCompanyDbModuleId[] = [
   'bancos',
   'viaticos',
+  'actividades',
   'anticipos',
   'cxc',
   'cxp',
@@ -51,6 +52,15 @@ export const MODULE_COMPANY_DB_META: Record<
     description:
       'Base de datos independiente de empresas / razones sociales habilitadas para consultores y liquidaciones de viáticos.',
     defaultCurrency: 'GTQ',
+  },
+  actividades: {
+    name: 'Panel de Actividades',
+    shortName: 'Actividades',
+    status: 'Activo',
+    firestorePath: 'module_company_directories/actividades',
+    description:
+      'Sociedades de la matriz de actividades contables y cierres (PREMEX, ADIQUIM, NUTREO, ALURA, ASIMETRIX, PRIZMA, MESAGE).',
+    defaultCurrency: 'COP',
   },
   anticipos: {
     name: 'Anticipos',
@@ -160,6 +170,15 @@ export const INITIAL_STANDALONE_MODULE_COMPANIES: Record<
       moneda: 'HNL',
       activo: true,
     },
+  ],
+  actividades: [
+    { id: 'act-soc-premex', nombre: 'PREMEX', codigo: 'PREMEX', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'act-soc-adiquim', nombre: 'ADIQUIM', codigo: 'ADIQUIM', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'act-soc-nutreo', nombre: 'NUTREO', codigo: 'NUTREO', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'act-soc-alura', nombre: 'ALURA', codigo: 'ALURA', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'act-soc-asimetrix', nombre: 'ASIMETRIX', codigo: 'ASIMETRIX', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'act-soc-prizma', nombre: 'PRIZMA', codigo: 'PRIZMA', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'act-soc-mesage', nombre: 'MESAGE', codigo: 'MESAGE', pais: 'Colombia', moneda: 'COP', activo: true },
   ],
   anticipos: [
     {

@@ -206,17 +206,9 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
           {!isAlreadyClosed ? (
             /* PHASE 1: Confirmation before closing */
             <div className="space-y-4">
-              <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2 text-xs text-slate-700 leading-relaxed">
-                <p>
-                  Al cerrar esta liquidación quedará marcada como{' '}
-                  <strong className="text-slate-900">Cerrada</strong> y protegida contra
-                  modificaciones, sin necesidad de enviarla por correo en este momento.
-                </p>
-                <p className="text-slate-600">
-                  Podrás descargar el <strong>Excel</strong> y el <strong>PDF</strong> de
-                  comprobantes inmediatamente, consultarla cuando quieras en{' '}
-                  <strong>Liquidaciones Cerradas</strong> o enviarla por correo más tarde.
-                </p>
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3.5 text-xs text-slate-700 leading-relaxed">
+                Al cerrar esta liquidación quedará protegida contra modificaciones y disponible en{' '}
+                <strong className="text-slate-900">Liquidaciones Cerradas</strong> para descarga o envío.
               </div>
 
               {liquidation.items.length === 0 && (
@@ -268,14 +260,9 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
           ) : (
             /* PHASE 2: Concluded state with direct Excel/PDF downloads & next actions */
             <div className="space-y-4">
-              <div className="px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-start gap-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <div>
-                  <div className="font-bold">Liquidación cerrada y registrada</div>
-                  <div className="text-emerald-800/90 mt-0.5">
-                    Ya puedes descargar el Excel oficial y el PDF compilado de facturas, consultar el archivo de liquidaciones cerradas o iniciar una nueva.
-                  </div>
-                </div>
+              <div className="px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-bold">Liquidación cerrada y registrada</span>
               </div>
 
               {/* Direct Download & Print Actions */}
