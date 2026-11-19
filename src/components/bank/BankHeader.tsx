@@ -174,7 +174,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
             onClick={onOpenPrintPreview}
             disabled={!selectedAccountId}
             className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="Vista de impresión horizontal y descarga PDF del entregable oficial"
+            title="Descargar o imprimir PDF oficial (individual o masivo)"
           >
             <Printer className="w-3.5 h-3.5 text-[#132B63]" />
             <span className="hidden xl:inline">Imprimir / PDF</span>
@@ -186,7 +186,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
             onClick={onExportExcel}
             disabled={!selectedAccountId}
             className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="Descargar libro entregable Excel con fórmulas vivas y 5 hojas SAP"
+            title="Descargar libro entregable Excel con fórmulas vivas (individual o masivo)"
           >
             <Download className="w-3.5 h-3.5 text-teal-700" />
             <span className="hidden xl:inline">Excel Entregable</span>

@@ -40,7 +40,12 @@ import {
   ParsedSapFbl3nResult,
   matchExistingAccount,
 } from '../../utils/bankExcel';
-import { exportSapDeliverableWorkbook } from '../../utils/bankOfficialExport';
+import {
+  BankBatchSheetEntry,
+  BankExportMode,
+  exportBankBatchPdf,
+  exportSapDeliverableWorkbook,
+} from '../../utils/bankOfficialExport';
 import { BankSidebar } from './BankSidebar';
 import { BankHeader } from './BankHeader';
 import { BankResumenView } from './BankResumenView';
@@ -50,6 +55,11 @@ import { BankCuentasView } from './BankCuentasView';
 import { BankCargaView } from './BankCargaView';
 import { AddReconcilingItemPayload } from './BankOfficialSheet';
 import { BankPrintPreviewModal } from './BankPrintPreviewModal';
+import {
+  BankExportAccountItem,
+  BankExportFormat,
+  BankExportModal,
+} from './BankExportModal';
 import {
   BlockedOpenNoticeModal,
   CloseReconciliationModal,
@@ -119,7 +129,18 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   const [activeTab, setActiveTab] = useState<BankTab>('resumen');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSavingCloud, setIsSavingCloud] = useState(false);
-  const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
+  const [exportModalConfig, setExportModalConfig] = useState<{
+    format: BankExportFormat;
+    mode: BankExportMode;
+    societyKey?: string;
+    accountId?: string;
+  } | null>(null);
+  const [printPreviewState, setPrintPreviewState] = useState<{
+    entries: BankBatchSheetEntry[];
+    selectedItems: BankExportAccountItem[];
+    mode: BankExportMode;
+    scopeLabel: string;
+  } | null>(null);
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [isOpenModalOpen, setIsOpenModalOpen] = useState(false);
   const [isBlockedOpenModalOpen, setIsBlockedOpenModalOpen] = useState(false);
@@ -228,6 +249,28 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
     data.ledgerItems,
     data.matches,
     data.openPeriod,
+    effectiveMonth,
+    data.sapOpenItems,
+  ]);
+
+  const activePeriodExportItems = useMemo<BankExportAccountItem[]>(() => {
+    return data.accounts.map((acc) => ({
+      account: acc,
+      period: effectiveMonth,
+      summary: computeBankReconciliationSummary(
+        acc,
+        data.statementItems,
+        data.ledgerItems,
+        data.matches,
+        effectiveMonth,
+        data.sapOpenItems
+      ),
+    }));
+  }, [
+    data.accounts,
+    data.statementItems,
+    data.ledgerItems,
+    data.matches,
     effectiveMonth,
     data.sapOpenItems,
   ]);
@@ -1212,38 +1255,34 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   };
 
   // ============================================================================
-  // 5-Sheet Live-Formula Corporate Excel Deliverable Export
+  // Individual & Masivo Excel / PDF Exports
   // ============================================================================
 
-  const handleExportDeliverableExcel = async (societyFilterKey = 'ALL') => {
-    if (!selectedAccount) return;
+  const handleOpenExportModal = (opts: {
+    format: BankExportFormat;
+    mode: BankExportMode;
+    societyKey?: string;
+    accountId?: string;
+  }) => {
+    if (data.accounts.length === 0) {
+      showFeedback('info', 'No hay cuentas bancarias disponibles para descargar.');
+      return;
+    }
+    setExportModalConfig(opts);
+  };
+
+  const handleExecuteExportExcel = async (
+    selectedItems: BankExportAccountItem[],
+    mode: BankExportMode,
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return;
     try {
-      const scopedAccounts =
-        societyFilterKey === 'ALL'
-          ? data.accounts
-          : data.accounts.filter(
-              (a) =>
-                (a.codigoSociedad || a.sociedad || '').trim().toUpperCase() ===
-                societyFilterKey.trim().toUpperCase()
-            );
-
-      const centerSummaries = (scopedAccounts.length > 0 ? scopedAccounts : data.accounts).map(
-        (acc) =>
-          computeBankReconciliationSummary(
-            acc,
-            data.statementItems,
-            data.ledgerItems,
-            data.matches,
-            effectiveMonth,
-            data.sapOpenItems
-          )
-      );
-
-      const scopedAccountIds = new Set(centerSummaries.map((s) => s.account?.id).filter(Boolean));
       const targetMonthKey = normalizePeriodKey(effectiveMonth);
+      const selectedAccountIds = new Set(selectedItems.map((i) => i.account.id));
       const scopedSapItems = data.sapOpenItems.filter(
         (i) =>
-          scopedAccountIds.has(i.cuentaId) &&
+          selectedAccountIds.has(i.cuentaId) &&
           (!i.mes || normalizePeriodKey(i.mes) === targetMonthKey)
       );
       const scopedBalanceRows = data.sapBalanceRows.filter(
@@ -1251,18 +1290,15 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
       );
       const scopedMatches = data.matches.filter(
         (m) =>
-          scopedAccountIds.has(m.cuentaId) &&
+          selectedAccountIds.has(m.cuentaId) &&
           normalizePeriodKey(m.mes) === targetMonthKey
       );
 
-      const scopeLabel =
-        societyFilterKey === 'ALL'
-          ? `${selectedAccount.sociedad}_${selectedAccount.banco}`
-          : `Soc_${societyFilterKey}`;
-
       await exportSapDeliverableWorkbook({
-        activeSummary: summary,
-        centerSummaries,
+        activeSummary: selectedItems[0].summary,
+        centerSummaries: selectedItems.map((i) => i.summary),
+        batchEntries: selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+        mode,
         sapOpenItems: scopedSapItems,
         sapBalanceRows: scopedBalanceRows,
         statementItems: data.statementItems,
@@ -1274,14 +1310,51 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
 
       showFeedback(
         'success',
-        `Libro Excel entregable descargado con fórmulas vivas (${
-          scopedMatches.length > 0 ? '5 hojas SAP' : '4 hojas SAP'
-        }).`
+        mode === 'individual'
+          ? `Excel individual de ${selectedItems[0].account.banco} descargado con fórmulas vivas.`
+          : `Excel masivo descargado: Resumen Consolidado + ${selectedItems.length} hoja(s) oficial(es) con fórmulas vivas.`
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'No se pudo generar el libro Excel.';
       showFeedback('error', msg);
     }
+  };
+
+  const handleExecuteExportPdf = async (
+    selectedItems: BankExportAccountItem[],
+    mode: BankExportMode,
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return;
+    try {
+      await exportBankBatchPdf(
+        selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+        scopeLabel
+      );
+      showFeedback(
+        'success',
+        mode === 'individual'
+          ? `PDF individual de ${selectedItems[0].account.banco} descargado correctamente.`
+          : `PDF masivo descargado con ${selectedItems.length} hoja(s) oficial(es) horizontales.`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'No se pudo generar el documento PDF.';
+      showFeedback('error', msg);
+    }
+  };
+
+  const handleOpenBatchPrintPreview = (
+    selectedItems: BankExportAccountItem[],
+    mode: BankExportMode,
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return;
+    setPrintPreviewState({
+      entries: selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+      selectedItems,
+      mode,
+      scopeLabel,
+    });
   };
 
   const handleSaveCloudClick = async () => {
@@ -1347,8 +1420,20 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
           }
           availableMonths={availableMonths}
           closedPeriodKeys={closedPeriodKeys}
-          onOpenPrintPreview={() => setIsPrintPreviewOpen(true)}
-          onExportExcel={() => void handleExportDeliverableExcel('ALL')}
+          onOpenPrintPreview={() =>
+            handleOpenExportModal({
+              format: 'pdf',
+              mode: 'individual',
+              accountId: selectedAccount?.id,
+            })
+          }
+          onExportExcel={() =>
+            handleOpenExportModal({
+              format: 'excel',
+              mode: 'individual',
+              accountId: selectedAccount?.id,
+            })
+          }
           onSaveCloud={handleSaveCloudClick}
           isSavingCloud={isSavingCloud}
           hasUnsavedChanges={data.hasUnsavedChanges}
@@ -1599,8 +1684,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               onUpdateMonthlyBalances={handleUpdateMonthlyBalances}
               onAddReconcilingItem={handleAddReconcilingItem}
               onDeleteLineItem={handleDeleteLineItem}
-              onOpenPrintPreview={() => setIsPrintPreviewOpen(true)}
-              onExportDeliverableExcel={(socKey) => void handleExportDeliverableExcel(socKey)}
+              onOpenExportModal={handleOpenExportModal}
               isReadOnly={isOperationalReadOnly}
             />
           )}
@@ -1617,7 +1701,13 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               onUpdateSapOpenItem={handleUpdateSapOpenItem}
               onReclassifySapOpenItem={handleReclassifySapOpenItem}
               onDeleteSapOpenItem={handleDeleteSapOpenItem}
-              onExportExcel={() => void handleExportDeliverableExcel('ALL')}
+              onExportExcel={() =>
+                handleOpenExportModal({
+                  format: 'excel',
+                  mode: 'masivo',
+                  accountId: selectedAccount?.id,
+                })
+              }
               onNavigateTab={setActiveTab}
               isReadOnly={isOperationalReadOnly}
             />
@@ -1714,14 +1804,41 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
         </main>
       </div>
 
-      {/* Print Preview & Landscape PDF Modal */}
-      <BankPrintPreviewModal
-        isOpen={isPrintPreviewOpen}
-        onClose={() => setIsPrintPreviewOpen(false)}
-        summary={summary}
-        selectedMonth={effectiveMonth}
-        onExportFullExcel={() => handleExportDeliverableExcel('ALL')}
-      />
+      {/* Individual / Masivo Download Selector Modal (Excel & PDF) */}
+      {exportModalConfig && (
+        <BankExportModal
+          isOpen={true}
+          onClose={() => setExportModalConfig(null)}
+          title="Descargar Conciliaciones · Centro de Cuadre"
+          subtitle={`${effectiveMonth} · ${activePeriodExportItems.length} cuenta(s) bancaria(s) disponibles`}
+          items={activePeriodExportItems}
+          initialFormat={exportModalConfig.format}
+          initialMode={exportModalConfig.mode}
+          initialAccountId={exportModalConfig.accountId || selectedAccount?.id}
+          initialSocietyKey={exportModalConfig.societyKey || 'ALL'}
+          onExecuteExcel={handleExecuteExportExcel}
+          onExecutePdf={handleExecuteExportPdf}
+          onOpenPdfPreview={handleOpenBatchPrintPreview}
+        />
+      )}
+
+      {/* Print Preview & Landscape PDF Modal (supports 1-page Individual or multi-page Masivo) */}
+      {printPreviewState && (
+        <BankPrintPreviewModal
+          isOpen={true}
+          onClose={() => setPrintPreviewState(null)}
+          entries={printPreviewState.entries}
+          selectedMonth={effectiveMonth}
+          scopeLabel={printPreviewState.scopeLabel}
+          onExportFullExcel={() =>
+            handleExecuteExportExcel(
+              printPreviewState.selectedItems,
+              printPreviewState.mode,
+              printPreviewState.scopeLabel
+            )
+          }
+        />
+      )}
 
       {/* Close Reconciliation Confirmation Modal */}
       {data.openPeriod && (

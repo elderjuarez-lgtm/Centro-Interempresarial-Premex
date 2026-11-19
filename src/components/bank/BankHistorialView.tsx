@@ -13,14 +13,12 @@ import {
   Building2,
   Landmark,
   FileSpreadsheet,
+  FileText,
   Calendar,
   User as UserIcon,
+  Layers,
 } from 'lucide-react';
-import {
-  BankAccount,
-  BankClosedReconciliation,
-  BankReconciliationSummary,
-} from '../../types';
+import { BankAccount, BankClosedReconciliation } from '../../types';
 import {
   RECONCILING_SECTION_META,
   computeBankReconciliationSummary,
@@ -30,9 +28,19 @@ import {
   getEffectiveSapItemSection,
   getSapDocumentClassLabel,
 } from '../../utils/bankReconciliation';
-import { exportSapDeliverableWorkbook } from '../../utils/bankOfficialExport';
+import {
+  BankBatchSheetEntry,
+  BankExportMode,
+  exportBankBatchPdf,
+  exportSapDeliverableWorkbook,
+} from '../../utils/bankOfficialExport';
 import { BankOfficialSheet } from './BankOfficialSheet';
 import { BankPrintPreviewModal } from './BankPrintPreviewModal';
+import {
+  BankExportAccountItem,
+  BankExportFormat,
+  BankExportModal,
+} from './BankExportModal';
 
 interface BankHistorialViewProps {
   closedReconciliations: BankClosedReconciliation[];
@@ -42,6 +50,26 @@ interface BankHistorialViewProps {
   onRequestCloseCurrent: () => void;
   onGoToCentroCuadre: () => void;
   onNotify: (type: 'success' | 'info' | 'error', message: string) => void;
+}
+
+interface HistorialExportContext {
+  records: BankClosedReconciliation[];
+  items: BankExportAccountItem[];
+  format: BankExportFormat;
+  mode: BankExportMode;
+  initialAccountId?: string;
+  initialSocietyKey?: string;
+  title: string;
+  subtitle: string;
+}
+
+interface HistorialPrintPreviewState {
+  records: BankClosedReconciliation[];
+  entries: BankBatchSheetEntry[];
+  selectedItems: BankExportAccountItem[];
+  mode: BankExportMode;
+  scopeLabel: string;
+  selectedMonth: string;
 }
 
 const formatClosedDateTime = (iso: string): string => {
@@ -63,6 +91,29 @@ const formatClosedDateTime = (iso: string): string => {
 const getAccountSocietyKey = (acc: BankAccount): string =>
   (acc.codigoSociedad || acc.sociedad || '').trim().toUpperCase();
 
+const buildExportItemsFromRecords = (
+  records: BankClosedReconciliation[]
+): BankExportAccountItem[] => {
+  const items: BankExportAccountItem[] = [];
+  records.forEach((rec) => {
+    rec.accounts.forEach((acc) => {
+      items.push({
+        account: acc,
+        period: rec.period,
+        summary: computeBankReconciliationSummary(
+          acc,
+          [],
+          [],
+          [],
+          rec.period,
+          rec.sapOpenItems
+        ),
+      });
+    });
+  });
+  return items;
+};
+
 export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
   closedReconciliations,
   openPeriod,
@@ -74,14 +125,11 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [selectedClosedId, setSelectedClosedId] = useState<string | null>(null);
+  const [checkedClosedIds, setCheckedClosedIds] = useState<Set<string>>(new Set());
   const [detailSocietyKey, setDetailSocietyKey] = useState<string>('ALL');
   const [detailAccountId, setDetailAccountId] = useState<string>('');
-  const [isExportingId, setIsExportingId] = useState<string | null>(null);
-  const [printSnapshot, setPrintSnapshot] = useState<{
-    summary: BankReconciliationSummary;
-    period: string;
-    record: BankClosedReconciliation;
-  } | null>(null);
+  const [exportContext, setExportContext] = useState<HistorialExportContext | null>(null);
+  const [printPreview, setPrintPreview] = useState<HistorialPrintPreviewState | null>(null);
 
   const selectedClosed = useMemo(
     () => closedReconciliations.find((c) => c.id === selectedClosedId) || null,
@@ -99,6 +147,15 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
     setDetailAccountId(selectedClosed.accounts[0]?.id || '');
   }, [selectedClosed?.id]);
 
+  // Prune stale checked IDs if closedReconciliations changes
+  useEffect(() => {
+    const validIds = new Set(closedReconciliations.map((c) => c.id));
+    setCheckedClosedIds((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => validIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [closedReconciliations]);
+
   // Filter master list
   const filteredHistory = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -107,15 +164,34 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
       if (rec.period.toLowerCase().includes(q)) return true;
       if (rec.closedByName.toLowerCase().includes(q)) return true;
       if ((rec.notes || '').toLowerCase().includes(q)) return true;
-      if (rec.societies.some((s) => s.nombre.toLowerCase().includes(q) || s.codigoSociedad.toLowerCase().includes(q))) {
+      if (
+        rec.societies.some(
+          (s) =>
+            s.nombre.toLowerCase().includes(q) || s.codigoSociedad.toLowerCase().includes(q)
+        )
+      ) {
         return true;
       }
-      if (rec.accounts.some((a) => a.banco.toLowerCase().includes(q) || a.sociedad.toLowerCase().includes(q))) {
+      if (
+        rec.accounts.some(
+          (a) => a.banco.toLowerCase().includes(q) || a.sociedad.toLowerCase().includes(q)
+        )
+      ) {
         return true;
       }
       return false;
     });
   }, [closedReconciliations, search]);
+
+  const checkedRecords = useMemo(
+    () => closedReconciliations.filter((r) => checkedClosedIds.has(r.id)),
+    [closedReconciliations, checkedClosedIds]
+  );
+
+  const checkedTotalAccounts = useMemo(
+    () => checkedRecords.reduce((sum, r) => sum + r.accounts.length, 0),
+    [checkedRecords]
+  );
 
   // Compute frozen summaries for the inspected closed reconciliation
   const closedSummaries = useMemo(() => {
@@ -197,72 +273,202 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
     );
   }, [selectedClosed, activeClosedEntry]);
 
-  // Export Excel Deliverable from any frozen snapshot
-  const handleExportClosedExcel = async (
-    record: BankClosedReconciliation,
-    focusAccountId?: string
-  ) => {
-    if (record.accounts.length === 0) {
-      onNotify('info', 'Este cierre no contiene cuentas bancarias visibles para exportar.');
+  // ============================================================================
+  // Unified Individual & Masivo Export Handlers (Single or Multiple Closed Periods)
+  // ============================================================================
+
+  const openHistorialExportModal = (opts: {
+    records: BankClosedReconciliation[];
+    format: BankExportFormat;
+    mode: BankExportMode;
+    initialAccountId?: string;
+    initialSocietyKey?: string;
+  }) => {
+    const items = buildExportItemsFromRecords(opts.records);
+    if (items.length === 0) {
+      onNotify('info', 'No hay cuentas bancarias visibles en los cierres seleccionados.');
       return;
     }
-    setIsExportingId(record.id);
-    try {
-      const centerSummaries = record.accounts.map((acc) =>
-        computeBankReconciliationSummary(acc, [], [], [], record.period, record.sapOpenItems)
-      );
-      const activeSummary =
-        (focusAccountId
-          ? centerSummaries.find((s) => s.account?.id === focusAccountId)
-          : null) || centerSummaries[0];
+    const isSingleRec = opts.records.length === 1;
+    setExportContext({
+      records: opts.records,
+      items,
+      format: opts.format,
+      mode: opts.mode,
+      initialAccountId: opts.initialAccountId,
+      initialSocietyKey: opts.initialSocietyKey || 'ALL',
+      title: isSingleRec
+        ? `Descargar Historial · ${opts.records[0].period}`
+        : `Descarga Masiva del Historial (${opts.records.length} periodos)`,
+      subtitle: isSingleRec
+        ? `Cierre archivado · ${items.length} cuenta(s) bancaria(s) disponibles`
+        : `${opts.records.map((r) => r.period).join(', ')} · ${items.length} conciliación(es)`,
+    });
+  };
 
+  const executeHistorialExcel = async (
+    records: BankClosedReconciliation[],
+    selectedItems: BankExportAccountItem[],
+    mode: BankExportMode,
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return;
+    try {
+      const selectedPairKeys = new Set(
+        selectedItems.map((it) => `${it.period}::${it.account.id}`)
+      );
+      const selectedPeriods = new Set(selectedItems.map((it) => it.period));
+
+      const scopedOpenItems = records.flatMap((rec) =>
+        selectedPeriods.has(rec.period)
+          ? rec.sapOpenItems.filter((i) => selectedPairKeys.has(`${rec.period}::${i.cuentaId}`))
+          : []
+      );
+      const scopedBalanceRows = records.flatMap((rec) =>
+        selectedPeriods.has(rec.period) ? rec.sapBalanceRows : []
+      );
+      const primaryPeriod = selectedItems[0].period;
+
+      const cleanScope = scopeLabel.replace(/^Historial_/i, '');
       await exportSapDeliverableWorkbook({
-        activeSummary,
-        centerSummaries,
-        sapOpenItems: record.sapOpenItems,
-        sapBalanceRows: record.sapBalanceRows,
+        activeSummary: selectedItems[0].summary,
+        centerSummaries: selectedItems.map((i) => i.summary),
+        batchEntries: selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+        mode,
+        sapOpenItems: scopedOpenItems,
+        sapBalanceRows: scopedBalanceRows,
         statementItems: [],
         ledgerItems: [],
         matches: [],
-        selectedMonth: record.period,
-        scopeLabel: `Cerrada_${record.period}`,
+        selectedMonth: selectedPeriods.size === 1 ? primaryPeriod : 'MultiPeriodo',
+        scopeLabel: `Historial_${cleanScope}`,
       });
+
       onNotify(
         'success',
-        `Entregable Excel histórico de ${record.period} descargado correctamente.`
+        mode === 'individual'
+          ? `Excel histórico individual (${selectedItems[0].account.banco} · ${primaryPeriod}) descargado.`
+          : `Excel histórico masivo descargado: Resumen Consolidado + ${selectedItems.length} hoja(s) oficial(es) con fórmulas vivas.`
       );
     } catch (err: unknown) {
       onNotify(
         'error',
         err instanceof Error ? err.message : 'No se pudo exportar el entregable histórico.'
       );
-    } finally {
-      setIsExportingId(null);
     }
   };
 
-  const handleOpenClosedPrint = (
-    record: BankClosedReconciliation,
-    focusAccountId?: string
+  const executeHistorialPdf = async (
+    selectedItems: BankExportAccountItem[],
+    mode: BankExportMode,
+    scopeLabel: string
   ) => {
-    const targetAcc =
-      (focusAccountId ? record.accounts.find((a) => a.id === focusAccountId) : null) ||
-      record.accounts[0] ||
-      null;
-    if (!targetAcc) {
-      onNotify('info', 'No hay cuentas bancarias disponibles en este cierre para imprimir.');
-      return;
+    if (selectedItems.length === 0) return;
+    try {
+      await exportBankBatchPdf(
+        selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+        `Historial_${scopeLabel}`
+      );
+      onNotify(
+        'success',
+        mode === 'individual'
+          ? `PDF histórico individual (${selectedItems[0].account.banco} · ${selectedItems[0].period}) descargado.`
+          : `PDF histórico masivo descargado con ${selectedItems.length} hoja(s) oficial(es) horizontales.`
+      );
+    } catch (err: unknown) {
+      onNotify(
+        'error',
+        err instanceof Error ? err.message : 'No se pudo generar el documento PDF histórico.'
+      );
     }
-    const frozenSummary = computeBankReconciliationSummary(
-      targetAcc,
-      [],
-      [],
-      [],
-      record.period,
-      record.sapOpenItems
-    );
-    setPrintSnapshot({ summary: frozenSummary, period: record.period, record });
   };
+
+  const openHistorialPdfPreview = (
+    records: BankClosedReconciliation[],
+    selectedItems: BankExportAccountItem[],
+    mode: BankExportMode,
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return;
+    const uniquePeriods = new Set(selectedItems.map((i) => i.period));
+    setPrintPreview({
+      records,
+      entries: selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+      selectedItems,
+      mode,
+      scopeLabel: `Historial_${scopeLabel}`,
+      selectedMonth:
+        uniquePeriods.size === 1 ? selectedItems[0].period : `${uniquePeriods.size} periodos`,
+    });
+  };
+
+  const toggleCheckRecord = (id: string) => {
+    setCheckedClosedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allVisibleChecked =
+    filteredHistory.length > 0 && filteredHistory.every((r) => checkedClosedIds.has(r.id));
+
+  const toggleCheckAllVisible = () => {
+    setCheckedClosedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleChecked) {
+        filteredHistory.forEach((r) => next.delete(r.id));
+      } else {
+        filteredHistory.forEach((r) => next.add(r.id));
+      }
+      return next;
+    });
+  };
+
+  // Shared modals rendered in both Detail and Master List views
+  const renderSharedModals = () => (
+    <>
+      {exportContext && (
+        <BankExportModal
+          isOpen={true}
+          onClose={() => setExportContext(null)}
+          title={exportContext.title}
+          subtitle={exportContext.subtitle}
+          items={exportContext.items}
+          initialFormat={exportContext.format}
+          initialMode={exportContext.mode}
+          initialAccountId={exportContext.initialAccountId}
+          initialSocietyKey={exportContext.initialSocietyKey}
+          onExecuteExcel={(sel, mode, scope) =>
+            executeHistorialExcel(exportContext.records, sel, mode, scope)
+          }
+          onExecutePdf={executeHistorialPdf}
+          onOpenPdfPreview={(sel, mode, scope) =>
+            openHistorialPdfPreview(exportContext.records, sel, mode, scope)
+          }
+        />
+      )}
+
+      {printPreview && (
+        <BankPrintPreviewModal
+          isOpen={true}
+          onClose={() => setPrintPreview(null)}
+          entries={printPreview.entries}
+          selectedMonth={printPreview.selectedMonth}
+          scopeLabel={printPreview.scopeLabel}
+          onExportFullExcel={() =>
+            executeHistorialExcel(
+              printPreview.records,
+              printPreview.selectedItems,
+              printPreview.mode,
+              printPreview.scopeLabel
+            )
+          }
+        />
+      )}
+    </>
+  );
 
   // ============================================================================
   // DETAIL CONSULTATION MODE (Read-only frozen snapshot)
@@ -302,28 +508,42 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => handleOpenClosedPrint(selectedClosed, activeClosedEntry?.account.id)}
-              disabled={!activeClosedEntry}
+              onClick={() =>
+                openHistorialExportModal({
+                  records: [selectedClosed],
+                  format: 'pdf',
+                  mode: 'masivo',
+                  initialAccountId: activeClosedEntry?.account.id,
+                  initialSocietyKey: detailSocietyKey,
+                })
+              }
+              disabled={selectedClosed.accounts.length === 0}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-40"
+              title="Descargar o imprimir PDF (individual o masivo)"
             >
               <Printer className="w-3.5 h-3.5 text-[#132B63]" />
-              <span>Imprimir / PDF</span>
+              <span>Descargar PDF</span>
             </button>
             <button
               type="button"
               onClick={() =>
-                void handleExportClosedExcel(selectedClosed, activeClosedEntry?.account.id)
+                openHistorialExportModal({
+                  records: [selectedClosed],
+                  format: 'excel',
+                  mode: 'masivo',
+                  initialAccountId: activeClosedEntry?.account.id,
+                  initialSocietyKey: detailSocietyKey,
+                })
               }
-              disabled={isExportingId === selectedClosed.id || !activeClosedEntry}
+              disabled={selectedClosed.accounts.length === 0}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#0E224D] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              title="Descargar Excel entregable (individual o masivo)"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>
-                {isExportingId === selectedClosed.id ? 'Generando...' : 'Descargar Excel'}
-              </span>
+              <span>Descargar Excel</span>
             </button>
           </div>
         </section>
@@ -458,10 +678,22 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
               onDeleteLineItem={() => {}}
               onOpenAccountPartidas={() => {}}
               onOpenPrintPreview={() =>
-                handleOpenClosedPrint(selectedClosed, activeClosedEntry.account.id)
+                openHistorialExportModal({
+                  records: [selectedClosed],
+                  format: 'pdf',
+                  mode: 'individual',
+                  initialAccountId: activeClosedEntry.account.id,
+                  initialSocietyKey: detailSocietyKey,
+                })
               }
               onExportOfficialExcel={() =>
-                void handleExportClosedExcel(selectedClosed, activeClosedEntry.account.id)
+                openHistorialExportModal({
+                  records: [selectedClosed],
+                  format: 'excel',
+                  mode: 'individual',
+                  initialAccountId: activeClosedEntry.account.id,
+                  initialSocietyKey: detailSocietyKey,
+                })
               }
             />
 
@@ -571,21 +803,7 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
           </div>
         )}
 
-        {/* Print Preview Modal for Historical Snapshot */}
-        {printSnapshot && (
-          <BankPrintPreviewModal
-            isOpen={true}
-            onClose={() => setPrintSnapshot(null)}
-            summary={printSnapshot.summary}
-            selectedMonth={printSnapshot.period}
-            onExportFullExcel={() =>
-              handleExportClosedExcel(
-                printSnapshot.record,
-                printSnapshot.summary.account?.id
-              )
-            }
-          />
-        )}
+        {renderSharedModals()}
       </div>
     );
   }
@@ -607,11 +825,28 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
           </div>
           <p className="text-xs text-slate-500">
             Archivo permanente de periodos cerrados con instantáneas de saldos 00/01/02, partidas
-            FBL3N y entregables descargables.
+            FBL3N y descarga individual o masiva en Excel y PDF.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {closedReconciliations.length > 0 && (
+            <button
+              type="button"
+              onClick={() =>
+                openHistorialExportModal({
+                  records: checkedRecords.length > 0 ? checkedRecords : closedReconciliations,
+                  format: 'excel',
+                  mode: 'masivo',
+                })
+              }
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              title="Descargar múltiples cuentas o periodos cerrados en Excel o PDF"
+            >
+              <Layers className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Descarga Masiva</span>
+            </button>
+          )}
           {!isReadOnly && openPeriod && (
             <button
               type="button"
@@ -704,6 +939,57 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
             </div>
           </div>
 
+          {/* Contextual Multi-Period Bulk Selection Strip */}
+          {checkedRecords.length > 0 && (
+            <div className="px-5 py-2.5 bg-blue-50/70 border-b border-blue-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-[#132B63] font-semibold">
+                <Layers className="w-4 h-4 shrink-0" />
+                <span>
+                  {checkedRecords.length} periodo(s) seleccionado(s) ·{' '}
+                  <span className="font-mono tabular-nums">{checkedTotalAccounts}</span>{' '}
+                  conciliación(es)
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    openHistorialExportModal({
+                      records: checkedRecords,
+                      format: 'excel',
+                      mode: 'masivo',
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Excel Masivo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openHistorialExportModal({
+                      records: checkedRecords,
+                      format: 'pdf',
+                      mode: 'masivo',
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>PDF Masivo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCheckedClosedIds(new Set())}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer whitespace-nowrap"
+                >
+                  Limpiar
+                </button>
+              </div>
+            </div>
+          )}
+
           {filteredHistory.length === 0 ? (
             <div className="p-8 text-center text-xs text-slate-500">
               No se encontraron conciliaciones cerradas que coincidan con &ldquo;{search}&rdquo;.
@@ -713,7 +999,16 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-600">
-                    <th className="py-3 px-4">Periodo</th>
+                    <th className="py-3 pl-4 pr-2 w-9">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleChecked}
+                        onChange={toggleCheckAllVisible}
+                        aria-label="Seleccionar todos los periodos visibles para descarga masiva"
+                        className="w-4 h-4 rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8] cursor-pointer"
+                      />
+                    </th>
+                    <th className="py-3 px-3">Periodo</th>
                     <th className="py-3 px-4">Fecha y Responsable</th>
                     <th className="py-3 px-4">Cobertura</th>
                     <th className="py-3 px-4">Estado al Cierre</th>
@@ -724,9 +1019,24 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredHistory.map((rec) => {
                     const allSquared = rec.diffAccountsCount === 0;
+                    const isChecked = checkedClosedIds.has(rec.id);
                     return (
-                      <tr key={rec.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="py-3.5 px-4 align-top">
+                      <tr
+                        key={rec.id}
+                        className={`transition-colors ${
+                          isChecked ? 'bg-blue-50/40' : 'hover:bg-slate-50/70'
+                        }`}
+                      >
+                        <td className="py-3.5 pl-4 pr-2 align-top">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleCheckRecord(rec.id)}
+                            aria-label={`Seleccionar ${rec.period} para descarga masiva`}
+                            className="w-4 h-4 rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8] cursor-pointer mt-0.5"
+                          />
+                        </td>
+                        <td className="py-3.5 px-3 align-top">
                           <div className="flex items-center gap-2 font-bold text-slate-900">
                             <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
                             <span>{rec.period}</span>
@@ -787,19 +1097,30 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
                             </button>
                             <button
                               type="button"
-                              onClick={() => void handleExportClosedExcel(rec)}
-                              disabled={isExportingId === rec.id}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-40"
-                              title="Descargar Excel entregable con fórmulas vivas"
+                              onClick={() =>
+                                openHistorialExportModal({
+                                  records: [rec],
+                                  format: 'excel',
+                                  mode: 'masivo',
+                                })
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                              title="Descargar Excel individual o masivo de este periodo"
                             >
                               <Download className="w-3.5 h-3.5 text-teal-700" />
                               <span>Excel</span>
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleOpenClosedPrint(rec)}
+                              onClick={() =>
+                                openHistorialExportModal({
+                                  records: [rec],
+                                  format: 'pdf',
+                                  mode: 'masivo',
+                                })
+                              }
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                              title="Vista previa de impresión horizontal y PDF"
+                              title="Descargar o imprimir PDF individual o masivo de este periodo"
                             >
                               <Printer className="w-3.5 h-3.5 text-[#132B63]" />
                               <span>PDF</span>
@@ -816,21 +1137,7 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
         </section>
       )}
 
-      {/* Print Preview Modal triggered directly from List */}
-      {printSnapshot && (
-        <BankPrintPreviewModal
-          isOpen={true}
-          onClose={() => setPrintSnapshot(null)}
-          summary={printSnapshot.summary}
-          selectedMonth={printSnapshot.period}
-          onExportFullExcel={() =>
-            handleExportClosedExcel(
-              printSnapshot.record,
-              printSnapshot.summary.account?.id
-            )
-          }
-        />
-      )}
+      {renderSharedModals()}
     </div>
   );
 };

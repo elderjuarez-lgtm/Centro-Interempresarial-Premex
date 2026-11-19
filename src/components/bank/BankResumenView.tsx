@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   Layers,
   Landmark,
+  FileText,
 } from 'lucide-react';
 import {
   BankAccount,
@@ -57,8 +58,12 @@ interface BankResumenViewProps {
   ) => void;
   onAddReconcilingItem: (accountId: string, payload: AddReconcilingItemPayload) => void;
   onDeleteLineItem: (source: 'sap' | 'bank' | 'ledger', itemId: string) => void;
-  onOpenPrintPreview: () => void;
-  onExportDeliverableExcel: (societyFilterKey: string) => void;
+  onOpenExportModal: (opts: {
+    format: 'excel' | 'pdf';
+    mode: 'individual' | 'masivo';
+    societyKey?: string;
+    accountId?: string;
+  }) => void;
   isReadOnly?: boolean;
 }
 
@@ -85,8 +90,7 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
   onUpdateMonthlyBalances,
   onAddReconcilingItem,
   onDeleteLineItem,
-  onOpenPrintPreview,
-  onExportDeliverableExcel,
+  onOpenExportModal,
   isReadOnly = false,
 }) => {
   const [selectedSocietyKey, setSelectedSocietyKey] = useState<string>('ALL');
@@ -301,17 +305,41 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => onExportDeliverableExcel(selectedSocietyKey)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors cursor-pointer"
+              onClick={() =>
+                onOpenExportModal({
+                  format: 'pdf',
+                  mode: 'masivo',
+                  societyKey: selectedSocietyKey,
+                  accountId: activeAccount?.id,
+                })
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              title="Descargar o imprimir PDF (individual o masivo)"
+            >
+              <FileText className="w-3.5 h-3.5 text-[#132B63]" />
+              <span>Descargar PDF</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                onOpenExportModal({
+                  format: 'excel',
+                  mode: 'masivo',
+                  societyKey: selectedSocietyKey,
+                  accountId: activeAccount?.id,
+                })
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              title="Descargar Excel entregable (individual o masivo)"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Excel Centro ({scopeStats.total})</span>
+              <span>Descargar Excel</span>
             </button>
             {!isReadOnly && (
               <button
                 type="button"
                 onClick={() => onNavigateTab('carga')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <UploadCloud className="w-3.5 h-3.5" />
                 <span>Cargar Balance / Partidas</span>
@@ -577,8 +605,22 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
         onAddReconcilingItem={onAddReconcilingItem}
         onDeleteLineItem={onDeleteLineItem}
         onOpenAccountPartidas={onOpenAccountPartidas}
-        onOpenPrintPreview={onOpenPrintPreview}
-        onExportOfficialExcel={() => onExportDeliverableExcel(selectedSocietyKey)}
+        onOpenPrintPreview={() =>
+          onOpenExportModal({
+            format: 'pdf',
+            mode: 'individual',
+            societyKey: selectedSocietyKey,
+            accountId: activeAccount?.id,
+          })
+        }
+        onExportOfficialExcel={() =>
+          onOpenExportModal({
+            format: 'excel',
+            mode: 'individual',
+            societyKey: selectedSocietyKey,
+            accountId: activeAccount?.id,
+          })
+        }
       />
 
       {/* BLOQUE 4: Auditoría de Subcuentas SAP (00 / 01 / 02) + Cuadro Consolidado Desplegable */}

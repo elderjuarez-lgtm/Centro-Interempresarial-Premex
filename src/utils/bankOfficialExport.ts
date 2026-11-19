@@ -39,6 +39,57 @@ const sanitizeSlug = (raw: string): string =>
     .replace(/^_+|_+$/g, '')
     .slice(0, 48) || 'Premex';
 
+/**
+ * Generates a valid, unique Excel worksheet name (<= 31 chars, no forbidden chars).
+ */
+const buildUniqueSheetName = (usedLower: Set<string>, rawLabel: string): string => {
+  const cleaned = String(rawLabel || 'Conciliacion')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\\/*?:\[\]']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const base = (cleaned || 'Conciliacion').slice(0, 31).trim() || 'Conciliacion';
+  if (!usedLower.has(base.toLowerCase())) {
+    usedLower.add(base.toLowerCase());
+    return base;
+  }
+  for (let n = 2; n < 500; n += 1) {
+    const suffix = ` (${n})`;
+    const candidate = `${base.slice(0, Math.max(1, 31 - suffix.length)).trim()}${suffix}`;
+    if (!usedLower.has(candidate.toLowerCase())) {
+      usedLower.add(candidate.toLowerCase());
+      return candidate;
+    }
+  }
+  const fallback = `Hoja_${usedLower.size + 1}`.slice(0, 31);
+  usedLower.add(fallback.toLowerCase());
+  return fallback;
+};
+
+const buildAccountSheetTabLabel = (
+  summary: BankReconciliationSummary,
+  period: string,
+  includePeriodPrefix: boolean
+): string => {
+  const acc = summary.account;
+  if (!acc) return 'Conciliacion';
+  const periodShort = includePeriodPrefix
+    ? `${period.slice(0, 3)}${period.match(/\d{2,4}/)?.[0]?.slice(-2) || ''} `
+    : '';
+  const socPrefix = acc.codigoSociedad
+    ? `${acc.codigoSociedad} `
+    : `${acc.sociedad.split(/\s+/)[0]?.slice(0, 6) || ''} `;
+  const bankClean = acc.banco
+    .replace(/^BANCO\s+/i, '')
+    .replace(/\bS\.?A\.?S?\.?\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, includePeriodPrefix ? 11 : 14);
+  const acctTail = (acc.numeroCuenta || acc.raizContable || '').replace(/\s+/g, '').slice(-5);
+  return `${periodShort}${socPrefix}${bankClean}${acctTail ? ` ${acctTail}` : ''}`.trim();
+};
+
 const getExcelNumFmt = (currency: BankCurrency): string => {
   if (currency === 'COP') return '"$" * #,##0;"$" * (#,##0);"$" * "-"';
   if (currency === 'GTQ') return '"Q" * #,##0.00;"Q" * (#,##0.00);"Q" * "-"';
@@ -447,9 +498,20 @@ const populateOfficialExcelSheet = (
   ws.getCell(diffRowIdx, 8).alignment = { horizontal: 'right', vertical: 'middle' };
 };
 
+export type BankExportMode = 'individual' | 'masivo';
+
+export interface BankBatchSheetEntry {
+  summary: BankReconciliationSummary;
+  period: string;
+}
+
 export interface SapDeliverableWorkbookOptions {
   activeSummary: BankReconciliationSummary;
   centerSummaries: BankReconciliationSummary[];
+  /** Optional explicit list of (summary, period) sheets for single-period or multi-period bulk exports */
+  batchEntries?: BankBatchSheetEntry[];
+  /** 'individual' exports 1 account's official sheet + scoped SAP items/balance; 'masivo' exports Consolidated Summary + 1 official live-formula sheet per account + SAP items + Balance */
+  mode?: BankExportMode;
   sapOpenItems: SapOpenItem[];
   sapBalanceRows: SapBalanceRow[];
   statementItems?: BankStatementItem[];
@@ -474,13 +536,30 @@ const styleStandardTableHeader = (row: ExcelJS.Row) => {
   });
 };
 
+const matchesAccountBalanceRow = (
+  row: SapBalanceRow,
+  acc: NonNullable<BankReconciliationSummary['account']>
+): boolean => {
+  const rowSoc = (row.sociedadCodigo || row.sociedadNombre || '').trim().toUpperCase();
+  const accSoc = (acc.codigoSociedad || acc.sociedad || '').trim().toUpperCase();
+  if (rowSoc && accSoc && rowSoc !== accSoc && row.sociedadNombre.trim().toUpperCase() !== acc.sociedad.trim().toUpperCase()) {
+    return false;
+  }
+  const rowGl = row.cuentaMayor.replace(/\D/g, '');
+  const rowRoot = row.raizContable.replace(/\D/g, '');
+  const accRoot = (acc.raizContable || '').replace(/\D/g, '');
+  const accGls = [acc.cuentaMayor00, acc.cuentaMayor01, acc.cuentaMayor02, acc.codigoContable]
+    .filter(Boolean)
+    .map((v) => String(v).replace(/\D/g, ''));
+  if (accRoot && rowRoot && accRoot === rowRoot) return true;
+  if (rowGl && accGls.includes(rowGl)) return true;
+  return false;
+};
+
 /**
- * Generates the complete 5-sheet Corporate Deliverable Excel (.xlsx) with LIVE formulas:
- * 1. Conciliacion Bancos
- * 2. Centro Conciliaciones
- * 3. Partidas Abiertas SAP
- * 4. Balance 00-01-02
- * 5. Cruce Bilateral (when bilateral matches/records exist)
+ * Generates Corporate Deliverable Excel (.xlsx) with LIVE formulas:
+ * - Individual mode: 1 official `Conciliacion Bancos` sheet + account-scoped `Partidas Abiertas SAP` + `Balance 00-01-02`.
+ * - Masivo mode: `Centro Conciliaciones` consolidated overview + 1 dedicated live-formula `CONCILIACION DE BANCOS` sheet per account/period + `Partidas Abiertas SAP` + `Balance 00-01-02`.
  */
 export const exportSapDeliverableWorkbook = async (
   opts: SapDeliverableWorkbookOptions
@@ -488,6 +567,8 @@ export const exportSapDeliverableWorkbook = async (
   const {
     activeSummary,
     centerSummaries,
+    batchEntries,
+    mode,
     sapOpenItems,
     sapBalanceRows,
     statementItems = [],
@@ -497,76 +578,155 @@ export const exportSapDeliverableWorkbook = async (
     scopeLabel,
   } = opts;
 
-  if (!activeSummary.account) return '';
+  const resolvedEntries: BankBatchSheetEntry[] = (
+    batchEntries && batchEntries.length > 0
+      ? batchEntries
+      : centerSummaries.map((s) => ({ summary: s, period: selectedMonth }))
+  ).filter((e) => Boolean(e.summary.account));
+
+  const effectiveMode: BankExportMode =
+    mode || (resolvedEntries.length > 1 ? 'masivo' : 'individual');
+
+  if (effectiveMode === 'individual' && !activeSummary.account) return '';
+  if (effectiveMode === 'masivo' && resolvedEntries.length === 0) return '';
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Centro Interempresarial Premex';
   wb.created = new Date();
+  const usedSheetNames = new Set<string>();
 
-  // Sheet 1: Conciliacion Bancos (active bank official deliverable with live formulas)
-  const wsOfficial = wb.addWorksheet('Conciliacion Bancos');
-  populateOfficialExcelSheet(wsOfficial, activeSummary, selectedMonth);
+  const uniquePeriods = new Set(resolvedEntries.map((e) => e.period));
+  const isMultiPeriod = uniquePeriods.size > 1;
 
-  // Sheet 2: Centro Conciliaciones (all accounts in selected society filter)
-  const wsCentro = wb.addWorksheet('Centro Conciliaciones');
-  wsCentro.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
-  wsCentro.columns = [
-    { header: 'Cod. Soc.', key: 'codSoc', width: 11 },
-    { header: 'Sociedad', key: 'sociedad', width: 22 },
-    { header: 'Banco', key: 'banco', width: 24 },
-    { header: 'No. Cuenta', key: 'cuenta', width: 18 },
-    { header: 'Cta. Mayor 00', key: 'cta00', width: 15 },
-    { header: 'Moneda', key: 'moneda', width: 9 },
-    { header: 'Saldo Cta 00', key: 's00', width: 17 },
-    { header: 'Saldo Cta 01', key: 's01', width: 16 },
-    { header: 'Saldo Cta 02', key: 's02', width: 16 },
-    { header: 'Saldo Libros', key: 'libros', width: 17 },
-    { header: 'Saldo Extracto', key: 'extracto', width: 17 },
-    { header: 'Conc. Libros', key: 'concLibros', width: 17 },
-    { header: 'Conc. Extracto', key: 'concExtracto', width: 17 },
-    { header: 'Diferencia', key: 'diff', width: 15 },
-    { header: 'Estado', key: 'estado', width: 14 },
-  ];
-  styleStandardTableHeader(wsCentro.getRow(1));
-
-  const validCenter = centerSummaries.filter((s) => Boolean(s.account));
-  validCenter.forEach((s) => {
-    if (!s.account) return;
-    const isOk = Math.abs(s.diferenciaNeta) <= 1;
-    const row = wsCentro.addRow({
-      codSoc: s.account.codigoSociedad || '-',
-      sociedad: s.account.sociedad,
-      banco: s.account.banco,
-      cuenta: s.account.numeroCuenta,
-      cta00: s.account.cuentaMayor00 || s.account.codigoContable || '-',
-      moneda: s.account.moneda,
-      s00: s.saldoCuenta00,
-      s01: s.saldoCuenta01,
-      s02: s.saldoCuenta02,
-      libros: s.saldoLibros,
-      extracto: s.saldoExtracto,
-      concLibros: s.saldoConciliadoLibros,
-      concExtracto: s.saldoConciliadoExtracto,
-      diff: s.diferenciaNeta,
-      estado: isOk ? 'CUADRADA' : 'POR REVISAR',
-    });
-    const nf = getExcelNumFmt(s.account.moneda);
-    for (let c = 7; c <= 14; c += 1) {
-      row.getCell(c).numFmt = nf;
-      row.getCell(c).alignment = { horizontal: 'right', vertical: 'middle' };
-    }
-    row.getCell(15).font = {
-      name: 'Calibri',
-      size: 9.5,
-      bold: true,
-      color: { argb: isOk ? 'FF166534' : 'FFB91C1C' },
+  if (effectiveMode === 'individual' && activeSummary.account) {
+    // Sheet 1: Exact Corporate Deliverable for the single selected account
+    const wsOfficial = wb.addWorksheet(
+      buildUniqueSheetName(usedSheetNames, 'Conciliacion Bancos')
+    );
+    populateOfficialExcelSheet(wsOfficial, activeSummary, selectedMonth);
+  } else {
+    // MASIVO MODE:
+    // Sheet 1: Consolidated Overview (`Centro Conciliaciones`)
+    const wsCentro = wb.addWorksheet(
+      buildUniqueSheetName(usedSheetNames, 'Centro Conciliaciones')
+    );
+    wsCentro.pageSetup = {
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
     };
-  });
+    const centroCols: Partial<ExcelJS.Column>[] = [
+      ...(isMultiPeriod ? [{ header: 'Periodo', key: 'periodo', width: 16 }] : []),
+      { header: 'Cod. Soc.', key: 'codSoc', width: 11 },
+      { header: 'Sociedad', key: 'sociedad', width: 22 },
+      { header: 'Banco', key: 'banco', width: 24 },
+      { header: 'No. Cuenta', key: 'cuenta', width: 18 },
+      { header: 'Cta. Mayor 00', key: 'cta00', width: 15 },
+      { header: 'Moneda', key: 'moneda', width: 9 },
+      { header: 'Saldo Cta 00', key: 's00', width: 17 },
+      { header: 'Saldo Cta 01', key: 's01', width: 16 },
+      { header: 'Saldo Cta 02', key: 's02', width: 16 },
+      { header: 'Saldo Libros', key: 'libros', width: 17 },
+      { header: 'Saldo Extracto', key: 'extracto', width: 17 },
+      { header: 'Conc. Libros', key: 'concLibros', width: 17 },
+      { header: 'Conc. Extracto', key: 'concExtracto', width: 17 },
+      { header: 'Diferencia', key: 'diff', width: 15 },
+      { header: 'Estado', key: 'estado', width: 14 },
+    ];
+    wsCentro.columns = centroCols;
+    styleStandardTableHeader(wsCentro.getRow(1));
 
-  // Sheet 3: Partidas Abiertas SAP (FBL3N)
-  const wsPartidas = wb.addWorksheet('Partidas Abiertas SAP');
-  wsPartidas.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+    const numStartCol = isMultiPeriod ? 8 : 7;
+    const numEndCol = isMultiPeriod ? 15 : 14;
+    const statusCol = isMultiPeriod ? 16 : 15;
+
+    resolvedEntries.forEach(({ summary: s, period }) => {
+      if (!s.account) return;
+      const isOk = Math.abs(s.diferenciaNeta) <= 1;
+      const row = wsCentro.addRow({
+        ...(isMultiPeriod ? { periodo: period } : {}),
+        codSoc: s.account.codigoSociedad || '-',
+        sociedad: s.account.sociedad,
+        banco: s.account.banco,
+        cuenta: s.account.numeroCuenta,
+        cta00: s.account.cuentaMayor00 || s.account.codigoContable || '-',
+        moneda: s.account.moneda,
+        s00: s.saldoCuenta00,
+        s01: s.saldoCuenta01,
+        s02: s.saldoCuenta02,
+        libros: s.saldoLibros,
+        extracto: s.saldoExtracto,
+        concLibros: s.saldoConciliadoLibros,
+        concExtracto: s.saldoConciliadoExtracto,
+        diff: s.diferenciaNeta,
+        estado: isOk ? 'CUADRADA' : 'POR REVISAR',
+      });
+      const nf = getExcelNumFmt(s.account.moneda);
+      for (let c = numStartCol; c <= numEndCol; c += 1) {
+        row.getCell(c).numFmt = nf;
+        row.getCell(c).alignment = { horizontal: 'right', vertical: 'middle' };
+      }
+      row.getCell(statusCol).font = {
+        name: 'Calibri',
+        size: 9.5,
+        bold: true,
+        color: { argb: isOk ? 'FF166534' : 'FFB91C1C' },
+      };
+    });
+
+    // Sheets 2..N+1: One dedicated official live-formula sheet per account/period
+    resolvedEntries.forEach(({ summary: entrySum, period }) => {
+      if (!entrySum.account) return;
+      const tabTitle = buildUniqueSheetName(
+        usedSheetNames,
+        buildAccountSheetTabLabel(entrySum, period, isMultiPeriod)
+      );
+      const wsAccount = wb.addWorksheet(tabTitle);
+      populateOfficialExcelSheet(wsAccount, entrySum, period);
+    });
+  }
+
+  // Scope SAP Open Items & Balance rows according to Individual vs Masivo
+  const exportedAccounts =
+    effectiveMode === 'individual' && activeSummary.account
+      ? [activeSummary.account]
+      : resolvedEntries
+          .map((e) => e.summary.account)
+          .filter((a): a is NonNullable<BankReconciliationSummary['account']> => Boolean(a));
+  const exportedAccountIds = new Set(exportedAccounts.map((a) => a.id));
+
+  const scopedOpenItems =
+    effectiveMode === 'individual'
+      ? sapOpenItems.filter((i) => exportedAccountIds.has(i.cuentaId))
+      : sapOpenItems.filter(
+          (i) => exportedAccountIds.size === 0 || exportedAccountIds.has(i.cuentaId)
+        );
+
+  const scopedBalanceRows =
+    effectiveMode === 'individual' && activeSummary.account
+      ? sapBalanceRows.filter((b) => matchesAccountBalanceRow(b, activeSummary.account!))
+      : exportedAccounts.length > 0
+      ? (() => {
+          const matched = sapBalanceRows.filter((b) =>
+            exportedAccounts.some((acc) => matchesAccountBalanceRow(b, acc))
+          );
+          return matched.length > 0 ? matched : sapBalanceRows;
+        })()
+      : sapBalanceRows;
+
+  // Sheet: Partidas Abiertas SAP (FBL3N)
+  const wsPartidas = wb.addWorksheet(
+    buildUniqueSheetName(usedSheetNames, 'Partidas Abiertas SAP')
+  );
+  wsPartidas.pageSetup = {
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+  };
   wsPartidas.columns = [
+    ...(isMultiPeriod ? [{ header: 'Periodo', key: 'mes', width: 15 }] : []),
     { header: 'Sociedad', key: 'soc', width: 11 },
     { header: 'Razón Social', key: 'socName', width: 22 },
     { header: 'Cta. Mayor', key: 'ctaMayor', width: 15 },
@@ -586,9 +746,11 @@ export const exportSapDeliverableWorkbook = async (
   ];
   styleStandardTableHeader(wsPartidas.getRow(1));
 
-  sapOpenItems.forEach((item) => {
+  const amtColIdx = isMultiPeriod ? 15 : 14;
+  scopedOpenItems.forEach((item) => {
     const effSection = getEffectiveSapItemSection(item);
     const row = wsPartidas.addRow({
+      ...(isMultiPeriod ? { mes: item.mes } : {}),
       soc: item.sociedadCodigo,
       socName: item.sociedadNombre,
       ctaMayor: item.cuentaMayor,
@@ -606,12 +768,12 @@ export const exportSapDeliverableWorkbook = async (
       moneda: item.monedaLocal,
       texto: item.texto,
     });
-    row.getCell(14).numFmt = getExcelNumFmt(item.monedaLocal);
-    row.getCell(14).alignment = { horizontal: 'right', vertical: 'middle' };
+    row.getCell(amtColIdx).numFmt = getExcelNumFmt(item.monedaLocal);
+    row.getCell(amtColIdx).alignment = { horizontal: 'right', vertical: 'middle' };
   });
 
-  // Sheet 4: Balance 00-01-02
-  const wsBal = wb.addWorksheet('Balance 00-01-02');
+  // Sheet: Balance 00-01-02
+  const wsBal = wb.addWorksheet(buildUniqueSheetName(usedSheetNames, 'Balance 00-01-02'));
   wsBal.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
   wsBal.columns = [
     { header: 'Sociedad', key: 'soc', width: 12 },
@@ -626,7 +788,7 @@ export const exportSapDeliverableWorkbook = async (
   ];
   styleStandardTableHeader(wsBal.getRow(1));
 
-  sapBalanceRows.forEach((b) => {
+  scopedBalanceRows.forEach((b) => {
     const row = wsBal.addRow({
       soc: b.sociedadCodigo,
       socName: b.sociedadNombre,
@@ -642,10 +804,15 @@ export const exportSapDeliverableWorkbook = async (
     row.getCell(7).alignment = { horizontal: 'right', vertical: 'middle' };
   });
 
-  // Sheet 5: Cruce Bilateral (included whenever bilateral matches exist)
+  // Optional legacy matches sheet (only if legacy bilateral matches exist)
   if (matches.length > 0) {
-    const wsCruce = wb.addWorksheet('Cruce Bilateral');
-    wsCruce.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+    const wsCruce = wb.addWorksheet(buildUniqueSheetName(usedSheetNames, 'Cruce Bilateral'));
+    wsCruce.pageSetup = {
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+    };
     wsCruce.columns = [
       { header: '#', key: 'idx', width: 6 },
       { header: 'Periodo', key: 'mes', width: 16 },
@@ -688,9 +855,14 @@ export const exportSapDeliverableWorkbook = async (
   }
 
   const buffer = await wb.xlsx.writeBuffer();
-  const filename = `Conciliacion_Bancos_SAP_${sanitizeSlug(scopeLabel)}_${sanitizeSlug(
-    selectedMonth === 'ALL' ? 'Consolidado' : selectedMonth
-  )}.xlsx`;
+  const filename =
+    effectiveMode === 'individual' && activeSummary.account
+      ? `Conciliacion_Individual_${sanitizeSlug(activeSummary.account.sociedad)}_${sanitizeSlug(
+          activeSummary.account.banco
+        )}_${sanitizeSlug(activeSummary.account.numeroCuenta)}_${sanitizeSlug(selectedMonth)}.xlsx`
+      : `Conciliacion_Masiva_${sanitizeSlug(scopeLabel)}_${resolvedEntries.length}Cuentas_${sanitizeSlug(
+          isMultiPeriod ? 'MultiPeriodo' : selectedMonth === 'ALL' ? 'Consolidado' : selectedMonth
+        )}.xlsx`;
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
@@ -711,6 +883,7 @@ export const exportOfficialBankReconciliationExcel = async (
   return exportSapDeliverableWorkbook({
     activeSummary: valid[0],
     centerSummaries: valid,
+    mode: valid.length > 1 ? 'masivo' : 'individual',
     sapOpenItems: valid.flatMap((s) => s.scopedSapItems),
     sapBalanceRows: [],
     selectedMonth,
@@ -719,18 +892,19 @@ export const exportOfficialBankReconciliationExcel = async (
 };
 
 // ============================================================================
-// Printable Landscape PDF Generator matching the Official Premex Bank Sheet
+// Printable Landscape PDF Generator (Individual 1-Page & Masivo Multi-Page)
 // ============================================================================
 
-export async function generateBankOfficialPdfBytes(
+const appendOfficialBankPageToPdf = (
+  pdfDoc: PDFDocument,
+  fontRegular: Awaited<ReturnType<PDFDocument['embedFont']>>,
+  fontBold: Awaited<ReturnType<PDFDocument['embedFont']>>,
   summary: BankReconciliationSummary,
-  selectedMonth: string
-): Promise<{ bytes: Uint8Array<ArrayBuffer>; filename: string }> {
+  selectedMonth: string,
+  pageNumber: number,
+  totalPages: number
+) => {
   const acc = summary.account;
-  const pdfDoc = await PDFDocument.create();
-  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
   const pageW = 792; // Landscape Letter
   const pageH = 612;
   const marginX = 28;
@@ -849,6 +1023,7 @@ export async function generateBankOfficialPdfBytes(
       box?: boolean;
       doubleBottom?: boolean;
       dashZero?: boolean;
+      fontSize?: number;
     }
   ) => {
     const x = colX[colIdx];
@@ -874,8 +1049,8 @@ export async function generateBankOfficialPdfBytes(
     }
     const formatted = formatOfficialCellAmount(value, currency, Boolean(opts?.dashZero));
     const font = opts?.bold ? fontBold : fontRegular;
-    const size = 8.2;
-    const textY = rowTopY - rowH / 2 - 3;
+    const size = opts?.fontSize ?? 8.2;
+    const textY = rowTopY - rowH / 2 - 2.8;
     page.drawText(toAsciiPdf(formatted.symbol), {
       x: x + 4,
       y: textY,
@@ -912,14 +1087,14 @@ export async function generateBankOfficialPdfBytes(
     const tx = align === 'center' ? x + (w - tw) / 2 : x + 4;
     page.drawText(fitted, {
       x: tx,
-      y: rowTopY - rowH / 2 - 3,
+      y: rowTopY - rowH / 2 - 2.8,
       size,
       font,
       color: darkInk,
     });
   };
 
-  cursorY -= 10;
+  cursorY -= 8;
 
   // Row: SALDO EN LIBROS | SALDO EN EXTRACTO
   const balRowH = 20;
@@ -940,7 +1115,7 @@ export async function generateBankOfficialPdfBytes(
     box: true,
     doubleBottom: true,
   });
-  cursorY -= balRowH + 11;
+  cursorY -= balRowH + 10;
 
   // Section 1 Subtotals
   const subH = 19;
@@ -968,22 +1143,44 @@ export async function generateBankOfficialPdfBytes(
   const menosNc = summary.officialLines.menosNotasCredito;
   const masCons = summary.officialLines.masConsignaciones;
 
-  const maxBlock1 = Math.min(10, Math.max(4, masNd.length, menosChq.length));
-  const itemRowH = 16;
+  // Adapt row height smoothly so longer item lists still fit cleanly on 1 landscape sheet
+  const rawB1 = Math.max(4, masNd.length, menosChq.length);
+  const rawB2 = Math.max(3, menosNc.length, masCons.length);
+  const maxBlock1 = Math.min(13, rawB1);
+  const maxBlock2 = Math.min(10, rawB2);
+  const totalDetailRows = maxBlock1 + maxBlock2;
+  const itemRowH = totalDetailRows > 18 ? 12.2 : totalDetailRows > 14 ? 14 : 16;
+  const itemFontSize = totalDetailRows > 18 ? 7.0 : 7.6;
+
   for (let i = 0; i < maxBlock1; i += 1) {
+    const isLastB1 = i === maxBlock1 - 1;
+    const lOverflow = isLastB1 && masNd.length > maxBlock1;
+    const rOverflow = isLastB1 && menosChq.length > maxBlock1;
     const lItem = masNd[i];
     const rItem = menosChq[i];
-    if (lItem) {
-      drawTextCell(0, cursorY, itemRowH, lItem.dto, 'center', false, 7.6);
-      drawTextCell(1, cursorY, itemRowH, formatSheetDate(lItem.fecha), 'center', false, 7.6);
-      drawTextCell(2, cursorY, itemRowH, lItem.concepto, 'left', false, 7.6);
-      drawAmountCell(3, cursorY, itemRowH, lItem.valor);
+
+    if (lOverflow) {
+      const rem = masNd.slice(i);
+      const remSum = rem.reduce((s, it) => s + it.valor, 0);
+      drawTextCell(2, cursorY, itemRowH, `(+${rem.length} partidas adicionales - ver Excel)`, 'left', true, itemFontSize);
+      drawAmountCell(3, cursorY, itemRowH, remSum, { fontSize: itemFontSize });
+    } else if (lItem) {
+      drawTextCell(0, cursorY, itemRowH, lItem.dto, 'center', false, itemFontSize);
+      drawTextCell(1, cursorY, itemRowH, formatSheetDate(lItem.fecha), 'center', false, itemFontSize);
+      drawTextCell(2, cursorY, itemRowH, lItem.concepto, 'left', false, itemFontSize);
+      drawAmountCell(3, cursorY, itemRowH, lItem.valor, { fontSize: itemFontSize });
     }
-    if (rItem) {
-      drawTextCell(4, cursorY, itemRowH, rItem.dto, 'center', false, 7.6);
-      drawTextCell(5, cursorY, itemRowH, formatSheetDate(rItem.fecha), 'center', false, 7.6);
-      drawTextCell(6, cursorY, itemRowH, rItem.concepto, 'left', false, 7.6);
-      drawAmountCell(7, cursorY, itemRowH, rItem.valor);
+
+    if (rOverflow) {
+      const rem = menosChq.slice(i);
+      const remSum = rem.reduce((s, it) => s + it.valor, 0);
+      drawTextCell(6, cursorY, itemRowH, `(+${rem.length} partidas adicionales - ver Excel)`, 'left', true, itemFontSize);
+      drawAmountCell(7, cursorY, itemRowH, remSum, { fontSize: itemFontSize });
+    } else if (rItem) {
+      drawTextCell(4, cursorY, itemRowH, rItem.dto, 'center', false, itemFontSize);
+      drawTextCell(5, cursorY, itemRowH, formatSheetDate(rItem.fecha), 'center', false, itemFontSize);
+      drawTextCell(6, cursorY, itemRowH, rItem.concepto, 'left', false, itemFontSize);
+      drawAmountCell(7, cursorY, itemRowH, rItem.valor, { fontSize: itemFontSize });
     }
     cursorY -= itemRowH;
   }
@@ -1008,21 +1205,35 @@ export async function generateBankOfficialPdfBytes(
   });
   cursorY -= subH;
 
-  const maxBlock2 = Math.min(8, Math.max(3, menosNc.length, masCons.length));
   for (let i = 0; i < maxBlock2; i += 1) {
+    const isLastB2 = i === maxBlock2 - 1;
+    const lOverflow = isLastB2 && menosNc.length > maxBlock2;
+    const rOverflow = isLastB2 && masCons.length > maxBlock2;
     const lItem = menosNc[i];
     const rItem = masCons[i];
-    if (lItem) {
-      drawTextCell(0, cursorY, itemRowH, lItem.dto, 'center', false, 7.6);
-      drawTextCell(1, cursorY, itemRowH, formatSheetDate(lItem.fecha), 'center', false, 7.6);
-      drawTextCell(2, cursorY, itemRowH, lItem.concepto, 'left', false, 7.6);
-      drawAmountCell(3, cursorY, itemRowH, lItem.valor);
+
+    if (lOverflow) {
+      const rem = menosNc.slice(i);
+      const remSum = rem.reduce((s, it) => s + it.valor, 0);
+      drawTextCell(2, cursorY, itemRowH, `(+${rem.length} partidas adicionales - ver Excel)`, 'left', true, itemFontSize);
+      drawAmountCell(3, cursorY, itemRowH, remSum, { fontSize: itemFontSize });
+    } else if (lItem) {
+      drawTextCell(0, cursorY, itemRowH, lItem.dto, 'center', false, itemFontSize);
+      drawTextCell(1, cursorY, itemRowH, formatSheetDate(lItem.fecha), 'center', false, itemFontSize);
+      drawTextCell(2, cursorY, itemRowH, lItem.concepto, 'left', false, itemFontSize);
+      drawAmountCell(3, cursorY, itemRowH, lItem.valor, { fontSize: itemFontSize });
     }
-    if (rItem) {
-      drawTextCell(4, cursorY, itemRowH, rItem.dto, 'center', false, 7.6);
-      drawTextCell(5, cursorY, itemRowH, formatSheetDate(rItem.fecha), 'center', false, 7.6);
-      drawTextCell(6, cursorY, itemRowH, rItem.concepto, 'left', false, 7.6);
-      drawAmountCell(7, cursorY, itemRowH, rItem.valor);
+
+    if (rOverflow) {
+      const rem = masCons.slice(i);
+      const remSum = rem.reduce((s, it) => s + it.valor, 0);
+      drawTextCell(6, cursorY, itemRowH, `(+${rem.length} partidas adicionales - ver Excel)`, 'left', true, itemFontSize);
+      drawAmountCell(7, cursorY, itemRowH, remSum, { fontSize: itemFontSize });
+    } else if (rItem) {
+      drawTextCell(4, cursorY, itemRowH, rItem.dto, 'center', false, itemFontSize);
+      drawTextCell(5, cursorY, itemRowH, formatSheetDate(rItem.fecha), 'center', false, itemFontSize);
+      drawTextCell(6, cursorY, itemRowH, rItem.concepto, 'left', false, itemFontSize);
+      drawAmountCell(7, cursorY, itemRowH, rItem.valor, { fontSize: itemFontSize });
     }
     cursorY -= itemRowH;
   }
@@ -1069,7 +1280,7 @@ export async function generateBankOfficialPdfBytes(
   drawAmountCell(3, cursorY, totalH, summary.saldoConciliadoLibros, { bold: true });
   drawTextCell(6, cursorY, totalH, 'TOTAL CONCILIADO', 'left', true, 8.8);
   drawAmountCell(7, cursorY, totalH, summary.saldoConciliadoExtracto, { bold: true });
-  cursorY -= totalH + 14;
+  cursorY -= totalH + 13;
 
   // Net Difference Strip
   const isOk = Math.abs(summary.diferenciaNeta) <= 1;
@@ -1097,7 +1308,7 @@ export async function generateBankOfficialPdfBytes(
   });
 
   // Corporate Signature Lines
-  const sigY = 58;
+  const sigY = Math.min(54, Math.max(36, cursorY - 24));
   const sigW = 190;
   const sigPositions = [
     marginX + 16,
@@ -1119,7 +1330,7 @@ export async function generateBankOfficialPdfBytes(
     const tw = fontRegular.widthOfTextAtSize(sigLabels[idx], 7.5);
     page.drawText(sigLabels[idx], {
       x: sx + (sigW - tw) / 2,
-      y: sigY - 12,
+      y: sigY - 11,
       size: 7.5,
       font: fontRegular,
       color: mutedInk,
@@ -1128,22 +1339,84 @@ export async function generateBankOfficialPdfBytes(
 
   page.drawText(
     toAsciiPdf(`Centro Interempresarial Premex · Tesoreria SAP 00/01/02 · ${acc?.sociedad || ''}`),
-    { x: marginX, y: 18, size: 7, font: fontRegular, color: mutedInk }
+    { x: marginX, y: 14, size: 7, font: fontRegular, color: mutedInk }
   );
 
+  if (totalPages > 1) {
+    const pageTag = `Hoja ${pageNumber} de ${totalPages}`;
+    const tagW = fontBold.widthOfTextAtSize(pageTag, 7.2);
+    page.drawText(pageTag, {
+      x: marginX + contentW - tagW,
+      y: 14,
+      size: 7.2,
+      font: fontBold,
+      color: mutedInk,
+    });
+  }
+};
+
+export async function generateBankBatchPdfBytes(
+  entries: BankBatchSheetEntry[],
+  scopeLabel?: string
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; filename: string }> {
+  const validEntries = entries.filter((e) => Boolean(e.summary.account));
+  const pdfDoc = await PDFDocument.create();
+  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  validEntries.forEach((entry, idx) => {
+    appendOfficialBankPageToPdf(
+      pdfDoc,
+      fontRegular,
+      fontBold,
+      entry.summary,
+      entry.period,
+      idx + 1,
+      validEntries.length
+    );
+  });
+
   const saved = await pdfDoc.save();
-  const filename = `Conciliacion_Bancos_${sanitizeSlug(acc?.sociedad || 'Premex')}_${sanitizeSlug(
-    acc?.numeroCuenta || 'Cuenta'
-  )}_${sanitizeSlug(selectedMonth)}.pdf`;
+  let filename = 'Conciliacion_Bancos_Premex.pdf';
+  if (validEntries.length === 1) {
+    const acc = validEntries[0].summary.account;
+    filename = `Conciliacion_Individual_${sanitizeSlug(acc?.sociedad || 'Premex')}_${sanitizeSlug(
+      acc?.banco || 'Banco'
+    )}_${sanitizeSlug(acc?.numeroCuenta || 'Cuenta')}_${sanitizeSlug(validEntries[0].period)}.pdf`;
+  } else if (validEntries.length > 1) {
+    const uniquePeriods = new Set(validEntries.map((e) => e.period));
+    const periodSlug =
+      uniquePeriods.size === 1 ? sanitizeSlug(validEntries[0].period) : 'MultiPeriodo';
+    filename = `Conciliacion_Masiva_${sanitizeSlug(scopeLabel || 'Premex')}_${
+      validEntries.length
+    }Hojas_${periodSlug}.pdf`;
+  }
+
   return { bytes: new Uint8Array(saved), filename };
+}
+
+export async function exportBankBatchPdf(
+  entries: BankBatchSheetEntry[],
+  scopeLabel?: string
+): Promise<string> {
+  const valid = entries.filter((e) => Boolean(e.summary.account));
+  if (valid.length === 0) return '';
+  const { bytes, filename } = await generateBankBatchPdfBytes(valid, scopeLabel);
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  triggerBlobDownload(blob, filename);
+  return filename;
+}
+
+export async function generateBankOfficialPdfBytes(
+  summary: BankReconciliationSummary,
+  selectedMonth: string
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; filename: string }> {
+  return generateBankBatchPdfBytes([{ summary, period: selectedMonth }]);
 }
 
 export async function exportBankOfficialPdf(
   summary: BankReconciliationSummary,
   selectedMonth: string
 ): Promise<string> {
-  const { bytes, filename } = await generateBankOfficialPdfBytes(summary, selectedMonth);
-  const blob = new Blob([bytes], { type: 'application/pdf' });
-  triggerBlobDownload(blob, filename);
-  return filename;
+  return exportBankBatchPdf([{ summary, period: selectedMonth }]);
 }
