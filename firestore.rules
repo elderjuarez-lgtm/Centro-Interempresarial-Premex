@@ -295,7 +295,10 @@ service cloud.firestore {
           'title',
           'selectedMonth',
           'selectedAccountId',
+          'societies',
           'accounts',
+          'sapOpenItems',
+          'sapBalanceRows',
           'statementItems',
           'ledgerItems',
           'matches',
@@ -310,15 +313,18 @@ service cloud.firestore {
         data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
         data.selectedMonth is string && data.selectedMonth.size() >= 1 && data.selectedMonth.size() <= 60 &&
         (!('selectedAccountId' in data) || (data.selectedAccountId is string && data.selectedAccountId.size() <= 128)) &&
-        data.accounts is list && data.accounts.size() <= 100 &&
+        (!('societies' in data) || (data.societies is list && data.societies.size() <= 100 && (data.societies.size() == 0 || data.societies[0] is map))) &&
+        data.accounts is list && data.accounts.size() <= 300 &&
         (data.accounts.size() == 0 || data.accounts[0] is map) &&
+        (!('sapOpenItems' in data) || (data.sapOpenItems is list && data.sapOpenItems.size() <= 5000 && (data.sapOpenItems.size() == 0 || data.sapOpenItems[0] is map))) &&
+        (!('sapBalanceRows' in data) || (data.sapBalanceRows is list && data.sapBalanceRows.size() <= 5000 && (data.sapBalanceRows.size() == 0 || data.sapBalanceRows[0] is map))) &&
         data.statementItems is list && data.statementItems.size() <= 5000 &&
         (data.statementItems.size() == 0 || data.statementItems[0] is map) &&
         data.ledgerItems is list && data.ledgerItems.size() <= 5000 &&
         (data.ledgerItems.size() == 0 || data.ledgerItems[0] is map) &&
         data.matches is list && data.matches.size() <= 5000 &&
         (data.matches.size() == 0 || data.matches[0] is map) &&
-        data.accountsCount is int && data.accountsCount >= 0 && data.accountsCount <= 100 &&
+        data.accountsCount is int && data.accountsCount >= 0 && data.accountsCount <= 300 &&
         data.statementCount is int && data.statementCount >= 0 && data.statementCount <= 5000 &&
         data.ledgerCount is int && data.ledgerCount >= 0 && data.ledgerCount <= 5000 &&
         data.createdAt is timestamp &&
@@ -632,7 +638,10 @@ service cloud.firestore {
           'title',
           'selectedMonth',
           'selectedAccountId',
+          'societies',
           'accounts',
+          'sapOpenItems',
+          'sapBalanceRows',
           'statementItems',
           'ledgerItems',
           'matches',

@@ -237,23 +237,94 @@ export interface EffectivePermissions {
   previewEmail: string | null;
 }
 
-export type BankTab = 'resumen' | 'cruce' | 'pendientes' | 'cuentas' | 'carga';
+export type BankTab = 'resumen' | 'pendientes' | 'cuentas' | 'carga' | 'cruce';
 
 export type BankCurrency = 'USD' | 'COP' | 'GTQ' | 'MXN' | 'EUR';
 
-export type BankAccountType = 'Corriente' | 'Ahorros' | 'Recaudadora';
+export type BankAccountType =
+  | 'Corriente'
+  | 'Ahorros'
+  | 'Recaudadora'
+  | 'Fondo de Inversión'
+  | 'Fiduciaria';
+
+export type SapDocumentClass = 'CB' | 'DZ' | 'AB' | 'KZ' | 'KR' | 'DC' | string;
+
+export type SapSubaccountType = '00' | '01' | '02';
+
+export interface BankSociety {
+  id: string;
+  codigoSociedad: string;
+  nombre: string;
+  pais: string;
+  moneda: BankCurrency;
+  nit?: string;
+  activa?: boolean;
+}
+
+export interface BankMonthlyBalance {
+  saldoLibros: number;
+  saldoExtracto: number;
+  /** Saldos de las 3 subcuentas contables SAP (00 principal / 01 ingresos pend. / 02 egresos pend.) */
+  saldoCuenta00?: number;
+  saldoCuenta01?: number;
+  saldoCuenta02?: number;
+  /** true cuando el usuario ajustó manualmente el Saldo Extracto respecto a Cta 00 */
+  saldoExtractoManual?: boolean;
+  fechaCorte?: string; // YYYY-MM-DD
+  fuenteLibros?: string;
+  fuenteExtracto?: string;
+  updatedAtIso?: string;
+}
 
 export interface BankAccount {
   id: string;
   banco: string;
   numeroCuenta: string;
   sociedad: string;
+  /** Código de sociedad SAP (ej. 1000, 2000, 3000) */
+  codigoSociedad?: string;
   pais: string;
   moneda: BankCurrency;
   tipoCuenta: BankAccountType;
+  /** Ej. "Fondo de Valores RENTA LIQUIDEZ-1" o nombre del producto bancario */
+  productoCuenta?: string;
+  /** NIT o Código de Cuenta Contable mostrado en la cabecera oficial (ej. 8001502800) */
+  codigoContable?: string;
+  /** Raíz contable SAP (cuenta mayor sin los últimos 2 dígitos 00/01/02) */
+  raizContable?: string;
+  /** Subcuenta SAP terminación 00 (saldo banco principal) */
+  cuentaMayor00?: string;
+  /** Subcuenta SAP terminación 01 (ingresos pendientes por conciliar) */
+  cuentaMayor01?: string;
+  /** Subcuenta SAP terminación 02 (egresos pendientes por liquidar) */
+  cuentaMayor02?: string;
+  /** Saldos SAP activos de las 3 subcuentas */
+  saldoCuenta00?: number;
+  saldoCuenta01?: number;
+  saldoCuenta02?: number;
+  saldoExtractoManual?: boolean;
+  /** Última fecha de corte YYYY-MM-DD */
+  fechaCorte?: string;
   saldoInicialLibros: number;
   saldoFinalExtracto: number;
   saldoFinalLibros: number;
+  /** Saldos mensuales cargados independientemente desde Balance Contable y Saldos de Banco */
+  saldosPorMes?: Record<string, BankMonthlyBalance>;
+}
+
+export interface SapBalanceRow {
+  id: string;
+  sociedadCodigo: string;
+  sociedadNombre: string;
+  cuentaMayor: string;
+  raizContable: string;
+  subcuentaTipo: SapSubaccountType;
+  denominacion: string;
+  nuevoSaldo: number;
+  moneda: BankCurrency;
+  mes: string;
+  fechaCorte?: string;
 }
 
 export type BankPendingCategory =
@@ -263,18 +334,70 @@ export type BankPendingCategory =
   | 'nota_credito'
   | 'por_identificar';
 
+/** Las 4 secciones exactas del formato corporativo Premex de Conciliación de Bancos */
+export type BankReconcilingSection =
+  | 'mas_notas_debito_libros'
+  | 'menos_notas_credito_libros'
+  | 'menos_cheques_pendientes'
+  | 'mas_consignaciones_pendientes';
+
+export interface SapOpenItem {
+  id: string;
+  cuentaId: string;
+  sociedadCodigo: string;
+  sociedadNombre: string;
+  cuentaMayor: string;
+  raizContable: string;
+  subcuentaTipo: SapSubaccountType;
+  claveRef1: string;
+  /** Clave referencia 3 (tercero / quien pagó) */
+  claveRef3: string;
+  referencia: string;
+  numeroDocumento: string;
+  claseDocumento: SapDocumentClass;
+  fechaDocumento: string;
+  fechaContabilizacion: string;
+  /** Importe con signo en moneda local (negativo o positivo según FBL3N) */
+  importeMonedaLocal: number;
+  monedaLocal: BankCurrency;
+  texto: string;
+  mes: string;
+  /** Sección determinada automáticamente por clase de documento + signo */
+  seccionAuto: BankReconcilingSection;
+  /** Reclasificación manual opcional */
+  seccionManual?: BankReconcilingSection;
+  comentario?: string;
+  origen?: 'sap_fbl3n' | 'manual';
+}
+
+export interface OfficialReconcilingLineItem {
+  id: string;
+  source: 'sap' | 'bank' | 'ledger';
+  section: BankReconcilingSection;
+  dto: string;
+  fecha: string;
+  concepto: string;
+  valor: number;
+  signedImporte?: number;
+  tercero?: string;
+  claseDocumento?: SapDocumentClass;
+  subcuentaTipo?: SapSubaccountType;
+  comentario?: string;
+}
+
 export interface BankStatementItem {
   id: string;
   cuentaId: string;
   fecha: string;
   referencia: string;
   descripcion: string;
-  /** En extracto bancario: CREDITO = abono/entrada de dinero (+), DEBITO = cargo/salida de dinero (-) */
+  /** En extracto bancario: CREDITO = abono/entrada (+) [MAS Nota Débito no Contabilizada en Libros], DEBITO = cargo/salida (-) [MENOS Nota Crédito no Contabilizada en Libros] */
   tipo: 'CREDITO' | 'DEBITO';
   valor: number;
   mes: string;
   categoriaPendiente?: BankPendingCategory;
   comentario?: string;
+  origenCarga?: 'conciliacion_directa' | 'extracto_completo';
 }
 
 export interface BookLedgerItem {
@@ -284,12 +407,13 @@ export interface BookLedgerItem {
   comprobante: string;
   tercero: string;
   descripcion: string;
-  /** En auxiliar contable de bancos: DEBITO = entrada a bancos (+), CREDITO = salida de bancos (-) */
+  /** En auxiliar contable de bancos: DEBITO = entrada a bancos (+) [MAS Consignaciones Pendientes en Extracto], CREDITO = salida de bancos (-) [MENOS Cheques Pendientes en Extracto] */
   tipo: 'DEBITO' | 'CREDITO';
   valor: number;
   mes: string;
   categoriaPendiente?: BankPendingCategory;
   comentario?: string;
+  origenCarga?: 'conciliacion_directa' | 'extracto_completo';
 }
 
 export type BankMatchMethod = 'automatico_ref' | 'automatico_valor' | 'manual';
@@ -307,12 +431,28 @@ export interface BankMatchGroup {
 
 export interface BankReconciliationSummary {
   account: BankAccount | null;
+  fechaCorte: string;
   saldoExtracto: number;
+  /** Subcuentas SAP 00 / 01 / 02 resueltas para el periodo */
+  saldoCuenta00: number;
+  saldoCuenta01: number;
+  saldoCuenta02: number;
+  hasSapSubaccounts: boolean;
+  saldoExtractoMatchesCta00: boolean;
+  /** Auditoría Subcuentas SAP (00/01/02) vs Extracto y Partidas Abiertas FBL3N */
+  sumSapItems01: number;
+  sumSapItems02: number;
+  diffSubcuenta00: number;
+  diffSubcuenta01: number;
+  diffSubcuenta02: number;
+  sapItemsCount: number;
   depositosEnTransito: number;
   chequesEnTransito: number;
   saldoConciliadoExtracto: number;
   saldoLibros: number;
+  /** Adiciones a Libros (+): en el formato oficial "MAS · NOTAS DEBITO NO CONTABILIZADAS" (ej. rendimientos) */
   notasCreditoNoContabilizadas: number;
+  /** Deducciones a Libros (-): en el formato oficial "MENOS · NOTAS CREDITO NO CONTABILIZADAS" (ej. comisiones, GMF) */
   notasDebitoNoContabilizadas: number;
   saldoConciliadoLibros: number;
   diferenciaNeta: number;
@@ -325,6 +465,20 @@ export interface BankReconciliationSummary {
   reconciledPct: number;
   unmatchedBankItems: BankStatementItem[];
   unmatchedLedgerItems: BookLedgerItem[];
+  /** Partidas SAP abiertas filtradas para la cuenta/periodo */
+  scopedSapItems: SapOpenItem[];
+  /** Partidas detalladas unificadas (SAP FBL3N + Cruce Bilateral) para las 4 secciones del formato oficial */
+  officialLines: {
+    masNotasDebito: OfficialReconcilingLineItem[];
+    menosNotasCredito: OfficialReconcilingLineItem[];
+    menosCheques: OfficialReconcilingLineItem[];
+    masConsignaciones: OfficialReconcilingLineItem[];
+  };
+  /** Partidas detalladas legacy (Cruce Bilateral) */
+  notasDebitoLibrosItems: BankStatementItem[];
+  notasCreditoLibrosItems: BankStatementItem[];
+  chequesPendientesItems: BookLedgerItem[];
+  consignacionesPendientesItems: BookLedgerItem[];
   matchedBankIds: Set<string>;
   matchedLedgerIds: Set<string>;
 }
@@ -333,7 +487,7 @@ export interface BankReconciliationSummary {
 // Liquidación de Viáticos Types
 // ============================================================================
 
-export type ViaticosTab = 'liquidador' | 'cerradas' | 'historial';
+export type ViaticosTab = 'liquidador' | 'cerradas' | 'contabilidad' | 'historial';
 
 export type ViaticoCurrency =
   | 'Quetzales'
@@ -362,6 +516,7 @@ export interface ViaticoConsultor {
   email: string;
   empresa: string;
   cargo?: string;
+  centroCosto?: string;
   monedaBase: ViaticoCurrency;
   activo: boolean;
 }
@@ -405,6 +560,7 @@ export interface ViaticoLiquidation {
   consultorNombre: string;
   consultorEmail: string;
   empresa: string;
+  centroCosto?: string;
   monedaBase: ViaticoCurrency;
   estado: ViaticoLiquidationStatus;
   items: ViaticoExpenseItem[];
@@ -419,6 +575,24 @@ export interface ViaticoLiquidation {
   sentAtIso?: string;
   sentToEmail?: string;
   notas?: string;
+}
+
+export interface ViaticoOdooCategoryAccount {
+  accountCode: string;
+  accountName: string;
+}
+
+export interface ViaticoOdooConfig {
+  diarioNombre: string;
+  diarioCodigo: string;
+  prefijoReferencia: string;
+  cuentaIvaCodigo: string;
+  cuentaIvaNombre: string;
+  etiquetaImpuesto: string;
+  cuentaContrapartidaCodigo: string;
+  cuentaContrapartidaNombre: string;
+  criterioFechaContable: 'fecha_cierre' | 'fecha_factura' | 'fecha_hoy';
+  cuentasPorCategoria: Record<ViaticoCategory, ViaticoOdooCategoryAccount>;
 }
 
 export interface ViaticosWorkspaceData {

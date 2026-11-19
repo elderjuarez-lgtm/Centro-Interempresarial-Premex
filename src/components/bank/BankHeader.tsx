@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Menu,
   Calendar,
@@ -9,6 +9,7 @@ import {
   LogOut,
   Loader2,
   ChevronRight,
+  Printer,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { ActiveModuleId, BankAccount, BankTab, EffectivePermissions } from '../../types';
@@ -23,6 +24,7 @@ interface BankHeaderProps {
   selectedMonth: string;
   setSelectedMonth: (month: string) => void;
   availableMonths: string[];
+  onOpenPrintPreview: () => void;
   onExportExcel: () => void;
   onSaveCloud: () => void;
   isSavingCloud: boolean;
@@ -35,11 +37,11 @@ interface BankHeaderProps {
 }
 
 const BANK_TAB_LABEL: Record<BankTab, string> = {
-  resumen: 'Resumen y Cuadre Bancario',
-  cruce: 'Mesa de Cruce Extracto vs Libros',
-  pendientes: 'Partidas Pendientes y Ajustes',
-  cuentas: 'Catálogo de Cuentas Bancarias',
-  carga: 'Carga de Extracto y Auxiliar',
+  resumen: 'Centro de Cuadre · Conciliación de Bancos',
+  pendientes: 'Partidas Abiertas SAP (FBL3N)',
+  cuentas: 'Maestro de Sociedades y Cuentas Bancarias',
+  carga: 'Carga Masiva SAP (Catálogo, Balance 00/01/02 y FBL3N)',
+  cruce: 'Cruce Bilateral Extracto vs Auxiliar',
 };
 
 export const BankHeader: React.FC<BankHeaderProps> = ({
@@ -51,6 +53,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
   selectedMonth,
   setSelectedMonth,
   availableMonths,
+  onOpenPrintPreview,
   onExportExcel,
   onSaveCloud,
   isSavingCloud,
@@ -61,8 +64,20 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
   onSwitchModule,
   permissions,
 }) => {
+  const accountsByCompany = useMemo(() => {
+    const map = new Map<string, BankAccount[]>();
+    accounts.forEach((acc) => {
+      const codePrefix = acc.codigoSociedad ? `${acc.codigoSociedad} · ` : '';
+      const key = `${codePrefix}${(acc.sociedad || 'Sin Sociedad').trim()}`;
+      const list = map.get(key) || [];
+      list.push(acc);
+      map.set(key, list);
+    });
+    return Array.from(map.entries());
+  }, [accounts]);
+
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90">
+    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 print:hidden">
       <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3">
         {/* Left: Mobile menu + Breadcrumb + Page title */}
         <div className="flex items-center gap-3 min-w-0">
@@ -85,7 +100,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
                 Premex
               </button>
               <ChevronRight className="w-3 h-3 text-slate-400" />
-              <span className="text-[#19377B]">Conciliación Bancaria</span>
+              <span className="text-[#19377B]">Tesorería SAP 00/01/02</span>
               {!permissions.isAdmin && (
                 <>
                   <span className="text-slate-300">·</span>
@@ -101,21 +116,25 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
           </div>
         </div>
 
-        {/* Right: Account selector, Period selector, Primary actions, Google Auth */}
+        {/* Right: Account selector grouped by society, Period selector, Print/PDF, Excel, Save, Auth */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Account selector */}
+          {/* Account selector grouped by Society */}
           <div className="hidden md:flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs">
             <Landmark className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
             <select
               aria-label="Seleccionar cuenta bancaria"
               value={selectedAccountId}
               onChange={(e) => onSelectAccountId(e.target.value)}
-              className="bg-transparent font-semibold text-slate-800 focus:outline-hidden cursor-pointer max-w-[200px] truncate"
+              className="bg-transparent font-semibold text-slate-800 focus:outline-hidden cursor-pointer max-w-[230px] truncate"
             >
-              {accounts.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.banco} ({acc.moneda}) · {acc.numeroCuenta}
-                </option>
+              {accountsByCompany.map(([socLabel, accList]) => (
+                <optgroup key={socLabel} label={socLabel}>
+                  {accList.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.banco} ({acc.moneda}) · {acc.numeroCuenta}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </div>
@@ -138,15 +157,28 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
             </select>
           </div>
 
-          {/* Export Excel */}
+          {/* Print / PDF Official Sheet */}
+          <button
+            type="button"
+            onClick={onOpenPrintPreview}
+            disabled={!selectedAccountId}
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            title="Vista de impresión horizontal y descarga PDF del entregable oficial"
+          >
+            <Printer className="w-3.5 h-3.5 text-[#132B63]" />
+            <span className="hidden xl:inline">Imprimir / PDF</span>
+          </button>
+
+          {/* Export Official Deliverable Excel */}
           <button
             type="button"
             onClick={onExportExcel}
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="Descargar cuadre bancario y anexos en Excel"
+            disabled={!selectedAccountId}
+            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            title="Descargar libro entregable Excel con fórmulas vivas y 5 hojas SAP"
           >
             <Download className="w-3.5 h-3.5 text-teal-700" />
-            <span className="hidden xl:inline">Exportar Excel</span>
+            <span className="hidden xl:inline">Excel Entregable</span>
             <span className="xl:hidden">Excel</span>
           </button>
 
@@ -163,7 +195,13 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
               ) : (
                 <Save className="w-3.5 h-3.5" />
               )}
-              <span>{isSavingCloud ? 'Guardando...' : hasUnsavedChanges ? 'Guardar cambios' : 'Guardar Nube'}</span>
+              <span>
+                {isSavingCloud
+                  ? 'Guardando...'
+                  : hasUnsavedChanges
+                  ? 'Guardar cambios'
+                  : 'Guardar Nube'}
+              </span>
             </button>
           )}
 
@@ -224,10 +262,14 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
           onChange={(e) => onSelectAccountId(e.target.value)}
           className="w-full text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-hidden"
         >
-          {accounts.map((acc) => (
-            <option key={acc.id} value={acc.id}>
-              {acc.banco} ({acc.moneda}) · {acc.numeroCuenta}
-            </option>
+          {accountsByCompany.map(([socLabel, accList]) => (
+            <optgroup key={socLabel} label={socLabel}>
+              {accList.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.banco} ({acc.moneda}) · {acc.numeroCuenta}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </div>

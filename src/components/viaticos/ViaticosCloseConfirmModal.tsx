@@ -10,6 +10,7 @@ import {
   Plus,
   Loader2,
   AlertTriangle,
+  Printer,
 } from 'lucide-react';
 import { ViaticoLiquidation } from '../../types';
 import { StoredReceiptMedia } from '../../services/viaticosMediaStore';
@@ -21,6 +22,7 @@ interface ViaticosCloseConfirmModalProps {
   liquidation: ViaticoLiquidation | null;
   mediaMap: Record<string, StoredReceiptMedia>;
   onConfirmClose: (liqId: string) => Promise<void>;
+  onPreviewPlanillaPdf: (liq: ViaticoLiquidation) => void;
   onDownloadExcel: (liq: ViaticoLiquidation) => Promise<void>;
   onDownloadPdf: (liq: ViaticoLiquidation) => Promise<void>;
   onOpenEmailModal: (liqId: string) => void;
@@ -34,6 +36,7 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
   liquidation,
   mediaMap,
   onConfirmClose,
+  onPreviewPlanillaPdf,
   onDownloadExcel,
   onDownloadPdf,
   onOpenEmailModal,
@@ -275,13 +278,25 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
                 </div>
               </div>
 
-              {/* Direct Download Actions */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Direct Download & Print Actions */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onPreviewPlanillaPdf(liquidation);
+                  }}
+                  className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 text-xs font-bold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Printer className="w-4 h-4 text-[#1E60A8]" />
+                  <span>Vista PDF / Imprimir</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={handleExcelClick}
                   disabled={isDownloadingExcel}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
                 >
                   {isDownloadingExcel ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -289,7 +304,7 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
                     <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
                   )}
                   <span>
-                    {isDownloadingExcel ? 'Generando Excel...' : 'Descargar Excel (.xlsx)'}
+                    {isDownloadingExcel ? 'Generando...' : 'Excel (.xlsx)'}
                   </span>
                 </button>
 
@@ -297,7 +312,7 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
                   type="button"
                   onClick={handlePdfClick}
                   disabled={isDownloadingPdf}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-xl transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 text-xs font-bold text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-xl transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
                 >
                   {isDownloadingPdf ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -305,7 +320,7 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
                     <FileText className="w-4 h-4 text-rose-700" />
                   )}
                   <span>
-                    {isDownloadingPdf ? 'Compilando PDF...' : 'Descargar PDF Comprobantes'}
+                    {isDownloadingPdf ? 'Compilando...' : 'PDF Comprobantes'}
                   </span>
                 </button>
               </div>

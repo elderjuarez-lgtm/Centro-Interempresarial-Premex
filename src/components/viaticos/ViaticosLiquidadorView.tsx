@@ -22,6 +22,7 @@ import {
   Archive,
   Calendar,
   Coins,
+  Printer,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -73,12 +74,15 @@ interface ViaticosLiquidadorViewProps {
     consultorNombre?: string;
     consultorEmail?: string;
     empresa?: string;
+    centroCosto?: string;
     monedaBase?: ViaticoCurrency;
   }) => void;
+  resolvedCostCenter: string;
   onAddOrUpdateItem: (item: ViaticoExpenseItem, isEdit: boolean) => void;
   onDeleteItem: (itemId: string) => void;
   onOpenCloseConfirmModal: () => void;
   onOpenCloseEmailModal: () => void;
+  onOpenPlanillaPdfPreview: () => void;
   onQuickDownloadExcel: () => void;
   onQuickDownloadPdf: () => void;
   isDownloadingExcel: boolean;
@@ -167,10 +171,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   onSelectLiquidation,
   onCreateNewLiquidation,
   onUpdateHeader,
+  resolvedCostCenter,
   onAddOrUpdateItem,
   onDeleteItem,
   onOpenCloseConfirmModal,
   onOpenCloseEmailModal,
+  onOpenPlanillaPdfPreview,
   onQuickDownloadExcel,
   onQuickDownloadPdf,
   isDownloadingExcel,
@@ -1099,6 +1105,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       consultorNombre: chosen.nombreCompleto,
                       consultorEmail: chosen.email,
                       empresa: chosen.empresa,
+                      centroCosto: chosen.centroCosto || '',
                       monedaBase: chosen.monedaBase,
                     });
                   }}
@@ -1126,7 +1133,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             </div>
           </div>
 
-          {/* Right: Premex Corporate Branding + Tagline + Empresa */}
+          {/* Right: Premex Corporate Branding + Tagline + Empresa + Centro de Costo */}
           <div className="lg:col-span-5 flex flex-col sm:flex-row lg:flex-col xl:flex-row items-start sm:items-center lg:items-end xl:items-center justify-end gap-4 pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-100">
             <div className="flex items-center gap-3">
               <PremexBrandLogo className="h-14 w-auto shrink-0" />
@@ -1162,6 +1169,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               )}
               <div className="text-[11px] text-slate-500 font-mono mt-0.5">
                 {liquidation.consultorEmail || 'Sin correo'}
+              </div>
+              <div className="text-[11px] font-semibold text-[#132B63] mt-0.5">
+                C.C.:{' '}
+                <span className={resolvedCostCenter ? '' : 'text-amber-700 font-normal italic'}>
+                  {resolvedCostCenter || 'Sin asignar'}
+                </span>
               </div>
             </div>
           </div>
@@ -1205,6 +1218,15 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
+              onClick={onOpenPlanillaPdfPreview}
+              disabled={liquidation.items.length === 0}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              <Printer className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span>Vista PDF / Imprimir</span>
+            </button>
+            <button
+              type="button"
               onClick={onQuickDownloadExcel}
               disabled={liquidation.items.length === 0 || isDownloadingExcel}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 bg-white hover:bg-emerald-50 border border-slate-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
@@ -1227,7 +1249,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               ) : (
                 <FileText className="w-3.5 h-3.5 text-rose-700" />
               )}
-              <span>PDF</span>
+              <span>PDF Comprobantes</span>
             </button>
             <button
               type="button"
@@ -1964,6 +1986,17 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={onOpenPlanillaPdfPreview}
+              disabled={liquidation.items.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-sky-50/70 hover:bg-sky-100 border border-sky-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              title="Visualizar e imprimir la planilla oficial en formato PDF horizontal"
+            >
+              <Printer className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span>Vista PDF / Imprimir</span>
+            </button>
+
+            <button
+              type="button"
               onClick={onQuickDownloadExcel}
               disabled={liquidation.items.length === 0 || isDownloadingExcel}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
@@ -1987,7 +2020,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               ) : (
                 <FileText className="w-3.5 h-3.5 text-rose-700" />
               )}
-              <span>Descargar PDF</span>
+              <span>PDF Comprobantes</span>
             </button>
 
             {!isLocked && liquidation.estado === 'borrador' && permissions.canOperate && (

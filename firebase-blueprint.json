@@ -250,17 +250,29 @@
           "description": "Selected corporate bank account ID",
           "maxLength": 128
         },
+        "societies": {
+          "type": "array",
+          "description": "Catalog of SAP corporate societies (codigoSociedad, nombre, pais, moneda, nit) configured for bank treasury reconciliations"
+        },
         "accounts": {
           "type": "array",
-          "description": "List of corporate bank accounts"
+          "description": "List of corporate bank accounts including SAP 00/01/02 GL accounts (cuentaMayor00/01/02, raizContable, saldoCuenta00/01/02), product description (productoCuenta), accounting/NIT code (codigoContable), cutoff date, and per-month accounting vs bank balances (saldosPorMes)"
+        },
+        "sapOpenItems": {
+          "type": "array",
+          "description": "SAP FBL3N open items (doc class CB/DZ/AB/KZ/KR/DC, subaccount 00/01/02, signed local amount, automatic and manual deliverable classification)"
+        },
+        "sapBalanceRows": {
+          "type": "array",
+          "description": "Raw SAP balance trial rows loaded for subaccounts 00, 01, and 02 grouped by society and accounting root"
         },
         "statementItems": {
           "type": "array",
-          "description": "Bank statement movements (Extracto Bancario)"
+          "description": "Bank statement movements and direct reconciling items affecting Accounting Books (MAS Notas Débito no Contabilizadas / MENOS Notas Crédito no Contabilizadas)"
         },
         "ledgerItems": {
           "type": "array",
-          "description": "Accounting bank ledger entries (Auxiliar Contable)"
+          "description": "Accounting bank ledger entries and direct reconciling items affecting Bank Statement (MENOS Cheques Pendientes / MAS Consignaciones Pendientes)"
         },
         "matches": {
           "type": "array",
@@ -486,11 +498,11 @@
         },
         "consultores": {
           "type": "array",
-          "description": "Bounded catalog of corporate consultants eligible for travel settlements"
+          "description": "Bounded catalog of corporate consultants eligible for travel settlements including assigned cost center (centroCosto)"
         },
         "liquidaciones": {
           "type": "array",
-          "description": "Bounded list of weekly travel expense settlements and line items"
+          "description": "Bounded list of weekly travel expense settlements, cost center snapshots, and line items"
         },
         "consultoresCount": {
           "type": "integer",

@@ -3,6 +3,7 @@ import {
   FileText,
   FolderClock,
   Archive,
+  Calculator,
   ChevronRight,
   X,
   ArrowLeft,
@@ -22,6 +23,7 @@ interface ViaticosSidebarProps {
   permissions: EffectivePermissions;
   openLiquidacionesCount: number;
   closedLiquidacionesCount: number;
+  accountingLiquidacionesCount: number;
   liquidacionesCount: number;
   consultorScopeLabel: string;
 }
@@ -35,6 +37,7 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
   permissions,
   openLiquidacionesCount,
   closedLiquidacionesCount,
+  accountingLiquidacionesCount,
   liquidacionesCount,
   consultorScopeLabel,
 }) => {
@@ -58,6 +61,13 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
       description: 'Consulta, Excel y PDF cerrados',
       icon: Archive,
       counter: String(closedLiquidacionesCount),
+    },
+    {
+      id: 'contabilidad',
+      label: 'Contabilidad',
+      description: 'Consolidado Odoo · Centros de costo',
+      icon: Calculator,
+      counter: String(accountingLiquidacionesCount),
     },
     {
       id: 'historial',

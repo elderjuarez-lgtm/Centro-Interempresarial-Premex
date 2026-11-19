@@ -1,173 +1,301 @@
 import React, { useState, useRef } from 'react';
 import {
   UploadCloud,
-  Download,
   FileSpreadsheet,
+  Download,
   CheckCircle2,
   AlertTriangle,
-  ArrowRight,
-  Lock,
+  Building2,
+  Layers,
+  ListChecks,
+  ArrowLeftRight,
+  Loader2,
+  X,
 } from 'lucide-react';
-import { BankAccount, BankStatementItem, BookLedgerItem } from '../../types';
 import {
-  downloadBankExcelTemplate,
-  parseBankExcelFile,
+  BankAccount,
+  BankSociety,
+  BankStatementItem,
+  BookLedgerItem,
+  EffectivePermissions,
+} from '../../types';
+import {
   ParsedBankImportResult,
+  ParsedSapBalanceResult,
+  ParsedSapCatalogResult,
+  ParsedSapFbl3nResult,
+  downloadBankExcelTemplate,
+  downloadSapBalanceTemplate,
+  downloadSapCatalogTemplate,
+  downloadSapFbl3nTemplate,
+  parseBankExcelFile,
+  parseSapBalance000102File,
+  parseSapCatalogFile,
+  parseSapFbl3nOpenItemsFile,
 } from '../../utils/bankExcel';
-import { formatBankMoney } from '../../utils/bankReconciliation';
+import {
+  RECONCILING_SECTION_META,
+  formatBankMoney,
+  formatSheetDate,
+  getSapDocumentClassLabel,
+} from '../../utils/bankReconciliation';
+
+type UploadTab = 'balance' | 'fbl3n' | 'catalogo' | 'bilateral';
 
 interface BankCargaViewProps {
+  societies: BankSociety[];
+  accounts: BankAccount[];
   selectedAccount: BankAccount | null;
   selectedMonth: string;
-  onConfirmImport: (payload: {
+  permissions: EffectivePermissions;
+  isReadOnly?: boolean;
+  onApplySapCatalogImport: (result: ParsedSapCatalogResult) => void;
+  onApplySapBalanceImport: (result: ParsedSapBalanceResult) => void;
+  onApplySapFbl3nImport: (result: ParsedSapFbl3nResult, mode: 'replace' | 'append') => void;
+  onConfirmBilateralImport: (payload: {
     statementItems: BankStatementItem[];
     ledgerItems: BookLedgerItem[];
     mode: 'replace' | 'append';
   }) => void;
-  isReadOnly?: boolean;
 }
 
 export const BankCargaView: React.FC<BankCargaViewProps> = ({
+  societies,
+  accounts,
   selectedAccount,
   selectedMonth,
-  onConfirmImport,
+  permissions,
   isReadOnly = false,
+  onApplySapCatalogImport,
+  onApplySapBalanceImport,
+  onApplySapFbl3nImport,
+  onConfirmBilateralImport,
 }) => {
-  const [importTarget, setImportTarget] = useState<'auto' | 'extracto' | 'libros'>('auto');
-  const [importMonth, setImportMonth] = useState(
-    selectedMonth === 'ALL' ? 'Septiembre 2026' : selectedMonth
-  );
-  const [preview, setPreview] = useState<ParsedBankImportResult | null>(null);
-  const [fileName, setFileName] = useState<string>('');
+  const [activeMode, setActiveMode] = useState<UploadTab>('balance');
+  const [isParsing, setIsParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [loadedFileName, setLoadedFileName] = useState<string | null>(null);
+  const [importMergeMode, setImportMergeMode] = useState<'replace' | 'append'>('replace');
 
-  const currency = selectedAccount?.moneda || 'USD';
+  const [catalogPreview, setCatalogPreview] = useState<ParsedSapCatalogResult | null>(null);
+  const [balancePreview, setBalancePreview] = useState<ParsedSapBalanceResult | null>(null);
+  const [fbl3nPreview, setFbl3nPreview] = useState<ParsedSapFbl3nResult | null>(null);
+  const [bilateralPreview, setBilateralPreview] = useState<ParsedBankImportResult | null>(null);
+  const [excludedCompaniesWarning, setExcludedCompaniesWarning] = useState<string[]>([]);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const effectiveMonth = selectedMonth === 'ALL' ? 'Octubre 2026' : selectedMonth;
+
+  const clearPreviews = () => {
+    setCatalogPreview(null);
+    setBalancePreview(null);
+    setFbl3nPreview(null);
+    setBilateralPreview(null);
+    setParseError(null);
+    setLoadedFileName(null);
+    setExcludedCompaniesWarning([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleModeChange = (mode: UploadTab) => {
+    setActiveMode(mode);
+    clearPreviews();
+  };
+
+  const isCompanyAuthorized = (nameOrCode: string): boolean => {
+    if (permissions.getModuleCompanyScope('bancos') !== 'selected') return true;
+    return permissions.isCompanyAllowed(nameOrCode, 'bancos');
+  };
+
+  const handleFilePicked = async (file: File) => {
+    setIsParsing(true);
+    setParseError(null);
+    setExcludedCompaniesWarning([]);
+    setLoadedFileName(file.name);
+
+    try {
+      const blocked = new Set<string>();
+
+      if (activeMode === 'catalogo') {
+        const res = await parseSapCatalogFile(file, societies, accounts);
+        const allowedSocieties = res.societies.filter((s) => {
+          const ok = isCompanyAuthorized(s.nombre) || isCompanyAuthorized(s.codigoSociedad);
+          if (!ok) blocked.add(s.nombre);
+          return ok;
+        });
+        const allowedAccounts = res.accounts.filter((a) => {
+          const ok = isCompanyAuthorized(a.sociedadNombre) || isCompanyAuthorized(a.codigoSociedad);
+          if (!ok) blocked.add(a.sociedadNombre);
+          return ok;
+        });
+        setCatalogPreview({ ...res, societies: allowedSocieties, accounts: allowedAccounts });
+      } else if (activeMode === 'balance') {
+        const res = await parseSapBalance000102File(file, effectiveMonth, societies, accounts);
+        const allowedGroups = res.groups.filter((g) => {
+          const ok = isCompanyAuthorized(g.sociedadNombre) || isCompanyAuthorized(g.sociedadCodigo);
+          if (!ok) blocked.add(g.sociedadNombre);
+          return ok;
+        });
+        const allowedKeys = new Set(allowedGroups.map((g) => g.sociedadCodigo.toUpperCase()));
+        const allowedRawRows = res.rawRows.filter((r) =>
+          allowedKeys.has(r.sociedadCodigo.toUpperCase())
+        );
+        setBalancePreview({ ...res, groups: allowedGroups, rawRows: allowedRawRows });
+      } else if (activeMode === 'fbl3n') {
+        const res = await parseSapFbl3nOpenItemsFile(
+          file,
+          effectiveMonth,
+          societies,
+          accounts,
+          selectedAccount
+        );
+        const allowedItems = res.items.filter((i) => {
+          const ok = isCompanyAuthorized(i.sociedadNombre) || isCompanyAuthorized(i.sociedadCodigo);
+          if (!ok) blocked.add(i.sociedadNombre);
+          return ok;
+        });
+        setFbl3nPreview({ ...res, items: allowedItems });
+      } else {
+        if (!selectedAccount) {
+          throw new Error('Selecciona una cuenta bancaria en la barra superior antes de importar.');
+        }
+        const res = await parseBankExcelFile(file, selectedAccount.id, effectiveMonth, 'auto');
+        setBilateralPreview(res);
+      }
+
+      if (blocked.size > 0) {
+        setExcludedCompaniesWarning(Array.from(blocked));
+      }
+    } catch (err: unknown) {
+      setParseError(
+        err instanceof Error ? err.message : 'No se pudo procesar el archivo seleccionado.'
+      );
+    } finally {
+      setIsParsing(false);
+    }
+  };
 
   if (isReadOnly) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200/90 p-10 text-center max-w-2xl mx-auto">
-        <Lock className="w-9 h-9 text-amber-600 mx-auto mb-3" />
-        <h3 className="text-base font-bold text-slate-900">
-          Carga de archivos restringida (Solo Consulta)
-        </h3>
-        <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-          Tu perfil tiene permisos únicamente de consulta y exportación. La importación de
-          extractos bancarios y auxiliares contables está habilitada para los roles Operador y
-          Administrador.
-        </p>
+      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-500">
+        Tu perfil es de solo consulta y no tiene permisos para ejecutar cargas masivas SAP.
       </div>
     );
   }
 
-  const handleFileChange = async (file: File | undefined) => {
-    if (!file || !selectedAccount) return;
-    setParseError(null);
-    setFileName(file.name);
-    try {
-      const result = await parseBankExcelFile(
-        file,
-        selectedAccount.id,
-        importMonth.trim() || 'Septiembre 2026',
-        importTarget
-      );
-      if (result.statementItems.length === 0 && result.ledgerItems.length === 0) {
-        setParseError(
-          'No se detectaron filas válidas con valores numéricos. Verifica las columnas (Fecha, Referencia/Comprobante, Descripción, Tipo o Débito/Crédito, Valor).'
-        );
-        setPreview(null);
-        return;
-      }
-      setPreview(result);
-    } catch (err: any) {
-      setParseError(err?.message || 'Error leyendo el archivo Excel/CSV.');
-      setPreview(null);
-    }
-  };
+  const tabs: {
+    id: UploadTab;
+    title: string;
+    subtitle: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = [
+    {
+      id: 'balance',
+      title: 'Balance SAP (00 / 01 / 02)',
+      subtitle: 'Agrupa por Sociedad + Raíz y precarga Extracto = Cta 00',
+      icon: Layers,
+    },
+    {
+      id: 'fbl3n',
+      title: 'Partidas Abiertas SAP (FBL3N)',
+      subtitle: 'Clasificación automática CB / DZ / AB / KZ / KR / DC',
+      icon: ListChecks,
+    },
+    {
+      id: 'catalogo',
+      title: 'Catálogo Sociedades y Cuentas',
+      subtitle: 'Importación masiva del maestro bancario 00 / 01 / 02',
+      icon: Building2,
+    },
+    {
+      id: 'bilateral',
+      title: 'Extracto y Auxiliar (Opcional)',
+      subtitle: 'Movimientos detallados para Mesa de Cruce Bilateral',
+      icon: ArrowLeftRight,
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      {/* Header & Template Download */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-base font-bold text-slate-900">
-            Carga de Extracto Bancario y Auxiliar Contable
-          </h3>
-          <p className="text-xs text-slate-500 mt-1">
-            Cuenta destino:{' '}
-            <strong className="text-slate-800">
-              {selectedAccount
-                ? `${selectedAccount.banco} · ${selectedAccount.numeroCuenta} (${selectedAccount.moneda})`
-                : 'Sin cuenta'}
-            </strong>
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => downloadBankExcelTemplate(selectedAccount)}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-[#19377B] bg-[#1E60A8]/10 hover:bg-[#1E60A8]/15 rounded-xl transition-colors cursor-pointer shrink-0"
-        >
-          <Download className="w-4 h-4" />
-          <span>Descargar Plantilla Excel (2 Hojas)</span>
-        </button>
-      </div>
-
-      {/* Upload Options & Drop Zone */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 p-6 space-y-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1.5">
-              Tipo de Archivo a Importar
-            </label>
-            <div className="inline-flex bg-slate-100 p-1 rounded-xl border border-slate-200/70 w-full">
-              {(
-                [
-                  { id: 'auto', label: 'Libro 2 Hojas (Auto)' },
-                  { id: 'extracto', label: 'Solo Extracto' },
-                  { id: 'libros', label: 'Solo Libros' },
-                ] as const
-              ).map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setImportTarget(opt.id)}
-                  className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                    importTarget === opt.id
-                      ? 'bg-white text-[#19377B] shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
+    <div className="space-y-5">
+      {/* Mode Selector Cards */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const active = activeMode === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => handleModeChange(tab.id)}
+              className={`text-left rounded-2xl border p-4 transition-all cursor-pointer ${
+                active
+                  ? 'bg-[#132B63] text-white border-[#132B63] shadow-sm'
+                  : 'bg-white text-slate-800 border-slate-200/90 hover:border-[#1E60A8]/60'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                    active ? 'bg-white/15 text-white' : 'bg-[#1E60A8]/10 text-[#1E60A8]'
                   }`}
                 >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div className="text-xs font-bold leading-snug">{tab.title}</div>
+              </div>
+              <p
+                className={`text-[11px] mt-2 leading-relaxed ${
+                  active ? 'text-sky-100/90' : 'text-slate-500'
+                }`}
+              >
+                {tab.subtitle}
+              </p>
+            </button>
+          );
+        })}
+      </section>
+
+      {/* Template Download + Dropzone Card */}
+      <section className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">
+              {tabs.find((t) => t.id === activeMode)?.title}
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Formatos soportados: <span className="font-mono">.xlsx, .xls, .csv</span> · Periodo
+              destino: <strong className="text-slate-800">{effectiveMonth}</strong>
+            </p>
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1.5">
-              Mes / Periodo por Defecto
-            </label>
-            <input
-              type="text"
-              value={importMonth}
-              onChange={(e) => setImportMonth(e.target.value)}
-              placeholder="Ej. Septiembre 2026"
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-hidden focus:border-[#1E60A8]"
-            />
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (activeMode === 'catalogo') downloadSapCatalogTemplate(societies, accounts);
+              else if (activeMode === 'balance')
+                downloadSapBalanceTemplate(accounts, effectiveMonth);
+              else if (activeMode === 'fbl3n') downloadSapFbl3nTemplate(accounts, effectiveMonth);
+              else downloadBankExcelTemplate(selectedAccount);
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#132B63] bg-slate-100 hover:bg-slate-200/80 rounded-xl transition-colors cursor-pointer shrink-0"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Descargar Plantilla Excel</span>
+          </button>
         </div>
 
-        {/* File Drop Zone */}
+        {/* File Dropzone */}
         <div
           onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
+          onDragOver={(e) => {
+            e.preventDefault();
+          }}
           onDrop={(e) => {
             e.preventDefault();
-            const f = e.dataTransfer.files?.[0];
-            void handleFileChange(f);
+            const file = e.dataTransfer.files?.[0];
+            if (file) void handleFilePicked(file);
           }}
-          className="border-2 border-dashed border-slate-300 hover:border-[#1E60A8] rounded-2xl p-8 text-center bg-slate-50/70 hover:bg-[#1E60A8]/4 transition-colors cursor-pointer"
+          className="border-2 border-dashed border-slate-300 hover:border-[#1E60A8] bg-slate-50/70 hover:bg-blue-50/30 rounded-2xl p-8 text-center transition-colors cursor-pointer"
         >
           <input
             ref={fileInputRef}
@@ -175,147 +303,433 @@ export const BankCargaView: React.FC<BankCargaViewProps> = ({
             accept=".xlsx,.xls,.csv"
             className="hidden"
             onChange={(e) => {
-              const f = e.target.files?.[0];
-              void handleFileChange(f);
-              e.target.value = '';
+              const file = e.target.files?.[0];
+              if (file) void handleFilePicked(file);
             }}
           />
-          <UploadCloud className="w-10 h-10 text-[#1E60A8] mx-auto mb-3" />
-          <p className="text-sm font-bold text-slate-800">
-            Haz clic o arrastra tu archivo Excel (.xlsx, .xls) o CSV aquí
-          </p>
-          <p className="text-xs text-slate-500 mt-1">
-            Acepta hojas llamadas &ldquo;Extracto Bancario&rdquo; y &ldquo;Auxiliar Contable&rdquo; o archivos individuales con columnas Débito / Crédito o Tipo / Valor.
-          </p>
+
+          {isParsing ? (
+            <div className="flex flex-col items-center gap-2 text-slate-600">
+              <Loader2 className="w-7 h-7 animate-spin text-[#1E60A8]" />
+              <span className="text-xs font-semibold">Analizando archivo SAP...</span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-11 h-11 rounded-xl bg-[#1E60A8]/10 text-[#1E60A8] flex items-center justify-center">
+                <UploadCloud className="w-5 h-5" />
+              </div>
+              <div className="text-sm font-bold text-slate-900">
+                {loadedFileName
+                  ? `Archivo cargado: ${loadedFileName}`
+                  : 'Arrastra tu archivo SAP aquí o haz clic para seleccionarlo'}
+              </div>
+              <p className="text-xs text-slate-500 max-w-lg">
+                {activeMode === 'balance' &&
+                  'Columnas esperadas: Sociedad, Cta.mayor (terminación 00 / 01 / 02), Denominación cuenta, Nuevo Saldo y opcional Moneda.'}
+                {activeMode === 'fbl3n' &&
+                  'Columnas FBL3N: Sociedad, Cuenta de mayor, Clave referencia 1 y 3 (Tercero), Referencia, Nº documento, Clase de documento, Fecha de documento, Fe.contabilización, Importe en moneda local, Moneda local y Texto.'}
+                {activeMode === 'catalogo' &&
+                  'Hojas esperadas: Sociedades (Codigo_Sociedad, Nombre, Pais, Moneda, NIT) y Cuentas_Bancarias (Banco, Numero_Cuenta, Cuenta_Mayor_00/01/02).'}
+                {activeMode === 'bilateral' &&
+                  `Carga hojas de Extracto y Auxiliar para la cuenta activa (${
+                    selectedAccount?.banco || 'selecciona cuenta arriba'
+                  }).`}
+              </p>
+            </div>
+          )}
         </div>
 
+        {/* Parse Errors & RBAC Warnings */}
         {parseError && (
-          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>{parseError}</span>
           </div>
         )}
 
-        {/* Preview & Confirmation */}
-        {preview && (
-          <div className="border-t border-slate-200 pt-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <FileSpreadsheet className="w-5 h-5 text-emerald-600 shrink-0" />
-                <div>
-                  <div className="text-sm font-bold text-slate-900">{fileName}</div>
-                  <div className="text-xs text-slate-600 tabular-nums">
-                    {preview.statementItems.length} movimientos de Extracto ·{' '}
-                    {preview.ledgerItems.length} registros de Auxiliar Contable
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onConfirmImport({
-                      statementItems: preview.statementItems,
-                      ledgerItems: preview.ledgerItems,
-                      mode: 'append',
-                    });
-                    setPreview(null);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#19377B] bg-[#1E60A8]/10 hover:bg-[#1E60A8]/15 rounded-xl cursor-pointer"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Agregar a registros actuales</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onConfirmImport({
-                      statementItems: preview.statementItems,
-                      ledgerItems: preview.ledgerItems,
-                      mode: 'replace',
-                    });
-                    setPreview(null);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl cursor-pointer"
-                >
-                  <span>Reemplazar cuenta y abrir Cruce</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {preview.warnings.length > 0 && (
-              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
-                {preview.warnings.join(' ')}
-              </div>
-            )}
-
-            {/* Quick sample rows preview */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {preview.statementItems.length > 0 && (
-                <div className="rounded-xl border border-slate-200 overflow-hidden">
-                  <div className="px-3.5 py-2 bg-slate-50 border-b border-slate-200 text-xs font-bold text-[#132B63]">
-                    Vista previa Extracto ({preview.statementItems.length})
-                  </div>
-                  <div className="divide-y divide-slate-100 text-xs">
-                    {preview.statementItems.slice(0, 5).map((item) => (
-                      <div
-                        key={item.id}
-                        className="px-3.5 py-2 flex items-center justify-between gap-3"
-                      >
-                        <div className="min-w-0">
-                          <span className="font-mono font-semibold text-slate-800 mr-2">
-                            {item.referencia}
-                          </span>
-                          <span className="text-slate-600 truncate">{item.descripcion}</span>
-                        </div>
-                        <span className="font-mono font-bold tabular-nums shrink-0">
-                          {formatBankMoney(
-                            item.tipo === 'CREDITO' ? item.valor : -item.valor,
-                            currency,
-                            true
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {preview.ledgerItems.length > 0 && (
-                <div className="rounded-xl border border-slate-200 overflow-hidden">
-                  <div className="px-3.5 py-2 bg-slate-50 border-b border-slate-200 text-xs font-bold text-teal-900">
-                    Vista previa Auxiliar Contable ({preview.ledgerItems.length})
-                  </div>
-                  <div className="divide-y divide-slate-100 text-xs">
-                    {preview.ledgerItems.slice(0, 5).map((item) => (
-                      <div
-                        key={item.id}
-                        className="px-3.5 py-2 flex items-center justify-between gap-3"
-                      >
-                        <div className="min-w-0">
-                          <span className="font-mono font-semibold text-slate-800 mr-2">
-                            {item.comprobante}
-                          </span>
-                          <span className="text-slate-600 truncate">{item.tercero}</span>
-                        </div>
-                        <span className="font-mono font-bold tabular-nums shrink-0">
-                          {formatBankMoney(
-                            item.tipo === 'DEBITO' ? item.valor : -item.valor,
-                            currency,
-                            true
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+        {excludedCompaniesWarning.length > 0 && (
+          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              Por permisos de sociedad en el módulo Bancos se omitieron registros de:{' '}
+              <strong>{excludedCompaniesWarning.join(', ')}</strong>.
+            </span>
           </div>
         )}
-      </div>
+      </section>
+
+      {/* ==================== PREVIEW 1: BALANCE SAP 00/01/02 ==================== */}
+      {activeMode === 'balance' && balancePreview && (
+        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4 text-[#1E60A8]" />
+                <span>
+                  Vista Previa Balance SAP · {balancePreview.groups.length} banco(s) agrupados (
+                  {balancePreview.rawRows.length} filas)
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Saldo en Libros = Cta 00 + Cta 01 + Cta 02 · Saldo en Extracto se precarga con Cta
+                00.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={clearPreviews}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-lg cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Descartar</span>
+              </button>
+              <button
+                type="button"
+                disabled={balancePreview.groups.length === 0}
+                onClick={() => onApplySapBalanceImport(balancePreview)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl transition-colors cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Aplicar Balance SAP ({balancePreview.groups.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {balancePreview.warnings.length > 0 && (
+            <div className="px-5 py-2.5 bg-amber-50 border-b border-amber-200 text-xs text-amber-900 space-y-1">
+              {balancePreview.warnings.slice(0, 5).map((w, i) => (
+                <div key={i}>• {w}</div>
+              ))}
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-3">Sociedad / Raíz</th>
+                  <th className="py-2.5 px-3">Cuenta Destino</th>
+                  <th className="py-2.5 px-3 text-right">Cta 00 (Extracto)</th>
+                  <th className="py-2.5 px-3 text-right">Cta 01 (Ingresos)</th>
+                  <th className="py-2.5 px-3 text-right">Cta 02 (Egresos)</th>
+                  <th className="py-2.5 px-3 text-right">Total Libros</th>
+                  <th className="py-2.5 px-3">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {balancePreview.groups.map((g) => (
+                  <tr key={g.groupKey} className="hover:bg-slate-50/70">
+                    <td className="py-2.5 px-3">
+                      <div className="font-bold text-slate-900">
+                        {g.sociedadCodigo} · {g.sociedadNombre}
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-500">
+                        Raíz {g.raizContable} · {g.moneda} · {g.mes}
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <div className="font-medium text-slate-800">
+                        {g.matchedAccountLabel || g.bancoInferido}
+                      </div>
+                      <div className="text-[11px] text-slate-400 truncate max-w-[220px]">
+                        {g.denominacionPrincipal}
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-slate-900">
+                      {formatBankMoney(g.saldoCuenta00, g.moneda)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-700">
+                      {formatBankMoney(g.saldoCuenta01, g.moneda)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-700">
+                      {formatBankMoney(g.saldoCuenta02, g.moneda)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-[#132B63]">
+                      {formatBankMoney(g.saldoLibrosTotal, g.moneda)}
+                    </td>
+                    <td className="py-2.5 px-3 text-[11px] font-semibold">
+                      {g.willAutoCreateAccount ? (
+                        <span className="text-blue-700">
+                          Crear {g.willAutoCreateSociety ? 'Sociedad y Cuenta' : 'Cuenta nueva'}
+                        </span>
+                      ) : (
+                        <span className="text-emerald-700">Actualizar saldos</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* ==================== PREVIEW 2: PARTIDAS ABIERTAS FBL3N ==================== */}
+      {activeMode === 'fbl3n' && fbl3nPreview && (
+        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-slate-900">
+                Vista Previa Partidas Abiertas FBL3N · {fbl3nPreview.items.length} partida(s)
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Clasificadas automáticamente por Clase de Documento (CB vs otras) y signo del
+                importe.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex bg-slate-200/70 p-0.5 rounded-lg text-xs">
+                <button
+                  type="button"
+                  onClick={() => setImportMergeMode('replace')}
+                  className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
+                    importMergeMode === 'replace'
+                      ? 'bg-white text-[#132B63] shadow-2xs'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  Reemplazar periodo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportMergeMode('append')}
+                  className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
+                    importMergeMode === 'append'
+                      ? 'bg-white text-[#132B63] shadow-2xs'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  Acumular
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={clearPreviews}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-lg cursor-pointer"
+              >
+                Descartar
+              </button>
+              <button
+                type="button"
+                disabled={fbl3nPreview.items.length === 0}
+                onClick={() => onApplySapFbl3nImport(fbl3nPreview, importMergeMode)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl transition-colors cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Aplicar Partidas ({fbl3nPreview.items.length})</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto max-h-[420px]">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200 sticky top-0">
+                <tr>
+                  <th className="py-2.5 px-3">Soc. / Cuenta Mayor</th>
+                  <th className="py-2.5 px-3 font-mono">Clase / Doc</th>
+                  <th className="py-2.5 px-3 font-mono">Fecha</th>
+                  <th className="py-2.5 px-3">Texto y Tercero (Ref. 3)</th>
+                  <th className="py-2.5 px-3 text-right">Importe ML</th>
+                  <th className="py-2.5 px-3">Sección Auto Entregable</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {fbl3nPreview.items.slice(0, 120).map((item) => (
+                  <tr key={item.rowIndex} className="hover:bg-slate-50/70">
+                    <td className="py-2 px-3">
+                      <div className="font-mono font-semibold text-slate-900">
+                        {item.sociedadCodigo} · {item.cuentaMayor} ({item.subcuentaTipo})
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        {item.matchedAccountLabel || 'Se creará cuenta automáticamente'}
+                      </div>
+                    </td>
+                    <td className="py-2 px-3 font-mono">
+                      <span className="font-bold text-[#132B63]">{item.claseDocumento}</span> ·{' '}
+                      {item.numeroDocumento}
+                      <div className="text-[10px] font-sans text-slate-400">
+                        {getSapDocumentClassLabel(item.claseDocumento)}
+                      </div>
+                    </td>
+                    <td className="py-2 px-3 font-mono text-slate-600">
+                      {formatSheetDate(item.fechaDocumento)}
+                    </td>
+                    <td className="py-2 px-3">
+                      <div className="font-medium text-slate-800">{item.texto}</div>
+                      {item.claveRef3 && (
+                        <div className="text-[11px] text-slate-500">{item.claveRef3}</div>
+                      )}
+                    </td>
+                    <td
+                      className={`py-2 px-3 text-right font-mono tabular-nums font-bold ${
+                        item.importeMonedaLocal < 0 ? 'text-rose-700' : 'text-emerald-700'
+                      }`}
+                    >
+                      {formatBankMoney(item.importeMonedaLocal, item.monedaLocal, true)}
+                    </td>
+                    <td className="py-2 px-3 font-medium text-slate-800">
+                      {RECONCILING_SECTION_META[item.seccionAuto].signLabel} ·{' '}
+                      {RECONCILING_SECTION_META[item.seccionAuto].title}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* ==================== PREVIEW 3: CATALOGO SOCIEDADES Y CUENTAS ==================== */}
+      {activeMode === 'catalogo' && catalogPreview && (
+        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-slate-900">
+                Vista Previa Catálogo · {catalogPreview.societies.length} sociedad(es) y{' '}
+                {catalogPreview.accounts.length} cuenta(s) bancaria(s)
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Las sociedades y cuentas existentes se actualizan conservando sus saldos históricos.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={clearPreviews}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-lg cursor-pointer"
+              >
+                Descartar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  catalogPreview.societies.length === 0 && catalogPreview.accounts.length === 0
+                }
+                onClick={() => onApplySapCatalogImport(catalogPreview)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl transition-colors cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Aplicar Catálogo</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto max-h-[380px]">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-3">Sociedad</th>
+                  <th className="py-2.5 px-3">Banco</th>
+                  <th className="py-2.5 px-3 font-mono">No. Cuenta / Moneda</th>
+                  <th className="py-2.5 px-3 font-mono">Cta 00 / 01 / 02</th>
+                  <th className="py-2.5 px-3">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {catalogPreview.accounts.map((acc, i) => (
+                  <tr key={`${acc.codigoSociedad}-${acc.numeroCuenta}-${i}`}>
+                    <td className="py-2 px-3 font-semibold text-slate-900">
+                      {acc.codigoSociedad} · {acc.sociedadNombre}
+                    </td>
+                    <td className="py-2 px-3 text-slate-800">{acc.banco}</td>
+                    <td className="py-2 px-3 font-mono text-slate-700">
+                      {acc.numeroCuenta} · {acc.moneda}
+                    </td>
+                    <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
+                      {acc.cuentaMayor00 || '-'} / {acc.cuentaMayor01 || '-'} /{' '}
+                      {acc.cuentaMayor02 || '-'}
+                    </td>
+                    <td className="py-2 px-3 text-[11px] font-semibold">
+                      {acc.matchedAccountId ? (
+                        <span className="text-emerald-700">Actualizar</span>
+                      ) : (
+                        <span className="text-blue-700">Nueva cuenta</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* ==================== PREVIEW 4: BILATERAL EXTRACTO + AUXILIAR ==================== */}
+      {activeMode === 'bilateral' && bilateralPreview && (
+        <section className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-slate-900">
+                Vista Previa Cruce Bilateral · {bilateralPreview.statementItems.length} mov.
+                Extracto y {bilateralPreview.ledgerItems.length} mov. Auxiliar
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Cuenta destino: <strong>{selectedAccount?.banco}</strong> (
+                {selectedAccount?.numeroCuenta})
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex bg-slate-200/70 p-0.5 rounded-lg text-xs">
+                <button
+                  type="button"
+                  onClick={() => setImportMergeMode('replace')}
+                  className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
+                    importMergeMode === 'replace'
+                      ? 'bg-white text-[#132B63] shadow-2xs'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  Reemplazar cuenta
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportMergeMode('append')}
+                  className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
+                    importMergeMode === 'append'
+                      ? 'bg-white text-[#132B63] shadow-2xs'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  Acumular
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={clearPreviews}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-lg cursor-pointer"
+              >
+                Descartar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  bilateralPreview.statementItems.length === 0 &&
+                  bilateralPreview.ledgerItems.length === 0
+                }
+                onClick={() =>
+                  onConfirmBilateralImport({
+                    statementItems: bilateralPreview.statementItems,
+                    ledgerItems: bilateralPreview.ledgerItems,
+                    mode: importMergeMode,
+                  })
+                }
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl transition-colors cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Aplicar y abrir Cruce Bilateral</span>
+              </button>
+            </div>
+          </div>
+          {bilateralPreview.warnings.length > 0 && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+              {bilateralPreview.warnings.join(' ')}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 };

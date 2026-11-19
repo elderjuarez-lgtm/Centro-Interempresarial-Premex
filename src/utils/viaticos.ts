@@ -5,6 +5,7 @@ import {
   ViaticoCurrency,
   ViaticoExpenseItem,
   ViaticoLiquidation,
+  ViaticoOdooConfig,
 } from '../types';
 import { normalizeEmail } from './permissions';
 
@@ -305,6 +306,130 @@ export const filterLiquidacionesByPermissions = (
   });
 };
 
+/**
+ * Consolidates liquidaciones across ALL liquidadores for the Contabilidad view,
+ * respecting the user's allowed Viáticos societies while never restricting to a single consultant.
+ */
+export const filterLiquidacionesForAccounting = (
+  liquidaciones: ViaticoLiquidation[],
+  permissions: EffectivePermissions
+): ViaticoLiquidation[] => {
+  if (permissions.isAdmin) return liquidaciones;
+  const viaticosScope = permissions.getModuleCompanyScope('viaticos');
+  if (viaticosScope === 'all') return liquidaciones;
+  return liquidaciones.filter((liq) =>
+    permissions.isCompanyAllowed(liq.empresa, 'viaticos')
+  );
+};
+
+/**
+ * Resolves the authoritative Cost Center (Centro de Costo) for a liquidation,
+ * falling back cleanly to the linked consultant profile in the master catalog.
+ */
+export const resolveLiquidationCostCenter = (
+  liquidation: Pick<
+    ViaticoLiquidation,
+    'centroCosto' | 'consultorId' | 'consultorEmail' | 'consultorNombre'
+  >,
+  consultores: ViaticoConsultor[]
+): string => {
+  const direct = String(liquidation.centroCosto || '').trim();
+  if (direct) return direct;
+
+  const byId = consultores.find((c) => c.id === liquidation.consultorId);
+  if (byId?.centroCosto?.trim()) return byId.centroCosto.trim();
+
+  const cleanEmail = normalizeEmail(liquidation.consultorEmail || '');
+  if (cleanEmail) {
+    const byEmail = consultores.find((c) => normalizeEmail(c.email) === cleanEmail);
+    if (byEmail?.centroCosto?.trim()) return byEmail.centroCosto.trim();
+  }
+
+  const normName = normalizeTextToken(liquidation.consultorNombre || '');
+  if (normName) {
+    const byName = consultores.find(
+      (c) => normalizeTextToken(c.nombreCompleto) === normName
+    );
+    if (byName?.centroCosto?.trim()) return byName.centroCosto.trim();
+  }
+
+  return '';
+};
+
+const ODOO_CONFIG_STORAGE_KEY = 'premex_viaticos_odoo_config_v1';
+
+export const DEFAULT_VIATICO_ODOO_CONFIG: ViaticoOdooConfig = {
+  diarioNombre: 'Liquidación de Viáticos',
+  diarioCodigo: 'VIAT',
+  prefijoReferencia: 'VIAT',
+  cuentaIvaCodigo: '1140101',
+  cuentaIvaNombre: 'IVA Crédito Fiscal por Cobrar',
+  etiquetaImpuesto: 'IVA 12% Compras',
+  cuentaContrapartidaCodigo: '2110201',
+  cuentaContrapartidaNombre: 'Viáticos por Reembolsar Empleados',
+  criterioFechaContable: 'fecha_cierre',
+  cuentasPorCategoria: {
+    Alimentación: {
+      accountCode: '520101',
+      accountName: 'Viáticos - Alimentación',
+    },
+    'Combustible / Lub': {
+      accountCode: '520102',
+      accountName: 'Viáticos - Combustibles y Lubricantes',
+    },
+    'Taxis / Buses': {
+      accountCode: '520103',
+      accountName: 'Viáticos - Transporte Local (Taxis / Buses)',
+    },
+    Hospedaje: {
+      accountCode: '520104',
+      accountName: 'Viáticos - Hospedaje y Alojamiento',
+    },
+    'Peajes / Parqueo': {
+      accountCode: '520105',
+      accountName: 'Viáticos - Peajes y Estacionamientos',
+    },
+    'Boletos Aéreos': {
+      accountCode: '520106',
+      accountName: 'Viáticos - Boletos Aéreos',
+    },
+    'Atención a Clientes': {
+      accountCode: '520107',
+      accountName: 'Gastos de Representación y Atención a Clientes',
+    },
+    'Otros Gastos': {
+      accountCode: '520199',
+      accountName: 'Viáticos - Otros Gastos de Viaje',
+    },
+  },
+};
+
+export const loadViaticoOdooConfig = (): ViaticoOdooConfig => {
+  try {
+    const raw = localStorage.getItem(ODOO_CONFIG_STORAGE_KEY);
+    if (!raw) return DEFAULT_VIATICO_ODOO_CONFIG;
+    const parsed = JSON.parse(raw) as Partial<ViaticoOdooConfig>;
+    return {
+      ...DEFAULT_VIATICO_ODOO_CONFIG,
+      ...parsed,
+      cuentasPorCategoria: {
+        ...DEFAULT_VIATICO_ODOO_CONFIG.cuentasPorCategoria,
+        ...(parsed.cuentasPorCategoria || {}),
+      },
+    };
+  } catch {
+    return DEFAULT_VIATICO_ODOO_CONFIG;
+  }
+};
+
+export const saveViaticoOdooConfig = (config: ViaticoOdooConfig): void => {
+  try {
+    localStorage.setItem(ODOO_CONFIG_STORAGE_KEY, JSON.stringify(config));
+  } catch {
+    // ignore storage quota errors
+  }
+};
+
 export const getCurrentIsoWeekNumber = (): string => {
   const now = new Date();
   const target = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
@@ -364,6 +489,7 @@ export const INITIAL_VIATICO_CONSULTORES: ViaticoConsultor[] = [
     email: 'elder.juarez@premexcorp.com',
     empresa: 'Premex Corp',
     cargo: 'Consultor Financiero / Regional',
+    centroCosto: 'CC-101 Finanzas Regional',
     monedaBase: 'Quetzales',
     activo: true,
   },
@@ -373,6 +499,7 @@ export const INITIAL_VIATICO_CONSULTORES: ViaticoConsultor[] = [
     email: 'melania.castillo@premexcorp.com',
     empresa: 'Premex S.A.S.',
     cargo: 'Consultora Técnica Comercial',
+    centroCosto: 'CC-201 Comercial Guatemala',
     monedaBase: 'Quetzales',
     activo: true,
   },
@@ -382,6 +509,7 @@ export const INITIAL_VIATICO_CONSULTORES: ViaticoConsultor[] = [
     email: 'cecilia.morales@premexcorp.com',
     empresa: 'Anitox Corporation',
     cargo: 'Especialista Nutrición Animal',
+    centroCosto: 'CC-301 Nutrición Anitox',
     monedaBase: 'Quetzales',
     activo: true,
   },
@@ -391,6 +519,7 @@ export const INITIAL_VIATICO_CONSULTORES: ViaticoConsultor[] = [
     email: 'carlos.mendoza@premexcorp.com',
     empresa: 'Premex S.A.S.',
     cargo: 'Consultor de Operaciones',
+    centroCosto: 'CC-205 Operaciones Latam',
     monedaBase: 'Dólares',
     activo: true,
   },
@@ -569,6 +698,7 @@ export const INITIAL_VIATICO_LIQUIDACIONES: ViaticoLiquidation[] = [
     consultorNombre: 'Elder Juarez Hernandez',
     consultorEmail: 'elder.juarez@premexcorp.com',
     empresa: 'Premex Corp',
+    centroCosto: 'CC-101 Finanzas Regional',
     monedaBase: 'Quetzales',
     estado: 'borrador',
     items: SEED_PREMICOL_ITEMS,

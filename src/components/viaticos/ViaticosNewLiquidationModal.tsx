@@ -17,6 +17,7 @@ export interface NewLiquidationPayload {
   monedaBase: ViaticoCurrency;
   consultorId: string;
   empresa: string;
+  centroCosto?: string;
 }
 
 interface ViaticosNewLiquidationModalProps {
@@ -45,6 +46,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
   const [monedaBase, setMonedaBase] = useState<ViaticoCurrency>('Quetzales');
   const [consultorId, setConsultorId] = useState('');
   const [empresa, setEmpresa] = useState('Premex Corp');
+  const [centroCosto, setCentroCosto] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -59,6 +61,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
         moduleCompanies[0]?.nombre ||
         'Premex Corp'
     );
+    setCentroCosto(initialConsultor?.centroCosto || '');
     setError(null);
   }, [isOpen, defaultConsultor, availableConsultores, moduleCompanies]);
 
@@ -70,6 +73,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
     if (chosen) {
       setEmpresa(chosen.empresa || empresa);
       setMonedaBase(chosen.monedaBase || monedaBase);
+      setCentroCosto(chosen.centroCosto || '');
     }
   };
 
@@ -94,6 +98,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
       monedaBase,
       consultorId,
       empresa: empresa.trim() || 'Premex Corp',
+      centroCosto: centroCosto.trim(),
     });
     onClose();
   };
@@ -228,36 +233,52 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
             )}
           </div>
 
-          {/* Sociedad / Empresa */}
-          <div>
-            <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-              <Building2 className="w-3.5 h-3.5 text-[#1E60A8]" />
-              <span>Sociedad / Empresa</span>
-            </label>
-            {moduleCompanies.length > 0 ? (
-              <select
-                value={empresa}
-                onChange={(e) => setEmpresa(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
-              >
-                {!moduleCompanies.some((c) => c.nombre === empresa) && (
-                  <option value={empresa}>{empresa}</option>
-                )}
-                {moduleCompanies.map((c) => (
-                  <option key={c.id} value={c.nombre}>
-                    {c.nombre}
-                  </option>
-                ))}
-              </select>
-            ) : (
+          {/* Sociedad / Empresa + Centro de Costo */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                <Building2 className="w-3.5 h-3.5 text-[#1E60A8]" />
+                <span>Sociedad / Empresa</span>
+              </label>
+              {moduleCompanies.length > 0 ? (
+                <select
+                  value={empresa}
+                  onChange={(e) => setEmpresa(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                >
+                  {!moduleCompanies.some((c) => c.nombre === empresa) && (
+                    <option value={empresa}>{empresa}</option>
+                  )}
+                  {moduleCompanies.map((c) => (
+                    <option key={c.id} value={c.nombre}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={empresa}
+                  onChange={(e) => setEmpresa(e.target.value)}
+                  placeholder="Premex Corp"
+                  className="w-full px-3.5 py-2 text-xs font-medium text-slate-900 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                />
+              )}
+            </div>
+
+            <div>
+              <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                <Layers className="w-3.5 h-3.5 text-[#1E60A8]" />
+                <span>Centro de Costo</span>
+              </label>
               <input
                 type="text"
-                value={empresa}
-                onChange={(e) => setEmpresa(e.target.value)}
-                placeholder="Premex Corp"
-                className="w-full px-3.5 py-2 text-xs font-medium text-slate-900 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                value={centroCosto}
+                onChange={(e) => setCentroCosto(e.target.value)}
+                placeholder="Cargado desde consultor"
+                className="w-full px-3.5 py-2 text-xs font-semibold text-[#132B63] rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
               />
-            )}
+            </div>
           </div>
 
           {/* Actions */}

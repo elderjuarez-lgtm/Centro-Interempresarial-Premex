@@ -209,7 +209,7 @@ INSTRUCCIONES CRÍTICAS POR CAMPO:
    - REGLA CRÍTICA DE EMISOR VS RECEPTOR (en tickets térmicos Y en facturas tamaño carta / Factura Cambiaria):
      * El EMISOR (quien vende el bien o servicio) y su NIT están junto al logo/encabezado principal de la empresa vendedora.
      * El COMPRADOR / RECEPTOR aparece en el recuadro de cliente/nombre/NIT del comprador (frecuentemente "PREMEZCLAS LATINOAMERICANAS, SOCIEDAD ANONIMA", "PREMEX", "ANITOX", "CONSUMIDOR FINAL", "CF" o el nombre del consultor).
-     * El CERTIFICADOR FEL aparece al pie de página (ej. "CERTIFICADOR: INFILE, S.A. NIT: 12521337", "DIGIFACT", "MEGAPRINT", "G4S", "CORPOSISTEMAS").
+     * El CERTIFICADOR FEL aparece al pie de página (ej. "CERTIFICADOR: INFILE, S.A. NIT: 12521337", "AINNOVA, SOCIEDAD ANONIMA NIT 50407754", "DIGIFACT", "MEGAPRINT", "G4S", "CORPOSISTEMAS", "GUATEFACTURAS").
      * NUNCA devuelvas el NIT ni el nombre de Premex / Premezclas Latinoamericanas / Anitox / Consumidor Final / CF ni el NIT del Certificador. Devuelve ÚNICAMENTE el NIT del EMISOR vendedor.
    - Si es un recibo extranjero o informal sin NIT/ID fiscal visible, devuelve "".
 5. proveedor: Nombre comercial o razón social clara del EMISOR (ej. "ITEMS INDUSTRIAL, S.A.", "FRANQUICIA DE SERVICIO Y CALIDAD, S.A.", "La paneria, s.a.", "Uno Guatemala, s. a", "Uber", "AIRBNB"). NUNCA pongas el nombre del comprador/cliente ni del certificador.
@@ -225,7 +225,7 @@ INSTRUCCIONES CRÍTICAS POR CAMPO:
 7. valorFactura: Monto TOTAL FINAL pagado en la moneda original (número decimal positivo usando punto decimal, ej. 72.00, 2200.00, 346.04).
    - Busca "TOTAL", "TOTAL A PAGAR", "GRAND TOTAL", "TOTAL PAGADO", "AMOUNT PAID", "IMPORTE TOTAL".
    - En facturas tamaño carta o Facturas Cambiarias que incluyan "TOTAL EN LETRAS" (ej. "DOS MIL DOSCIENTOS QUETZALES EXACTOS"), úsalo siempre para confirmar los dígitos exactos del total cuando la fotografía tenga letra pequeña.
-   - No devuelvas subtotales parciales, descuentos, ahorro ni vuelto/cambio.
+   - No devuelvas subtotales parciales, descuentos, ahorro, montos de exención ni vuelto/cambio.
    - Interpreta correctamente separadores de miles y decimales ("Q 2,200.00" -> 2200; "$ 45.000,00" -> 45000).
 8. tipoCambioSugerido: Tipo de cambio hacia la moneda base "${targetBaseCurrency}".
    - Si la moneda de la factura es igual a "${targetBaseCurrency}", devuelve exactamente 1.
@@ -237,7 +237,7 @@ INSTRUCCIONES CRÍTICAS POR CAMPO:
 10. porcentajeImpuesto: porcentaje numérico aplicable (12 FEL Guatemala general, 15 Honduras ISV, 19 Colombia IVA, 16 México IVA, 13 Costa Rica/El Salvador, 7 Panamá ITBMS, o el % impreso). Devuelve 0 si aplicaImpuestos es false.
 11. montoImpuesto: monto numérico de impuesto en la moneda de la factura.
    - Si la factura imprime explícitamente el impuesto (IVA/ISV/VAT/Tax), extrae ese valor exacto.
-   - Si aplicaImpuestos es true y el impuesto está incluido en el total sin línea separada (FEL Guatemala IVA 12%), calcula: round(valorFactura - (valorFactura / (1 + porcentajeImpuesto / 100)), 2). En combustible de Guatemala, si aparece IDP separado, calcula el IVA sobre (Total - IDP).
+   - Si aplicaImpuestos es true y el impuesto está incluido en el total sin línea separada (FEL Guatemala IVA 12%), calcula: round(valorFactura - (valorFactura / (1 + porcentajeImpuesto / 100)), 2). En combustible de Guatemala, si aparece IDP o exención temporal de IVA/IDP separada, calcula el IVA únicamente sobre la base gravada si es visible.
    - Si aplicaImpuestos es false, devuelve 0.
 12. categoriaSugerida: clasifica estrictamente en una de estas opciones:
    "Alimentación", "Combustible / Lub", "Taxis / Buses", "Hospedaje", "Peajes / Parqueo", "Boletos Aéreos", "Atención a Clientes", "Otros Gastos".

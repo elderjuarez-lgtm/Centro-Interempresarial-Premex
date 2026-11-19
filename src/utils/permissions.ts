@@ -588,34 +588,74 @@ export const filterIntercompanyByPermissions = (
 };
 
 /**
- * Filters Bank Reconciliation accounts, statement items, ledger items, and matches
- * strictly to accounts belonging to the user's allowed companies for the `bancos` module.
+ * Filters Bank Reconciliation societies, accounts, statement items, ledger items,
+ * matches, SAP FBL3N open items, and SAP balance rows strictly to the user's allowed companies
+ * for the `bancos` module.
  */
 export const filterBankByPermissions = (
   accounts: BankAccount[],
   statementItems: BankStatementItem[],
   ledgerItems: BookLedgerItem[],
   matches: BankMatchGroup[],
-  perms: EffectivePermissions
+  perms: EffectivePermissions,
+  societies: import('../types').BankSociety[] = [],
+  sapOpenItems: import('../types').SapOpenItem[] = [],
+  sapBalanceRows: import('../types').SapBalanceRow[] = []
 ): {
   accounts: BankAccount[];
   statementItems: BankStatementItem[];
   ledgerItems: BookLedgerItem[];
   matches: BankMatchGroup[];
+  societies: import('../types').BankSociety[];
+  sapOpenItems: import('../types').SapOpenItem[];
+  sapBalanceRows: import('../types').SapBalanceRow[];
 } => {
   if (perms.isAdmin || perms.getModuleCompanyScope('bancos') === 'all') {
-    return { accounts, statementItems, ledgerItems, matches };
+    return {
+      accounts,
+      statementItems,
+      ledgerItems,
+      matches,
+      societies,
+      sapOpenItems,
+      sapBalanceRows,
+    };
   }
 
   const allowedAccounts = accounts.filter((a) =>
     perms.isCompanyAllowed(a.sociedad, 'bancos')
   );
   const allowedAccountIds = new Set(allowedAccounts.map((a) => a.id));
+  const allowedSocieties = societies.filter((s) =>
+    perms.isCompanyAllowed(s.nombre, 'bancos')
+  );
+  const allowedSocietyCodes = new Set(
+    [
+      ...allowedSocieties.map((s) => s.codigoSociedad.trim().toUpperCase()),
+      ...allowedAccounts
+        .map((a) => String(a.codigoSociedad || '').trim().toUpperCase())
+        .filter(Boolean),
+    ].filter(Boolean)
+  );
 
   return {
     accounts: allowedAccounts,
     statementItems: statementItems.filter((i) => allowedAccountIds.has(i.cuentaId)),
     ledgerItems: ledgerItems.filter((i) => allowedAccountIds.has(i.cuentaId)),
     matches: matches.filter((m) => allowedAccountIds.has(m.cuentaId)),
+    societies: allowedSocieties,
+    sapOpenItems: sapOpenItems.filter(
+      (item) =>
+        allowedAccountIds.has(item.cuentaId) ||
+        perms.isCompanyAllowed(item.sociedadNombre, 'bancos') ||
+        (item.sociedadCodigo &&
+          allowedSocietyCodes.has(item.sociedadCodigo.trim().toUpperCase()))
+    ),
+    sapBalanceRows: sapBalanceRows.filter(
+      (row) =>
+        perms.isCompanyAllowed(row.sociedadNombre, 'bancos') ||
+        (row.sociedadCodigo &&
+          allowedSocietyCodes.has(row.sociedadCodigo.trim().toUpperCase()))
+    ),
   };
 };

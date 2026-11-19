@@ -42,8 +42,10 @@ async function fetchPremexLogoBytes(): Promise<ArrayBuffer | null> {
  * a secondary "Detalle Impuestos" worksheet prepared for accounting workflows).
  */
 export async function exportViaticosExcel(
-  liquidation: ViaticoLiquidation
+  liquidation: ViaticoLiquidation,
+  costCenter?: string
 ): Promise<string> {
+  const resolvedCostCenter = String(costCenter ?? liquidation.centroCosto ?? '').trim();
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Suite Corporativa Premex';
   wb.created = new Date();
@@ -153,6 +155,11 @@ export async function exportViaticosExcel(
   ws.getCell('L3').value = `Moneda base: ${liquidation.monedaBase}`;
   ws.getCell('L3').font = { name: 'Calibri', size: 9, color: { argb: 'FF475569' } };
   ws.getCell('L3').alignment = { horizontal: 'right', vertical: 'middle' };
+
+  ws.mergeCells('L4:N4');
+  ws.getCell('L4').value = `Centro de Costo: ${resolvedCostCenter || 'Sin asignar'}`;
+  ws.getCell('L4').font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF132B63' } };
+  ws.getCell('L4').alignment = { horizontal: 'right', vertical: 'middle' };
 
   // Row 6: Exact 14 Table Column Headers
   const headerLabels = [
@@ -299,7 +306,7 @@ export async function exportViaticosExcel(
     right: { style: 'medium', color: { argb: 'FF0F172A' } },
   };
 
-  // Worksheet 2: Fiscal / Tax Breakdown (prepared for upcoming accounting upload)
+  // Worksheet 2: Fiscal / Tax Breakdown (prepared for accounting upload)
   const wsTax = wb.addWorksheet('Detalle Impuestos');
   wsTax.columns = [
     { header: 'Fecha Doc.', width: 13 },
@@ -316,6 +323,7 @@ export async function exportViaticosExcel(
     { header: 'Tipo Cambio', width: 13 },
     { header: 'Valor Reintegrar', width: 16 },
     { header: 'Categoría', width: 20 },
+    { header: 'Centro de Costo', width: 24 },
     { header: 'Comprobante Adjunto', width: 26 },
   ];
 
@@ -343,6 +351,7 @@ export async function exportViaticosExcel(
       roundMoney(item.tipoCambio),
       roundMoney(item.valorReintegrar),
       item.categoria,
+      resolvedCostCenter || 'Sin asignar',
       item.attachmentName || 'Sin archivo adjunto',
     ]);
     [9, 10, 11, 12, 13].forEach((cIdx) => {
@@ -875,10 +884,605 @@ export async function exportViaticosReceiptsPdf(
   return { filename, embeddedCount, totalItems: liquidation.items.length };
 }
 
-export function buildViaticosEmailDraft(liquidation: ViaticoLiquidation): {
+function wrapPdfText(
+  text: string,
+  font: { widthOfTextAtSize: (t: string, size: number) => number },
+  fontSize: number,
+  maxWidth: number,
+  maxLines = 4
+): string[] {
+  const safe = toAsciiSafe(text).replace(/\s+/g, ' ').trim();
+  if (!safe) return [''];
+  if (font.widthOfTextAtSize(safe, fontSize) <= maxWidth) return [safe];
+
+  const words = safe.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  const pushWrappedToken = (token: string) => {
+    if (font.widthOfTextAtSize(token, fontSize) <= maxWidth) {
+      current = token;
+      return;
+    }
+    let slice = '';
+    for (const ch of token) {
+      if (font.widthOfTextAtSize(slice + ch, fontSize) <= maxWidth) {
+        slice += ch;
+      } else {
+        if (slice) lines.push(slice);
+        slice = ch;
+        if (lines.length >= maxLines) return;
+      }
+    }
+    current = slice;
+  };
+
+  for (const word of words) {
+    if (lines.length >= maxLines) break;
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
+      current = candidate;
+    } else {
+      if (current) lines.push(current);
+      if (lines.length >= maxLines) {
+        current = '';
+        break;
+      }
+      pushWrappedToken(word);
+    }
+  }
+  if (current && lines.length < maxLines) {
+    lines.push(current);
+  }
+
+  if (lines.length === maxLines) {
+    const last = lines[maxLines - 1];
+    let trimmed = last;
+    while (trimmed.length > 3 && font.widthOfTextAtSize(`${trimmed}...`, fontSize) > maxWidth) {
+      trimmed = trimmed.slice(0, -1);
+    }
+    if (trimmed.length < last.length || words.join(' ').length > lines.join(' ').length) {
+      lines[maxLines - 1] = `${trimmed.replace(/\.+$/, '')}...`;
+    }
+  }
+
+  return lines.length > 0 ? lines : [''];
+}
+
+/**
+ * Generates a crisp Landscape Letter PDF faithfully reproducing the official Premex
+ * Excel Viáticos worksheet (Cabecera LIQUIDACIÓN / SEMANA # / NOMBRE / CENTRO DE COSTO,
+ * Premex logo, exact 14-column grid with #B7DEE8 shading, Total Liquidación row,
+ * tax breakdown, and corporate approval signature lines) ready to print or preview.
+ */
+export async function generateViaticosPlanillaPdfBytes(
+  liquidation: ViaticoLiquidation,
+  costCenter?: string
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; filename: string }> {
+  const resolvedCostCenter = String(costCenter ?? liquidation.centroCosto ?? '').trim();
+  const pdfDoc = await PDFDocument.create();
+  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const pageW = 792; // Landscape Letter (11 x 8.5 in)
+  const pageH = 612;
+  const marginX = 24;
+  const bottomLimit = 46;
+
+  const premexNavy = rgb(0.075, 0.169, 0.388); // #132B63
+  const slateDark = rgb(0.06, 0.09, 0.16);
+  const slateMuted = rgb(0.38, 0.45, 0.54);
+  const gridLine = rgb(0.22, 0.28, 0.36);
+  const lightLine = rgb(0.75, 0.8, 0.86);
+  const excelHeaderBg = rgb(0.718, 0.871, 0.91); // #B7DEE8
+  const excelTotalBg = rgb(0.863, 0.933, 0.961); // #DCEEF5
+  const zebraBg = rgb(0.976, 0.984, 0.994);
+
+  // 14 columns summing exactly to 744pt (792 - 24*2)
+  const columns: {
+    label: string;
+    width: number;
+    align: 'left' | 'center' | 'right';
+    bold?: boolean;
+  }[] = [
+    { label: 'Fecha Doc.', width: 44, align: 'center' },
+    { label: 'Serie Doc.', width: 42, align: 'left' },
+    { label: 'No. Doc.', width: 54, align: 'left' },
+    { label: 'NIT', width: 42, align: 'left' },
+    { label: 'Proveedor', width: 76, align: 'left' },
+    { label: 'Moneda', width: 44, align: 'center' },
+    { label: 'Valor Factura', width: 44, align: 'right' },
+    { label: 'T.C.', width: 30, align: 'right' },
+    { label: 'Valor Reintegrar', width: 48, align: 'right', bold: true },
+    { label: 'Categoria', width: 58, align: 'left' },
+    { label: 'Cliente / Contacto', width: 78, align: 'left', bold: true },
+    { label: 'Objetivo Comercial', width: 74, align: 'left' },
+    { label: 'Descripcion del Gasto', width: 80, align: 'left' },
+    { label: 'Km', width: 30, align: 'center' },
+  ];
+
+  const colOffsets: number[] = [];
+  let accX = marginX;
+  columns.forEach((c) => {
+    colOffsets.push(accX);
+    accX += c.width;
+  });
+  const totalTableW = accX - marginX;
+
+  let embeddedLogo: Awaited<ReturnType<typeof pdfDoc.embedPng>> | null = null;
+  const logoBytes = await fetchPremexLogoBytes();
+  if (logoBytes) {
+    try {
+      embeddedLogo = await pdfDoc.embedPng(logoBytes);
+    } catch {
+      embeddedLogo = null;
+    }
+  }
+
+  const statusLabel =
+    liquidation.estado === 'enviada'
+      ? 'Cerrada y Enviada'
+      : liquidation.estado === 'cerrada'
+      ? 'Cerrada'
+      : 'Abierta (Borrador)';
+
+  const drawPageHeader = (page: ReturnType<typeof pdfDoc.addPage>, isFirstPage: boolean): number => {
+    if (isFirstPage) {
+      // Top Left Form Fields matching official Premex Excel layout
+      const labelX = marginX;
+      const valX = marginX + 94;
+      const valW = 248;
+
+      const drawHeaderLine = (
+        rowY: number,
+        label: string,
+        value: string,
+        centerValue = false
+      ) => {
+        page.drawText(label, {
+          x: labelX,
+          y: rowY,
+          size: 8.5,
+          font: fontBold,
+          color: slateDark,
+        });
+        const cleanVal = truncateText(value || '-', 48);
+        const textW = fontRegular.widthOfTextAtSize(cleanVal, 8.5);
+        const drawX = centerValue ? valX + Math.max(0, (valW - textW) / 2) : valX + 4;
+        page.drawText(cleanVal, {
+          x: drawX,
+          y: rowY,
+          size: 8.5,
+          font: centerValue ? fontBold : fontRegular,
+          color: slateDark,
+        });
+        page.drawLine({
+          start: { x: valX, y: rowY - 3 },
+          end: { x: valX + valW, y: rowY - 3 },
+          thickness: 0.75,
+          color: gridLine,
+        });
+      };
+
+      drawHeaderLine(pageH - 36, 'LIQUIDACION', liquidation.lineaLiquidacion || 'Sin titulo');
+      drawHeaderLine(pageH - 53, 'SEMANA #', liquidation.semana || '-', true);
+      drawHeaderLine(pageH - 70, 'NOMBRE:', liquidation.consultorNombre || '-', true);
+      drawHeaderLine(
+        pageH - 87,
+        'CENTRO COSTO:',
+        resolvedCostCenter || 'Sin asignar',
+        false
+      );
+
+      // Center Premex Logo + Tagline
+      const logoX = marginX + 368;
+      if (embeddedLogo) {
+        page.drawImage(embeddedLogo, {
+          x: logoX,
+          y: pageH - 88,
+          width: 56,
+          height: 56,
+        });
+      }
+      const tagX = embeddedLogo ? logoX + 64 : logoX;
+      page.drawText('NOURISHING', {
+        x: tagX,
+        y: pageH - 48,
+        size: 8.5,
+        font: fontBold,
+        color: slateMuted,
+      });
+      page.drawText('POSSIBILITIES', {
+        x: tagX,
+        y: pageH - 60,
+        size: 8.5,
+        font: fontBold,
+        color: slateMuted,
+      });
+      page.drawText('TOGETHER', {
+        x: tagX,
+        y: pageH - 72,
+        size: 8.5,
+        font: fontBold,
+        color: slateMuted,
+      });
+
+      // Right Corporate Metadata
+      const rightMeta = [
+        `Empresa: ${truncateText(liquidation.empresa || '-', 32)}`,
+        `Moneda base: ${truncateText(liquidation.monedaBase, 24)}`,
+        `Estado: ${statusLabel}`,
+        `Impresion: ${new Date().toLocaleDateString('es-GT')}`,
+      ];
+      rightMeta.forEach((line, idx) => {
+        const w = fontRegular.widthOfTextAtSize(line, 7.5);
+        page.drawText(line, {
+          x: pageW - marginX - w,
+          y: pageH - 36 - idx * 14,
+          size: 7.5,
+          font: idx === 0 ? fontBold : fontRegular,
+          color: idx === 0 ? premexNavy : slateMuted,
+        });
+      });
+
+      return pageH - 104;
+    }
+
+    // Continuation Page Compact Header
+    page.drawText(
+      truncateText(
+        `PREMEX · PLANILLA DE VIATICOS (Continuacion) · ${liquidation.lineaLiquidacion} · Sem #${liquidation.semana || '-'} · ${liquidation.consultorNombre}`,
+        118
+      ),
+      {
+        x: marginX,
+        y: pageH - 32,
+        size: 8.5,
+        font: fontBold,
+        color: premexNavy,
+      }
+    );
+    return pageH - 46;
+  };
+
+  const drawTableHeader = (page: ReturnType<typeof pdfDoc.addPage>, topY: number): number => {
+    const headerH = 24;
+    const bottomY = topY - headerH;
+    page.drawRectangle({
+      x: marginX,
+      y: bottomY,
+      width: totalTableW,
+      height: headerH,
+      color: excelHeaderBg,
+      borderColor: gridLine,
+      borderWidth: 0.8,
+    });
+
+    columns.forEach((col, i) => {
+      const x = colOffsets[i];
+      if (i > 0) {
+        page.drawLine({
+          start: { x, y: bottomY },
+          end: { x, y: topY },
+          thickness: 0.6,
+          color: gridLine,
+        });
+      }
+      const lines = wrapPdfText(col.label, fontBold, 6.8, col.width - 5, 2);
+      const totalTextH = lines.length * 8.2;
+      const startTextY = bottomY + (headerH + totalTextH) / 2 - 6.8;
+      lines.forEach((ln, li) => {
+        const lw = fontBold.widthOfTextAtSize(ln, 6.8);
+        page.drawText(ln, {
+          x: x + Math.max(2, (col.width - lw) / 2),
+          y: startTextY - li * 8.2,
+          size: 6.8,
+          font: fontBold,
+          color: slateDark,
+        });
+      });
+    });
+
+    return bottomY;
+  };
+
+  let page = pdfDoc.addPage([pageW, pageH]);
+  let cursorY = drawPageHeader(page, true);
+  cursorY = drawTableHeader(page, cursorY);
+
+  const cellFontSize = 6.6;
+  const lineH = 8.4;
+
+  const rowsToDraw =
+    liquidation.items.length > 0
+      ? liquidation.items.map((item) => [
+          item.fechaDoc || '',
+          item.serieDoc || '',
+          item.noDoc || '',
+          item.nit || '',
+          item.proveedor || '',
+          item.moneda || '',
+          formatViaticoAmount(item.valorFactura),
+          formatViaticoAmount(item.tipoCambio),
+          formatViaticoAmount(item.valorReintegrar),
+          item.categoria || '',
+          item.clienteContacto || '',
+          item.objetivoComercial || '',
+          item.descripcionGasto || '',
+          item.kilometraje || '',
+        ])
+      : [['Sin facturas registradas', '', '', '', '', '', '', '', '', '', '', '', '', '']];
+
+  rowsToDraw.forEach((cells, rowIdx) => {
+    const wrappedPerCol = cells.map((val, colIdx) => {
+      const col = columns[colIdx];
+      const fontToUse = col.bold ? fontBold : fontRegular;
+      return wrapPdfText(val, fontToUse, cellFontSize, col.width - 5, 4);
+    });
+    const maxLineCount = Math.max(1, ...wrappedPerCol.map((ls) => ls.length));
+    const rowH = Math.max(16, maxLineCount * lineH + 6);
+
+    if (cursorY - rowH < bottomLimit) {
+      page = pdfDoc.addPage([pageW, pageH]);
+      cursorY = drawPageHeader(page, false);
+      cursorY = drawTableHeader(page, cursorY);
+    }
+
+    const rowBottom = cursorY - rowH;
+    if (rowIdx % 2 === 1) {
+      page.drawRectangle({
+        x: marginX,
+        y: rowBottom,
+        width: totalTableW,
+        height: rowH,
+        color: zebraBg,
+      });
+    }
+
+    // Row border box
+    page.drawRectangle({
+      x: marginX,
+      y: rowBottom,
+      width: totalTableW,
+      height: rowH,
+      borderColor: lightLine,
+      borderWidth: 0.55,
+    });
+
+    wrappedPerCol.forEach((lines, colIdx) => {
+      const col = columns[colIdx];
+      const x = colOffsets[colIdx];
+      const fontToUse = col.bold ? fontBold : fontRegular;
+
+      if (colIdx > 0) {
+        page.drawLine({
+          start: { x, y: rowBottom },
+          end: { x, y: cursorY },
+          thickness: 0.45,
+          color: lightLine,
+        });
+      }
+
+      const blockH = lines.length * lineH;
+      const startY = rowBottom + (rowH + blockH) / 2 - cellFontSize - 0.5;
+      lines.forEach((ln, li) => {
+        const lw = fontToUse.widthOfTextAtSize(ln, cellFontSize);
+        let drawX = x + 3;
+        if (col.align === 'right') {
+          drawX = x + col.width - lw - 3;
+        } else if (col.align === 'center') {
+          drawX = x + Math.max(2, (col.width - lw) / 2);
+        }
+        page.drawText(ln, {
+          x: drawX,
+          y: startY - li * lineH,
+          size: cellFontSize,
+          font: fontToUse,
+          color: slateDark,
+        });
+      });
+    });
+
+    cursorY = rowBottom;
+  });
+
+  // Blank separator row + Total Liquidación row + Fiscal Summary + Signatures
+  const footerNeededH = 122;
+  if (cursorY - footerNeededH < bottomLimit) {
+    page = pdfDoc.addPage([pageW, pageH]);
+    cursorY = drawPageHeader(page, false);
+  }
+
+  // Blank separator row matching Premex Excel template
+  const spacerH = 10;
+  page.drawRectangle({
+    x: marginX,
+    y: cursorY - spacerH,
+    width: totalTableW,
+    height: spacerH,
+    borderColor: lightLine,
+    borderWidth: 0.5,
+  });
+  cursorY -= spacerH;
+
+  // Total Liquidación Row (Merged cols F..H + Total under col I)
+  const totalRowH = 20;
+  const totalBottom = cursorY - totalRowH;
+  const labelBoxX = colOffsets[5]; // Moneda..T.C.
+  const labelBoxW = columns[5].width + columns[6].width + columns[7].width;
+  const totalBoxX = colOffsets[8]; // Valor Reintegrar
+  const totalBoxW = columns[8].width;
+
+  page.drawRectangle({
+    x: labelBoxX,
+    y: totalBottom,
+    width: labelBoxW,
+    height: totalRowH,
+    color: rgb(1, 1, 1),
+    borderColor: slateDark,
+    borderWidth: 1.1,
+  });
+  const totalLbl = 'Total Liquidacion';
+  const totalLblW = fontBold.widthOfTextAtSize(totalLbl, 8.2);
+  page.drawText(totalLbl, {
+    x: labelBoxX + (labelBoxW - totalLblW) / 2,
+    y: totalBottom + 6.5,
+    size: 8.2,
+    font: fontBold,
+    color: slateDark,
+  });
+
+  page.drawRectangle({
+    x: totalBoxX,
+    y: totalBottom,
+    width: totalBoxW,
+    height: totalRowH,
+    color: excelTotalBg,
+    borderColor: slateDark,
+    borderWidth: 1.1,
+  });
+  const totalNumStr = toAsciiSafe(formatViaticoAmount(liquidation.totalLiquidacion));
+  const totalNumW = fontBold.widthOfTextAtSize(totalNumStr, 8.2);
+  page.drawText(totalNumStr, {
+    x: totalBoxX + totalBoxW - totalNumW - 3,
+    y: totalBottom + 6.5,
+    size: 8.2,
+    font: fontBold,
+    color: premexNavy,
+  });
+
+  // Currency summary text to the right of total cell
+  const totalWithCurrency = toAsciiSafe(
+    `${formatViaticoAmount(liquidation.totalLiquidacion, liquidation.monedaBase, true)} (${
+      liquidation.monedaBase
+    })`
+  );
+  page.drawText(totalWithCurrency, {
+    x: totalBoxX + totalBoxW + 8,
+    y: totalBottom + 6.5,
+    size: 8,
+    font: fontBold,
+    color: premexNavy,
+  });
+
+  // Compact Fiscal Breakdown Strip
+  const taxStripY = totalBottom - 24;
+  page.drawRectangle({
+    x: marginX,
+    y: taxStripY,
+    width: totalTableW,
+    height: 18,
+    color: rgb(0.96, 0.975, 0.99),
+    borderColor: lightLine,
+    borderWidth: 0.6,
+  });
+  const fiscalLine = toAsciiSafe(
+    `Resumen Fiscal:  Comprobantes: ${liquidation.items.length}   |   Con Impuestos: ${formatViaticoAmount(
+      liquidation.totalConImpuestos,
+      liquidation.monedaBase,
+      true
+    )}   |   Impuesto Estimado (IVA): ${formatViaticoAmount(
+      liquidation.totalImpuestos,
+      liquidation.monedaBase,
+      true
+    )}   |   Sin Impuestos: ${formatViaticoAmount(
+      liquidation.totalSinImpuestos,
+      liquidation.monedaBase,
+      true
+    )}`
+  );
+  page.drawText(fiscalLine, {
+    x: marginX + 8,
+    y: taxStripY + 5.5,
+    size: 7.4,
+    font: fontRegular,
+    color: slateDark,
+  });
+
+  // Corporate Approval Signature Lines
+  const sigY = taxStripY - 46;
+  const sigW = 200;
+  const sigPositions = [
+    { x: marginX + 18, title: 'Elaborado por / Consultor', sub: liquidation.consultorNombre },
+    { x: marginX + 272, title: 'Revisado por / Jefatura', sub: 'Firma y fecha de autorizacion' },
+    { x: marginX + 526, title: 'Recibido / Contabilidad', sub: resolvedCostCenter ? `C.C.: ${resolvedCostCenter}` : 'Registro contable Odoo' },
+  ];
+  sigPositions.forEach((sig) => {
+    page.drawLine({
+      start: { x: sig.x, y: sigY + 18 },
+      end: { x: sig.x + sigW, y: sigY + 18 },
+      thickness: 0.75,
+      color: gridLine,
+    });
+    const titleW = fontBold.widthOfTextAtSize(sig.title, 7.6);
+    page.drawText(sig.title, {
+      x: sig.x + (sigW - titleW) / 2,
+      y: sigY + 7,
+      size: 7.6,
+      font: fontBold,
+      color: slateDark,
+    });
+    const subTxt = truncateText(sig.sub || '', 36);
+    const subW = fontRegular.widthOfTextAtSize(subTxt, 6.8);
+    page.drawText(subTxt, {
+      x: sig.x + (sigW - subW) / 2,
+      y: sigY - 3,
+      size: 6.8,
+      font: fontRegular,
+      color: slateMuted,
+    });
+  });
+
+  // Stamp footer page numbers on every page
+  const allPages = pdfDoc.getPages();
+  allPages.forEach((p, idx) => {
+    const leftFooter = toAsciiSafe(
+      `Suite Corporativa Premex · Planilla Imprimible de Viaticos · ${liquidation.empresa}`
+    );
+    const rightFooter = `Pagina ${idx + 1} de ${allPages.length}`;
+    p.drawText(leftFooter, {
+      x: marginX,
+      y: 18,
+      size: 7,
+      font: fontRegular,
+      color: slateMuted,
+    });
+    const rw = fontRegular.widthOfTextAtSize(rightFooter, 7);
+    p.drawText(rightFooter, {
+      x: pageW - marginX - rw,
+      y: 18,
+      size: 7,
+      font: fontBold,
+      color: slateMuted,
+    });
+  });
+
+  const pdfBytes = await pdfDoc.save();
+  const filename = `Planilla_Imprimible_Sem${sanitizeFileSlug(
+    liquidation.semana || '00'
+  )}_${sanitizeFileSlug(liquidation.consultorNombre)}.pdf`;
+
+  return { bytes: new Uint8Array(pdfBytes), filename };
+}
+
+export async function exportViaticosPlanillaPdf(
+  liquidation: ViaticoLiquidation,
+  costCenter?: string
+): Promise<string> {
+  const { bytes, filename } = await generateViaticosPlanillaPdfBytes(liquidation, costCenter);
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  triggerBlobDownload(blob, filename);
+  return filename;
+}
+
+export function buildViaticosEmailDraft(
+  liquidation: ViaticoLiquidation,
+  costCenter?: string
+): {
   subject: string;
   body: string;
 } {
+  const resolvedCostCenter = String(costCenter ?? liquidation.centroCosto ?? '').trim();
   const totalFormatted = formatViaticoAmount(
     liquidation.totalLiquidacion,
     liquidation.monedaBase,
@@ -909,6 +1513,7 @@ export function buildViaticosEmailDraft(liquidation: ViaticoLiquidation): {
     `• Semana #: ${liquidation.semana || '-'}`,
     `• Consultor: ${liquidation.consultorNombre} (${liquidation.consultorEmail || 'Sin correo'})`,
     `• Empresa / Sociedad: ${liquidation.empresa}`,
+    `• Centro de Costo: ${resolvedCostCenter || 'Sin asignar'}`,
     `• Cantidad de comprobantes: ${liquidation.items.length}`,
     `• Total con impuestos: ${formatViaticoAmount(
       liquidation.totalConImpuestos,
@@ -929,9 +1534,9 @@ export function buildViaticosEmailDraft(liquidation: ViaticoLiquidation): {
     'Detalle resumido de gastos:',
     ...lines,
     '',
-    'Se adjuntan a este correo los dos archivos oficiales descargados desde la Suite Premex:',
+    'Se adjuntan a este correo los archivos oficiales descargados desde la Suite Premex:',
     '1. Archivo Excel (.xlsx) diligenciado con el formato oficial Premex y detalle de impuestos.',
-    '2. Archivo PDF (.pdf) compilado con todas las imágenes y facturas adjuntas.',
+    '2. Planilla imprimible en PDF (.pdf) y/o PDF compilado con todas las imágenes y facturas adjuntas.',
     '',
     'Saludos cordiales,',
     liquidation.consultorNombre,

@@ -10,6 +10,7 @@ import {
   LogOut,
   FileSpreadsheet,
   FileText,
+  Printer,
   Lock,
 } from 'lucide-react';
 import {
@@ -28,6 +29,7 @@ interface ViaticosHeaderProps {
   onSaveToCloud: () => void;
   onOpenCloseConfirmModal: () => void;
   onOpenCloseEmailModal: () => void;
+  onOpenPlanillaPdfPreview: () => void;
   onQuickDownloadExcel: () => void;
   onQuickDownloadPdf: () => void;
   isDownloadingExcel: boolean;
@@ -49,6 +51,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
   onSaveToCloud,
   onOpenCloseConfirmModal,
   onOpenCloseEmailModal,
+  onOpenPlanillaPdfPreview,
   onQuickDownloadExcel,
   onQuickDownloadPdf,
   isDownloadingExcel,
@@ -144,6 +147,8 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
                   : 'Panel de Liquidadores'
                 : activeTab === 'cerradas'
                 ? 'Consulta de Liquidaciones Cerradas'
+                : activeTab === 'contabilidad'
+                ? 'Contabilidad y Carga a Odoo'
                 : 'Historial General y Consultores'}
             </h2>
           </div>
@@ -165,6 +170,17 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
 
           {activeLiquidation && activeTab === 'liquidador' && (
             <>
+              <button
+                type="button"
+                onClick={onOpenPlanillaPdfPreview}
+                disabled={!hasItems}
+                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                title="Visualizar planilla Excel en formato PDF para imprimir"
+              >
+                <Printer className="w-3.5 h-3.5 text-[#1E60A8]" />
+                <span>Vista PDF</span>
+              </button>
+
               <button
                 type="button"
                 onClick={onQuickDownloadExcel}

@@ -43,6 +43,7 @@ const sanitizeConsultor = (c: ViaticoConsultor): ViaticoConsultor => ({
   email: String(c.email || '').trim().toLowerCase().slice(0, 160),
   empresa: String(c.empresa || 'Premex Corp').trim().slice(0, 140),
   cargo: c.cargo ? String(c.cargo).trim().slice(0, 120) : '',
+  centroCosto: c.centroCosto ? String(c.centroCosto).trim().slice(0, 120) : '',
   monedaBase: c.monedaBase || 'Quetzales',
   activo: c.activo !== false,
 });
@@ -109,6 +110,7 @@ const sanitizeLiquidation = (l: ViaticoLiquidation): ViaticoLiquidation => {
     updatedAtIso: String(l.updatedAtIso || new Date().toISOString()).slice(0, 60),
   };
 
+  if (l.centroCosto) base.centroCosto = String(l.centroCosto).trim().slice(0, 120);
   if (l.closedAtIso) base.closedAtIso = String(l.closedAtIso).slice(0, 60);
   if (l.closedBy) base.closedBy = String(l.closedBy).slice(0, 160);
   if (l.sentAtIso) base.sentAtIso = String(l.sentAtIso).slice(0, 60);

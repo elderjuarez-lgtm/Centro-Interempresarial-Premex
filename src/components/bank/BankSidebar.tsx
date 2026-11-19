@@ -19,9 +19,10 @@ interface BankSidebarProps {
   isOpenMobile: boolean;
   onCloseMobile: () => void;
   selectedAccount: BankAccount | null;
+  societiesCount: number;
   accountsCount: number;
-  unmatchedCount: number;
-  reconciledPct: number;
+  openItemsCount: number;
+  squaredAccountsCount: number;
   onSwitchModule: (moduleId: ActiveModuleId) => void;
   permissions: EffectivePermissions;
 }
@@ -32,9 +33,10 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
   isOpenMobile,
   onCloseMobile,
   selectedAccount,
+  societiesCount,
   accountsCount,
-  unmatchedCount,
-  reconciledPct,
+  openItemsCount,
+  squaredAccountsCount,
   onSwitchModule,
   permissions,
 }) => {
@@ -47,37 +49,37 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
   }[] = [
     {
       id: 'resumen',
-      label: 'Resumen y Cuadre',
-      description: 'Conciliación formal extracto vs libros',
+      label: 'Centro de Cuadre',
+      description: 'Sociedades, bancos y formato oficial',
       icon: LayoutDashboard,
-      counter: `${reconciledPct}%`,
-    },
-    {
-      id: 'cruce',
-      label: 'Mesa de Cruce',
-      description: 'Emparejamiento automático y manual',
-      icon: ArrowLeftRight,
-      counter: null,
+      counter: accountsCount > 0 ? `${squaredAccountsCount}/${accountsCount}` : null,
     },
     {
       id: 'pendientes',
-      label: 'Partidas Pendientes',
-      description: 'Tránsito, notas débito y ajustes',
+      label: 'Partidas Abiertas',
+      description: 'Gestión FBL3N, clases SAP y ajustes',
       icon: AlertCircle,
-      counter: unmatchedCount > 0 ? String(unmatchedCount) : null,
+      counter: openItemsCount > 0 ? String(openItemsCount) : null,
     },
     {
       id: 'cuentas',
-      label: 'Cuentas Bancarias',
-      description: 'Catálogo de cuentas y saldos finales',
+      label: 'Sociedades y Cuentas',
+      description: 'Maestro sociedades y subcuentas 00/01/02',
       icon: Landmark,
-      counter: String(accountsCount),
+      counter: `${societiesCount}·${accountsCount}`,
     },
     {
       id: 'carga',
-      label: 'Carga de Archivos',
-      description: 'Importar extracto y auxiliar Excel',
+      label: 'Carga Masiva SAP',
+      description: 'Catálogo, Balance 00/01/02 y FBL3N',
       icon: UploadCloud,
+      counter: null,
+    },
+    {
+      id: 'cruce',
+      label: 'Cruce Bilateral',
+      description: 'Emparejamiento extracto vs auxiliar',
+      icon: ArrowLeftRight,
       counter: null,
     },
   ];
@@ -90,13 +92,13 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
     <>
       {isOpenMobile && (
         <div
-          className="fixed inset-0 bg-slate-900/60 z-40 lg:hidden backdrop-blur-xs"
+          className="fixed inset-0 bg-slate-900/60 z-40 lg:hidden backdrop-blur-xs print:hidden"
           onClick={onCloseMobile}
         />
       )}
 
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-gradient-to-b from-[#0E224D] via-[#132E66] to-[#0B1C3F] text-white flex flex-col border-r border-blue-900/40 shadow-xl transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-gradient-to-b from-[#0E224D] via-[#132E66] to-[#0B1C3F] text-white flex flex-col border-r border-blue-900/40 shadow-xl transition-transform duration-300 ease-in-out lg:translate-x-0 print:hidden ${
           isOpenMobile ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -137,12 +139,10 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
           <BancosModuleLogo className="w-10 h-10 shrink-0" />
           <div className="min-w-0">
             <h1 className="font-bold text-sm tracking-tight text-white truncate">
-              Conciliación Bancaria
+              Centro de Conciliaciones
             </h1>
             <p className="text-[11px] text-sky-200/80 truncate">
-              {selectedAccount
-                ? `${selectedAccount.banco} · ${selectedAccount.moneda}`
-                : 'Tesorería Corporativa'}
+              Tesorería SAP 00 / 01 / 02
             </p>
           </div>
         </div>
@@ -151,20 +151,25 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
         {selectedAccount && (
           <div className="mx-3.5 my-3 px-3.5 py-2.5 rounded-xl bg-white/8 border border-white/12">
             <div className="text-[10px] font-bold uppercase tracking-wider text-sky-200/80">
-              Cuenta Activa
+              {selectedAccount.codigoSociedad
+                ? `Soc. ${selectedAccount.codigoSociedad} · ${selectedAccount.sociedad}`
+                : selectedAccount.sociedad}
             </div>
             <div className="text-sm font-bold text-white truncate mt-0.5">
               {selectedAccount.banco}
             </div>
             <div className="text-[11px] text-blue-200/80 font-mono truncate">
-              {selectedAccount.numeroCuenta} · {selectedAccount.sociedad}
+              {selectedAccount.cuentaMayor00
+                ? `Cta 00: ${selectedAccount.cuentaMayor00}`
+                : selectedAccount.numeroCuenta}{' '}
+              · {selectedAccount.moneda}
             </div>
           </div>
         )}
 
         {/* Navigation Links */}
         <div className="px-4 py-2 text-[11px] font-semibold tracking-wider text-sky-200/60 uppercase">
-          Vistas del Módulo
+          Vistas Bancarias SAP
         </div>
 
         <nav className="flex-1 px-3 space-y-1 overflow-y-auto">

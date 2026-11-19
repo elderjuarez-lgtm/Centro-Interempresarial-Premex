@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Unlock,
+  Printer,
 } from 'lucide-react';
 import { EffectivePermissions, ViaticoLiquidation } from '../../types';
 import { StoredReceiptMedia } from '../../services/viaticosMediaStore';
@@ -26,22 +27,26 @@ interface ViaticosCloseEmailModalProps {
   isOpen: boolean;
   onClose: () => void;
   liquidation: ViaticoLiquidation | null;
+  costCenter?: string;
   mediaMap: Record<string, StoredReceiptMedia>;
   permissions: EffectivePermissions;
   onConfirmCloseLiquidation: () => Promise<void>;
   onMarkAsSent: (sentToEmail: string) => Promise<void>;
   onReopenLiquidation?: () => Promise<void>;
+  onPreviewPlanillaPdf?: () => void;
 }
 
 export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = ({
   isOpen,
   onClose,
   liquidation,
+  costCenter,
   mediaMap,
   permissions,
   onConfirmCloseLiquidation,
   onMarkAsSent,
   onReopenLiquidation,
+  onPreviewPlanillaPdf,
 }) => {
   const [recipientEmail, setRecipientEmail] = useState('contabilidad@premexcorp.com');
   const [ccEmail, setCcEmail] = useState('');
@@ -66,7 +71,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
 
   useEffect(() => {
     if (!isOpen || !liquidation) return;
-    const draft = buildViaticosEmailDraft(liquidation);
+    const draft = buildViaticosEmailDraft(liquidation, costCenter);
     setSubject(draft.subject);
     setBody(draft.body);
     setCcEmail(liquidation.consultorEmail || '');
@@ -78,7 +83,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
     setErrorMsg(null);
     setSuccessMsg(null);
     setCopiedBody(false);
-  }, [isOpen, liquidation]);
+  }, [isOpen, liquidation, costCenter]);
 
   if (!isOpen || !liquidation) return null;
 
@@ -105,7 +110,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
     setIsGeneratingExcel(true);
     setErrorMsg(null);
     try {
-      const filename = await exportViaticosExcel(liquidation);
+      const filename = await exportViaticosExcel(liquidation, costCenter);
       setExcelResult(filename);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Error generando el archivo Excel.');
@@ -135,7 +140,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
       if (isDraft && autoCloseOnDownload && permissions.canOperate) {
         await onConfirmCloseLiquidation();
       }
-      const xlsxName = await exportViaticosExcel(liquidation);
+      const xlsxName = await exportViaticosExcel(liquidation, costCenter);
       setExcelResult(xlsxName);
       const pdfRes = await exportViaticosReceiptsPdf(liquidation, mediaMap);
       setPdfResult(pdfRes);
@@ -357,6 +362,21 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                 )}
                 <span>Solo Excel (.xlsx)</span>
               </button>
+
+              {onPreviewPlanillaPdf && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onPreviewPlanillaPdf();
+                  }}
+                  disabled={liquidation.items.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <Printer className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Vista PDF / Imprimir</span>
+                </button>
+              )}
 
               <button
                 type="button"

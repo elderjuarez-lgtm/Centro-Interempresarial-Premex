@@ -18,6 +18,7 @@ import {
   Calendar,
   Coins,
   Archive,
+  Printer,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -31,6 +32,7 @@ import {
   CURRENCY_SYMBOLS,
   VIATICO_CURRENCIES,
   formatViaticoAmount,
+  resolveLiquidationCostCenter,
 } from '../../utils/viaticos';
 import { normalizeEmail } from '../../utils/permissions';
 
@@ -45,6 +47,7 @@ interface ViaticosHistorialViewProps {
   onOpenLiquidation: (id: string) => void;
   onCreateNewLiquidation: () => void;
   onDeleteLiquidation: (id: string) => void;
+  onPreviewPlanillaPdf: (liq: ViaticoLiquidation) => void;
   onDownloadExcel: (liq: ViaticoLiquidation) => void;
   onDownloadPdf: (liq: ViaticoLiquidation) => void;
   onOpenCloseConfirmFor: (liq: ViaticoLiquidation) => void;
@@ -65,6 +68,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   onOpenLiquidation,
   onCreateNewLiquidation,
   onDeleteLiquidation,
+  onPreviewPlanillaPdf,
   onDownloadExcel,
   onDownloadPdf,
   onOpenCloseConfirmFor,
@@ -98,9 +102,18 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   const [cEmail, setCEmail] = useState('');
   const [cEmpresa, setCEmpresa] = useState('Premex Corp');
   const [cCargo, setCCargo] = useState('Consultor Comercial');
+  const [cCentroCosto, setCCentroCosto] = useState('');
   const [cMoneda, setCMoneda] = useState<ViaticoCurrency>('Quetzales');
   const [cActivo, setCActivo] = useState(true);
   const [cError, setCError] = useState<string | null>(null);
+
+  const existingCostCenters = useMemo(() => {
+    const set = new Set<string>();
+    consultores.forEach((c) => {
+      if (c.centroCosto?.trim()) set.add(c.centroCosto.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [consultores]);
 
   // Base list scoped to closed/sent in 'cerradas' mode, or all liquidaciones in 'historial' mode
   const scopedLiquidaciones = useMemo(
@@ -186,6 +199,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
     setCEmail('');
     setCEmpresa(moduleCompanies[0]?.nombre || 'Premex Corp');
     setCCargo('Consultor Comercial');
+    setCCentroCosto('');
     setCMoneda('Quetzales');
     setCActivo(true);
     setCError(null);
@@ -198,6 +212,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
     setCEmail(c.email);
     setCEmpresa(c.empresa);
     setCCargo(c.cargo || '');
+    setCCentroCosto(c.centroCosto || '');
     setCMoneda(c.monedaBase);
     setCActivo(c.activo);
     setCError(null);
@@ -226,6 +241,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
       email: cleanEmail,
       empresa: cEmpresa.trim() || 'Premex Corp',
       cargo: cCargo.trim(),
+      centroCosto: cCentroCosto.trim(),
       monedaBase: cMoneda,
       activo: cActivo,
     });
@@ -584,6 +600,14 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                           <div className="text-[11px] font-mono text-slate-500">
                             {liq.consultorEmail || 'Sin correo'}
                           </div>
+                          {(() => {
+                            const cc = resolveLiquidationCostCenter(liq, consultores);
+                            return cc ? (
+                              <div className="text-[10px] font-semibold text-[#132B63] mt-0.5">
+                                C.C.: {cc}
+                              </div>
+                            ) : null;
+                          })()}
                         </td>
 
                         <td className="py-3.5 px-4 text-center font-mono tabular-nums text-slate-700">
@@ -657,6 +681,16 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                                 <span>Cerrar</span>
                               </button>
                             )}
+
+                            <button
+                              type="button"
+                              onClick={() => onPreviewPlanillaPdf(liq)}
+                              disabled={liq.items.length === 0}
+                              title="Vista PDF e Imprimir Planilla Excel"
+                              className="p-1.5 text-[#1E60A8] hover:bg-sky-50 disabled:opacity-40 rounded-lg cursor-pointer"
+                            >
+                              <Printer className="w-4 h-4" />
+                            </button>
 
                             <button
                               type="button"
@@ -771,6 +805,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                   <th className="py-3 px-4">Consultor</th>
                   <th className="py-3 px-4">Correo Corporativo (Vínculo)</th>
                   <th className="py-3 px-4">Empresa / Sociedad</th>
+                  <th className="py-3 px-4">Centro de Costo (Contabilidad)</th>
                   <th className="py-3 px-4">Moneda Base</th>
                   <th className="py-3 px-4">Estado</th>
                   {permissions.isAdmin && (
@@ -802,6 +837,13 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                       </span>
                     </td>
                     <td className="py-3.5 px-4 font-medium text-slate-800">{c.empresa}</td>
+                    <td className="py-3.5 px-4">
+                      {c.centroCosto ? (
+                        <span className="font-semibold text-[#132B63]">{c.centroCosto}</span>
+                      ) : (
+                        <span className="text-amber-700 italic">Sin asignar</span>
+                      )}
+                    </td>
                     <td className="py-3.5 px-4 text-slate-700">{c.monedaBase}</td>
                     <td className="py-3.5 px-4">
                       <span
@@ -938,6 +980,25 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Centro de Costo (se carga automáticamente en Contabilidad / Odoo)
+                </label>
+                <input
+                  type="text"
+                  list="viaticos-cost-centers-list"
+                  value={cCentroCosto}
+                  onChange={(e) => setCCentroCosto(e.target.value)}
+                  placeholder="Ej. CC-201 Comercial Guatemala"
+                  className="w-full px-3 py-2 text-xs font-semibold text-[#132B63] rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                />
+                <datalist id="viaticos-cost-centers-list">
+                  {existingCostCenters.map((cc) => (
+                    <option key={cc} value={cc} />
+                  ))}
+                </datalist>
               </div>
 
               <div>

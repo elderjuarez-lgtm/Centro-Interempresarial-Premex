@@ -19,10 +19,13 @@ import {
 } from '../../services/viaticosMediaStore';
 import {
   filterLiquidacionesByPermissions,
+  filterLiquidacionesForAccounting,
   recalculateLiquidationTotals,
+  resolveLiquidationCostCenter,
   resolveViaticosConsultantScope,
   roundMoney,
 } from '../../utils/viaticos';
+import { normalizeEmail } from '../../utils/permissions';
 import {
   exportViaticosExcel,
   exportViaticosReceiptsPdf,
@@ -31,7 +34,9 @@ import { ViaticosSidebar } from './ViaticosSidebar';
 import { ViaticosHeader } from './ViaticosHeader';
 import { ViaticosLiquidadorView } from './ViaticosLiquidadorView';
 import { ViaticosHistorialView } from './ViaticosHistorialView';
+import { ViaticosContabilidadView } from './ViaticosContabilidadView';
 import { ViaticosCloseEmailModal } from './ViaticosCloseEmailModal';
+import { ViaticosPlanillaPdfModal } from './ViaticosPlanillaPdfModal';
 import {
   NewLiquidationPayload,
   ViaticosNewLiquidationModal,
@@ -73,6 +78,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [closeConfirmLiqId, setCloseConfirmLiqId] = useState<string | null>(null);
   const [closeModalLiqId, setCloseModalLiqId] = useState<string | null>(null);
+  const [planillaPreviewLiqId, setPlanillaPreviewLiqId] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     type: 'success' | 'info' | 'error';
     message: string;
@@ -100,6 +106,12 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         scope.matchedConsultor
       ),
     [data.liquidaciones, permissions, scope.matchedConsultor]
+  );
+
+  // Consolidated multi-liquidador list for the Contabilidad / Odoo section
+  const accountingLiquidaciones = useMemo(
+    () => filterLiquidacionesForAccounting(data.liquidaciones, permissions),
+    [data.liquidaciones, permissions]
   );
 
   const openLiquidacionesCount = useMemo(
@@ -131,6 +143,15 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       visibleLiquidaciones.find((l) => l.id === closeModalLiqId) || activeLiquidation
     );
   }, [closeModalLiqId, visibleLiquidaciones, activeLiquidation]);
+
+  const planillaPreviewLiquidation = useMemo(() => {
+    if (!planillaPreviewLiqId) return null;
+    return (
+      accountingLiquidaciones.find((l) => l.id === planillaPreviewLiqId) ||
+      visibleLiquidaciones.find((l) => l.id === planillaPreviewLiqId) ||
+      activeLiquidation
+    );
+  }, [planillaPreviewLiqId, accountingLiquidaciones, visibleLiquidaciones, activeLiquidation]);
 
   // Load IndexedDB receipt media for active, close-confirm & email-modal liquidations
   useEffect(() => {
@@ -181,6 +202,8 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       consultorNombre: chosenConsultor?.nombreCompleto || 'Consultor Premex',
       consultorEmail: chosenConsultor?.email || permissions.email || '',
       empresa: payload.empresa || chosenConsultor?.empresa || 'Premex Corp',
+      centroCosto:
+        (payload.centroCosto || '').trim() || chosenConsultor?.centroCosto || '',
       monedaBase: payload.monedaBase,
       estado: 'borrador',
       items: [],
@@ -224,6 +247,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     consultorNombre?: string;
     consultorEmail?: string;
     empresa?: string;
+    centroCosto?: string;
     monedaBase?: ViaticoCurrency;
   }) => {
     if (!activeLiquidation || !permissions.canOperate) return;
@@ -409,13 +433,99 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   const handleUpsertConsultor = (consultor: ViaticoConsultor) => {
     if (!permissions.isAdmin) return;
     onUpdateData((prev) => {
-      const exists = prev.consultores.some((c) => c.id === consultor.id);
-      const nextConsultores = exists
+      const prevMatch = prev.consultores.find((c) => c.id === consultor.id);
+      const nextConsultores = prevMatch
         ? prev.consultores.map((c) => (c.id === consultor.id ? consultor : c))
         : [...prev.consultores, consultor];
-      return { ...prev, consultores: nextConsultores };
+
+      // Propagate updated Cost Center to this consultant's liquidations seamlessly
+      const prevCC = (prevMatch?.centroCosto || '').trim();
+      const nextCC = (consultor.centroCosto || '').trim();
+      const cleanEmail = normalizeEmail(consultor.email);
+      const nextLiquidaciones = prev.liquidaciones.map((l) => {
+        const belongsToConsultor =
+          l.consultorId === consultor.id ||
+          (cleanEmail && normalizeEmail(l.consultorEmail) === cleanEmail);
+        if (!belongsToConsultor) return l;
+        const currentLiqCC = (l.centroCosto || '').trim();
+        if (!currentLiqCC || currentLiqCC === prevCC) {
+          return { ...l, centroCosto: nextCC };
+        }
+        return l;
+      });
+
+      return {
+        ...prev,
+        consultores: nextConsultores,
+        liquidaciones: nextLiquidaciones,
+      };
     }, true);
-    showToast('success', `Consultor ${consultor.nombreCompleto} guardado en el listado.`);
+    showToast(
+      'success',
+      `Consultor ${consultor.nombreCompleto} guardado${
+        consultor.centroCosto ? ` (C.C.: ${consultor.centroCosto})` : ''
+      }.`
+    );
+  };
+
+  const handleAssignConsultorCostCenter = (params: {
+    consultorId: string;
+    consultorNombre: string;
+    consultorEmail: string;
+    empresa: string;
+    centroCosto: string;
+  }) => {
+    if (!permissions.canOperate) return;
+    const cleanEmail = normalizeEmail(params.consultorEmail);
+    const cleanCC = params.centroCosto.trim();
+
+    onUpdateData((prev) => {
+      const existingIdx = prev.consultores.findIndex(
+        (c) =>
+          c.id === params.consultorId ||
+          (cleanEmail && normalizeEmail(c.email) === cleanEmail)
+      );
+
+      let nextConsultores: ViaticoConsultor[];
+      if (existingIdx >= 0) {
+        nextConsultores = prev.consultores.map((c, idx) =>
+          idx === existingIdx ? { ...c, centroCosto: cleanCC } : c
+        );
+      } else {
+        nextConsultores = [
+          ...prev.consultores,
+          {
+            id: params.consultorId || `cons-${Date.now()}`,
+            nombreCompleto: params.consultorNombre,
+            email: cleanEmail,
+            empresa: params.empresa || 'Premex Corp',
+            cargo: 'Consultor / Liquidador',
+            centroCosto: cleanCC,
+            monedaBase: 'Quetzales',
+            activo: true,
+          },
+        ];
+      }
+
+      const nextLiquidaciones = prev.liquidaciones.map((l) => {
+        const matches =
+          l.consultorId === params.consultorId ||
+          (cleanEmail && normalizeEmail(l.consultorEmail) === cleanEmail) ||
+          l.consultorNombre === params.consultorNombre;
+        return matches ? { ...l, centroCosto: cleanCC } : l;
+      });
+
+      return {
+        ...prev,
+        consultores: nextConsultores,
+        liquidaciones: nextLiquidaciones,
+      };
+    }, true);
+
+    showToast(
+      'success',
+      `Centro de Costo "${cleanCC}" asignado a ${params.consultorNombre} y actualizado en la reportería contable.`
+    );
   };
 
   const handleDeleteConsultor = (consultorId: string) => {
@@ -435,7 +545,8 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     if (!liq || liq.items.length === 0) return;
     setIsDownloadingExcel(true);
     try {
-      const filename = await exportViaticosExcel(liq);
+      const cc = resolveLiquidationCostCenter(liq, data.consultores);
+      const filename = await exportViaticosExcel(liq, cc);
       showToast('success', `Excel descargado: ${filename}`);
     } catch (err: any) {
       showToast('error', err?.message || 'Error al generar el Excel.');
@@ -486,6 +597,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         permissions={permissions}
         openLiquidacionesCount={openLiquidacionesCount}
         closedLiquidacionesCount={closedLiquidacionesCount}
+        accountingLiquidacionesCount={accountingLiquidaciones.length}
         liquidacionesCount={visibleLiquidaciones.length}
         consultorScopeLabel={sidebarScopeLabel}
       />
@@ -503,6 +615,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
           }}
           onOpenCloseEmailModal={() => {
             if (activeLiquidation) setCloseModalLiqId(activeLiquidation.id);
+          }}
+          onOpenPlanillaPdfPreview={() => {
+            if (activeLiquidation) setPlanillaPreviewLiqId(activeLiquidation.id);
           }}
           onQuickDownloadExcel={() => {
             void handleQuickDownloadExcel(activeLiquidation);
@@ -585,6 +700,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               onSelectLiquidation={handleSelectLiquidation}
               onCreateNewLiquidation={handleOpenNewLiquidationModal}
               onUpdateHeader={handleUpdateHeader}
+              resolvedCostCenter={
+                activeLiquidation
+                  ? resolveLiquidationCostCenter(activeLiquidation, data.consultores)
+                  : ''
+              }
               onAddOrUpdateItem={handleAddOrUpdateItem}
               onDeleteItem={handleDeleteItem}
               onOpenCloseConfirmModal={() => {
@@ -592,6 +712,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               }}
               onOpenCloseEmailModal={() => {
                 if (activeLiquidation) setCloseModalLiqId(activeLiquidation.id);
+              }}
+              onOpenPlanillaPdfPreview={() => {
+                if (activeLiquidation) setPlanillaPreviewLiqId(activeLiquidation.id);
               }}
               onQuickDownloadExcel={() => {
                 void handleQuickDownloadExcel(activeLiquidation);
@@ -602,6 +725,18 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               isDownloadingExcel={isDownloadingExcel}
               isDownloadingPdf={isDownloadingPdf}
               onOpenClosedArchive={() => setActiveTab('cerradas')}
+            />
+          ) : activeTab === 'contabilidad' ? (
+            <ViaticosContabilidadView
+              liquidaciones={accountingLiquidaciones}
+              consultores={data.consultores}
+              permissions={permissions}
+              onPreviewPlanillaPdf={(liq) => setPlanillaPreviewLiqId(liq.id)}
+              onDownloadLiquidationExcel={(liq) => {
+                void handleQuickDownloadExcel(liq);
+              }}
+              onAssignConsultorCostCenter={handleAssignConsultorCostCenter}
+              onNotify={showToast}
             />
           ) : (
             <ViaticosHistorialView
@@ -618,6 +753,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               }}
               onCreateNewLiquidation={handleOpenNewLiquidationModal}
               onDeleteLiquidation={handleDeleteLiquidation}
+              onPreviewPlanillaPdf={(liq) => setPlanillaPreviewLiqId(liq.id)}
               onDownloadExcel={(liq) => {
                 void handleQuickDownloadExcel(liq);
               }}
@@ -652,6 +788,19 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         onCreate={handleCreateNewLiquidation}
       />
 
+      {/* Printable Landscape PDF Preview Modal matching the official Premex Excel sheet */}
+      <ViaticosPlanillaPdfModal
+        isOpen={Boolean(planillaPreviewLiqId && planillaPreviewLiquidation)}
+        onClose={() => setPlanillaPreviewLiqId(null)}
+        liquidation={planillaPreviewLiquidation}
+        costCenter={
+          planillaPreviewLiquidation
+            ? resolveLiquidationCostCenter(planillaPreviewLiquidation, data.consultores)
+            : ''
+        }
+        onDownloadExcel={(liq) => handleQuickDownloadExcel(liq)}
+      />
+
       {/* Standalone Close Liquidation Modal (no mandatory email dispatch + instant Excel/PDF + Closed Archive) */}
       <ViaticosCloseConfirmModal
         isOpen={Boolean(closeConfirmLiqId && closeConfirmLiquidation)}
@@ -659,6 +808,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         liquidation={closeConfirmLiquidation}
         mediaMap={mediaMap}
         onConfirmClose={(liqId) => handleConfirmCloseLiquidation(liqId)}
+        onPreviewPlanillaPdf={(liq) => setPlanillaPreviewLiqId(liq.id)}
         onDownloadExcel={(liq) => handleQuickDownloadExcel(liq)}
         onDownloadPdf={(liq) => handleQuickDownloadPdf(liq)}
         onOpenEmailModal={(liqId) => setCloseModalLiqId(liqId)}
@@ -671,6 +821,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         isOpen={Boolean(closeModalLiqId && modalLiquidation)}
         onClose={() => setCloseModalLiqId(null)}
         liquidation={modalLiquidation}
+        costCenter={
+          modalLiquidation
+            ? resolveLiquidationCostCenter(modalLiquidation, data.consultores)
+            : ''
+        }
         mediaMap={mediaMap}
         permissions={permissions}
         onConfirmCloseLiquidation={() =>
@@ -680,6 +835,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         onReopenLiquidation={
           permissions.isAdmin
             ? () => handleReopenLiquidation(modalLiquidation?.id)
+            : undefined
+        }
+        onPreviewPlanillaPdf={
+          modalLiquidation
+            ? () => setPlanillaPreviewLiqId(modalLiquidation.id)
             : undefined
         }
       />

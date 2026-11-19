@@ -20,9 +20,13 @@ import { handleFirestoreError, OperationType } from './reconciliationStore';
 import {
   BankAccount,
   BankMatchGroup,
+  BankSociety,
   BankStatementItem,
   BookLedgerItem,
+  SapBalanceRow,
+  SapOpenItem,
 } from '../types';
+import { classifySapOpenItem, extractSapAccountRoot } from '../utils/bankReconciliation';
 
 export const DEFAULT_BANK_REC_ID = 'principal-bancos';
 
@@ -33,7 +37,10 @@ export interface SavedBankReconciliationDoc {
   title: string;
   selectedMonth: string;
   selectedAccountId?: string;
+  societies: BankSociety[];
   accounts: BankAccount[];
+  sapOpenItems: SapOpenItem[];
+  sapBalanceRows: SapBalanceRow[];
   statementItems: BankStatementItem[];
   ledgerItems: BookLedgerItem[];
   matches: BankMatchGroup[];
@@ -43,28 +50,183 @@ export interface SavedBankReconciliationDoc {
   updatedAtIso?: string;
 }
 
+const sanitizeSaldosPorMes = (
+  raw: BankAccount['saldosPorMes']
+): BankAccount['saldosPorMes'] => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const entries = Object.entries(raw).slice(0, 48);
+  if (entries.length === 0) return undefined;
+  const clean: NonNullable<BankAccount['saldosPorMes']> = {};
+  entries.forEach(([monthKey, val]) => {
+    const safeKey = String(monthKey || '').trim().slice(0, 60);
+    if (!safeKey || !val || typeof val !== 'object') return;
+    const rec: NonNullable<BankAccount['saldosPorMes']>[string] = {
+      saldoLibros: Number.isFinite(Number(val.saldoLibros)) ? Number(val.saldoLibros) : 0,
+      saldoExtracto: Number.isFinite(Number(val.saldoExtracto)) ? Number(val.saldoExtracto) : 0,
+    };
+    if (val.saldoCuenta00 !== undefined && Number.isFinite(Number(val.saldoCuenta00))) {
+      rec.saldoCuenta00 = Number(val.saldoCuenta00);
+    }
+    if (val.saldoCuenta01 !== undefined && Number.isFinite(Number(val.saldoCuenta01))) {
+      rec.saldoCuenta01 = Number(val.saldoCuenta01);
+    }
+    if (val.saldoCuenta02 !== undefined && Number.isFinite(Number(val.saldoCuenta02))) {
+      rec.saldoCuenta02 = Number(val.saldoCuenta02);
+    }
+    if (val.saldoExtractoManual !== undefined) {
+      rec.saldoExtractoManual = Boolean(val.saldoExtractoManual);
+    }
+    if (val.fechaCorte) rec.fechaCorte = String(val.fechaCorte).slice(0, 30);
+    if (val.fuenteLibros) rec.fuenteLibros = String(val.fuenteLibros).slice(0, 120);
+    if (val.fuenteExtracto) rec.fuenteExtracto = String(val.fuenteExtracto).slice(0, 120);
+    if (val.updatedAtIso) rec.updatedAtIso = String(val.updatedAtIso).slice(0, 40);
+    clean[safeKey] = rec;
+  });
+  return Object.keys(clean).length > 0 ? clean : undefined;
+};
+
+const sanitizeSocieties = (societies: BankSociety[]): BankSociety[] =>
+  (Array.isArray(societies) ? societies : []).slice(0, 100).map((s, idx) => {
+    const clean: BankSociety = {
+      id: String(s.id || `soc-${idx + 1}`).slice(0, 128),
+      codigoSociedad: String(s.codigoSociedad || `${(idx + 1) * 1000}`).trim().slice(0, 30),
+      nombre: String(s.nombre || 'Sociedad').trim().slice(0, 120),
+      pais: String(s.pais || 'Colombia').trim().slice(0, 80),
+      moneda: s.moneda || 'COP',
+      activa: s.activa !== false,
+    };
+    if (s.nit && String(s.nit).trim()) clean.nit = String(s.nit).trim().slice(0, 60);
+    return clean;
+  });
+
 const sanitizeAccounts = (accounts: BankAccount[]): BankAccount[] =>
-  accounts.slice(0, 100).map((a, idx) => ({
-    id: String(a.id || `acc-${idx + 1}`).slice(0, 128),
-    banco: String(a.banco || 'Banco').slice(0, 120),
-    numeroCuenta: String(a.numeroCuenta || '').slice(0, 80),
-    sociedad: String(a.sociedad || 'Premex').slice(0, 120),
-    pais: String(a.pais || '').slice(0, 80),
-    moneda: a.moneda || 'USD',
-    tipoCuenta: a.tipoCuenta || 'Corriente',
-    saldoInicialLibros: Number.isFinite(Number(a.saldoInicialLibros))
-      ? Number(a.saldoInicialLibros)
-      : 0,
-    saldoFinalExtracto: Number.isFinite(Number(a.saldoFinalExtracto))
-      ? Number(a.saldoFinalExtracto)
-      : 0,
-    saldoFinalLibros: Number.isFinite(Number(a.saldoFinalLibros))
-      ? Number(a.saldoFinalLibros)
-      : 0,
-  }));
+  (Array.isArray(accounts) ? accounts : []).slice(0, 300).map((a, idx) => {
+    const clean: BankAccount = {
+      id: String(a.id || `acc-${idx + 1}`).slice(0, 128),
+      banco: String(a.banco || 'Banco').slice(0, 120),
+      numeroCuenta: String(a.numeroCuenta || '').slice(0, 80),
+      sociedad: String(a.sociedad || 'Premex').slice(0, 120),
+      pais: String(a.pais || '').slice(0, 80),
+      moneda: a.moneda || 'USD',
+      tipoCuenta: a.tipoCuenta || 'Corriente',
+      saldoInicialLibros: Number.isFinite(Number(a.saldoInicialLibros))
+        ? Number(a.saldoInicialLibros)
+        : 0,
+      saldoFinalExtracto: Number.isFinite(Number(a.saldoFinalExtracto))
+        ? Number(a.saldoFinalExtracto)
+        : 0,
+      saldoFinalLibros: Number.isFinite(Number(a.saldoFinalLibros))
+        ? Number(a.saldoFinalLibros)
+        : 0,
+    };
+    if (a.codigoSociedad && String(a.codigoSociedad).trim()) {
+      clean.codigoSociedad = String(a.codigoSociedad).trim().slice(0, 30);
+    }
+    if (a.productoCuenta && a.productoCuenta.trim()) {
+      clean.productoCuenta = String(a.productoCuenta).trim().slice(0, 140);
+    }
+    if (a.codigoContable && a.codigoContable.trim()) {
+      clean.codigoContable = String(a.codigoContable).trim().slice(0, 60);
+    }
+    if (a.raizContable && a.raizContable.trim()) {
+      clean.raizContable = String(a.raizContable).trim().slice(0, 60);
+    }
+    if (a.cuentaMayor00 && a.cuentaMayor00.trim()) {
+      clean.cuentaMayor00 = String(a.cuentaMayor00).trim().slice(0, 60);
+    }
+    if (a.cuentaMayor01 && a.cuentaMayor01.trim()) {
+      clean.cuentaMayor01 = String(a.cuentaMayor01).trim().slice(0, 60);
+    }
+    if (a.cuentaMayor02 && a.cuentaMayor02.trim()) {
+      clean.cuentaMayor02 = String(a.cuentaMayor02).trim().slice(0, 60);
+    }
+    if (a.saldoCuenta00 !== undefined && Number.isFinite(Number(a.saldoCuenta00))) {
+      clean.saldoCuenta00 = Number(a.saldoCuenta00);
+    }
+    if (a.saldoCuenta01 !== undefined && Number.isFinite(Number(a.saldoCuenta01))) {
+      clean.saldoCuenta01 = Number(a.saldoCuenta01);
+    }
+    if (a.saldoCuenta02 !== undefined && Number.isFinite(Number(a.saldoCuenta02))) {
+      clean.saldoCuenta02 = Number(a.saldoCuenta02);
+    }
+    if (a.saldoExtractoManual !== undefined) {
+      clean.saldoExtractoManual = Boolean(a.saldoExtractoManual);
+    }
+    if (a.fechaCorte && a.fechaCorte.trim()) {
+      clean.fechaCorte = String(a.fechaCorte).trim().slice(0, 30);
+    }
+    const cleanMonthly = sanitizeSaldosPorMes(a.saldosPorMes);
+    if (cleanMonthly) clean.saldosPorMes = cleanMonthly;
+    return clean;
+  });
+
+const sanitizeSapOpenItems = (items: SapOpenItem[]): SapOpenItem[] =>
+  (Array.isArray(items) ? items : []).slice(0, 5000).map((item, idx) => {
+    const parsedGl = extractSapAccountRoot(item.cuentaMayor || '');
+    const importe = Number.isFinite(Number(item.importeMonedaLocal))
+      ? Math.round(Number(item.importeMonedaLocal) * 100) / 100
+      : 0;
+    const clase = String(item.claseDocumento || 'AB').trim().toUpperCase().slice(0, 12);
+    const clean: SapOpenItem = {
+      id: String(item.id || `sap-${idx + 1}`).slice(0, 128),
+      cuentaId: String(item.cuentaId || '').slice(0, 128),
+      sociedadCodigo: String(item.sociedadCodigo || '').trim().slice(0, 30),
+      sociedadNombre: String(item.sociedadNombre || '').trim().slice(0, 120),
+      cuentaMayor: String(item.cuentaMayor || '').trim().slice(0, 40),
+      raizContable: String(item.raizContable || parsedGl.raiz).trim().slice(0, 40),
+      subcuentaTipo:
+        item.subcuentaTipo === '00' || item.subcuentaTipo === '01' || item.subcuentaTipo === '02'
+          ? item.subcuentaTipo
+          : parsedGl.subcuenta,
+      claveRef1: String(item.claveRef1 || '').slice(0, 80),
+      claveRef3: String(item.claveRef3 || '').slice(0, 120),
+      referencia: String(item.referencia || '').slice(0, 80),
+      numeroDocumento: String(item.numeroDocumento || '').slice(0, 80),
+      claseDocumento: clase,
+      fechaDocumento: String(item.fechaDocumento || '').slice(0, 30),
+      fechaContabilizacion: String(item.fechaContabilizacion || '').slice(0, 30),
+      importeMonedaLocal: importe,
+      monedaLocal: item.monedaLocal || 'COP',
+      texto: String(item.texto || '').slice(0, 220),
+      mes: String(item.mes || 'Octubre 2026').slice(0, 60),
+      seccionAuto: item.seccionAuto || classifySapOpenItem(clase, importe),
+    };
+    if (item.seccionManual) clean.seccionManual = item.seccionManual;
+    if (item.comentario && String(item.comentario).trim()) {
+      clean.comentario = String(item.comentario).trim().slice(0, 300);
+    }
+    if (item.origen === 'sap_fbl3n' || item.origen === 'manual') {
+      clean.origen = item.origen;
+    }
+    return clean;
+  });
+
+const sanitizeSapBalanceRows = (rows: SapBalanceRow[]): SapBalanceRow[] =>
+  (Array.isArray(rows) ? rows : []).slice(0, 5000).map((row, idx) => {
+    const parsedGl = extractSapAccountRoot(row.cuentaMayor || '');
+    const clean: SapBalanceRow = {
+      id: String(row.id || `sbal-${idx + 1}`).slice(0, 128),
+      sociedadCodigo: String(row.sociedadCodigo || '').trim().slice(0, 30),
+      sociedadNombre: String(row.sociedadNombre || '').trim().slice(0, 120),
+      cuentaMayor: String(row.cuentaMayor || '').trim().slice(0, 40),
+      raizContable: String(row.raizContable || parsedGl.raiz).trim().slice(0, 40),
+      subcuentaTipo:
+        row.subcuentaTipo === '00' || row.subcuentaTipo === '01' || row.subcuentaTipo === '02'
+          ? row.subcuentaTipo
+          : parsedGl.subcuenta,
+      denominacion: String(row.denominacion || '').slice(0, 180),
+      nuevoSaldo: Number.isFinite(Number(row.nuevoSaldo))
+        ? Math.round(Number(row.nuevoSaldo) * 100) / 100
+        : 0,
+      moneda: row.moneda || 'COP',
+      mes: String(row.mes || 'Octubre 2026').slice(0, 60),
+    };
+    if (row.fechaCorte) clean.fechaCorte = String(row.fechaCorte).slice(0, 30);
+    return clean;
+  });
 
 const sanitizeStatements = (items: BankStatementItem[]): BankStatementItem[] =>
-  items.slice(0, 5000).map((i, idx) => {
+  (Array.isArray(items) ? items : []).slice(0, 5000).map((i, idx) => {
     const clean: BankStatementItem = {
       id: String(i.id || `bs-${idx + 1}`).slice(0, 128),
       cuentaId: String(i.cuentaId || '').slice(0, 128),
@@ -73,15 +235,18 @@ const sanitizeStatements = (items: BankStatementItem[]): BankStatementItem[] =>
       descripcion: String(i.descripcion || '').slice(0, 200),
       tipo: i.tipo === 'CREDITO' ? 'CREDITO' : 'DEBITO',
       valor: Number.isFinite(Number(i.valor)) ? Math.abs(Number(i.valor)) : 0,
-      mes: String(i.mes || 'Septiembre 2026').slice(0, 60),
+      mes: String(i.mes || 'Octubre 2026').slice(0, 60),
     };
     if (i.categoriaPendiente) clean.categoriaPendiente = i.categoriaPendiente;
     if (i.comentario && i.comentario.trim()) clean.comentario = i.comentario.slice(0, 300);
+    if (i.origenCarga === 'conciliacion_directa' || i.origenCarga === 'extracto_completo') {
+      clean.origenCarga = i.origenCarga;
+    }
     return clean;
   });
 
 const sanitizeLedgers = (items: BookLedgerItem[]): BookLedgerItem[] =>
-  items.slice(0, 5000).map((i, idx) => {
+  (Array.isArray(items) ? items : []).slice(0, 5000).map((i, idx) => {
     const clean: BookLedgerItem = {
       id: String(i.id || `bl-${idx + 1}`).slice(0, 128),
       cuentaId: String(i.cuentaId || '').slice(0, 128),
@@ -91,19 +256,22 @@ const sanitizeLedgers = (items: BookLedgerItem[]): BookLedgerItem[] =>
       descripcion: String(i.descripcion || '').slice(0, 200),
       tipo: i.tipo === 'DEBITO' ? 'DEBITO' : 'CREDITO',
       valor: Number.isFinite(Number(i.valor)) ? Math.abs(Number(i.valor)) : 0,
-      mes: String(i.mes || 'Septiembre 2026').slice(0, 60),
+      mes: String(i.mes || 'Octubre 2026').slice(0, 60),
     };
     if (i.categoriaPendiente) clean.categoriaPendiente = i.categoriaPendiente;
     if (i.comentario && i.comentario.trim()) clean.comentario = i.comentario.slice(0, 300);
+    if (i.origenCarga === 'conciliacion_directa' || i.origenCarga === 'extracto_completo') {
+      clean.origenCarga = i.origenCarga;
+    }
     return clean;
   });
 
 const sanitizeMatches = (matches: BankMatchGroup[]): BankMatchGroup[] =>
-  matches.slice(0, 5000).map((m, idx) => {
+  (Array.isArray(matches) ? matches : []).slice(0, 5000).map((m, idx) => {
     const clean: BankMatchGroup = {
       id: String(m.id || `bm-${idx + 1}`).slice(0, 128),
       cuentaId: String(m.cuentaId || '').slice(0, 128),
-      mes: String(m.mes || 'Septiembre 2026').slice(0, 60),
+      mes: String(m.mes || 'Octubre 2026').slice(0, 60),
       bankItemIds: Array.isArray(m.bankItemIds) ? m.bankItemIds.slice(0, 50).map(String) : [],
       ledgerItemIds: Array.isArray(m.ledgerItemIds) ? m.ledgerItemIds.slice(0, 50).map(String) : [],
       method:
@@ -185,9 +353,12 @@ const fetchBankDocViaRest = async (docId: string): Promise<SavedBankReconciliati
     ownerId: String(parsed.ownerId || ''),
     ownerName: parsed.ownerName ? String(parsed.ownerName) : undefined,
     title: String(parsed.title || 'Conciliación Bancaria Premex'),
-    selectedMonth: String(parsed.selectedMonth || 'Septiembre 2026'),
+    selectedMonth: String(parsed.selectedMonth || 'Octubre 2026'),
     selectedAccountId: parsed.selectedAccountId ? String(parsed.selectedAccountId) : undefined,
+    societies: Array.isArray(parsed.societies) ? parsed.societies : [],
     accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
+    sapOpenItems: Array.isArray(parsed.sapOpenItems) ? parsed.sapOpenItems : [],
+    sapBalanceRows: Array.isArray(parsed.sapBalanceRows) ? parsed.sapBalanceRows : [],
     statementItems: Array.isArray(parsed.statementItems) ? parsed.statementItems : [],
     ledgerItems: Array.isArray(parsed.ledgerItems) ? parsed.ledgerItems : [],
     matches: Array.isArray(parsed.matches) ? parsed.matches : [],
@@ -232,9 +403,12 @@ export const subscribeToBankReconciliation = (
         ownerId: String(data.ownerId || ''),
         ownerName: data.ownerName ? String(data.ownerName) : undefined,
         title: String(data.title || 'Conciliación Bancaria Premex'),
-        selectedMonth: String(data.selectedMonth || 'Septiembre 2026'),
+        selectedMonth: String(data.selectedMonth || 'Octubre 2026'),
         selectedAccountId: data.selectedAccountId ? String(data.selectedAccountId) : undefined,
+        societies: Array.isArray(data.societies) ? data.societies : [],
         accounts: Array.isArray(data.accounts) ? data.accounts : [],
+        sapOpenItems: Array.isArray(data.sapOpenItems) ? data.sapOpenItems : [],
+        sapBalanceRows: Array.isArray(data.sapBalanceRows) ? data.sapBalanceRows : [],
         statementItems: Array.isArray(data.statementItems) ? data.statementItems : [],
         ledgerItems: Array.isArray(data.ledgerItems) ? data.ledgerItems : [],
         matches: Array.isArray(data.matches) ? data.matches : [],
@@ -265,7 +439,10 @@ export const saveBankReconciliationToCloud = async (params: {
   title: string;
   selectedMonth: string;
   selectedAccountId: string;
+  societies: BankSociety[];
   accounts: BankAccount[];
+  sapOpenItems: SapOpenItem[];
+  sapBalanceRows: SapBalanceRow[];
   statementItems: BankStatementItem[];
   ledgerItems: BookLedgerItem[];
   matches: BankMatchGroup[];
@@ -275,16 +452,19 @@ export const saveBankReconciliationToCloud = async (params: {
     throw new Error('Inicia sesión con Google para guardar la conciliación bancaria en la nube.');
   }
 
-  let docId = /^[a-zA-Z0-9_-]{1,128}$/.test(params.targetId)
+  const docId = /^[a-zA-Z0-9_-]{1,128}$/.test(params.targetId)
     ? params.targetId
     : DEFAULT_BANK_REC_ID;
 
+  const cleanSocieties = sanitizeSocieties(params.societies);
   const cleanAccounts = sanitizeAccounts(params.accounts);
+  const cleanSapOpenItems = sanitizeSapOpenItems(params.sapOpenItems);
+  const cleanSapBalanceRows = sanitizeSapBalanceRows(params.sapBalanceRows);
   const cleanStatements = sanitizeStatements(params.statementItems);
   const cleanLedgers = sanitizeLedgers(params.ledgerItems);
   const cleanMatches = sanitizeMatches(params.matches);
   const cleanTitle = (params.title.trim() || 'Conciliación Bancaria Premex').slice(0, 150);
-  const cleanMonth = (params.selectedMonth.trim() || 'Septiembre 2026').slice(0, 60);
+  const cleanMonth = (params.selectedMonth.trim() || 'Octubre 2026').slice(0, 60);
   const cleanAccountId = String(params.selectedAccountId || '').slice(0, 128);
   const cleanOwnerName = (user.displayName || user.email || 'Usuario').slice(0, 120);
 
@@ -299,7 +479,10 @@ export const saveBankReconciliationToCloud = async (params: {
       title: cleanTitle,
       selectedMonth: cleanMonth,
       selectedAccountId: cleanAccountId,
+      societies: cleanSocieties,
       accounts: cleanAccounts,
+      sapOpenItems: cleanSapOpenItems,
+      sapBalanceRows: cleanSapBalanceRows,
       statementItems: cleanStatements,
       ledgerItems: cleanLedgers,
       matches: cleanMatches,
@@ -331,7 +514,10 @@ export const saveBankReconciliationToCloud = async (params: {
           'title',
           'selectedMonth',
           'selectedAccountId',
+          'societies',
           'accounts',
+          'sapOpenItems',
+          'sapBalanceRows',
           'statementItems',
           'ledgerItems',
           'matches',
@@ -387,7 +573,10 @@ export const saveBankReconciliationToCloud = async (params: {
           title: cleanTitle,
           selectedMonth: cleanMonth,
           selectedAccountId: cleanAccountId,
+          societies: cleanSocieties,
           accounts: cleanAccounts,
+          sapOpenItems: cleanSapOpenItems,
+          sapBalanceRows: cleanSapBalanceRows,
           statementItems: cleanStatements,
           ledgerItems: cleanLedgers,
           matches: cleanMatches,
@@ -414,7 +603,10 @@ export const saveBankReconciliationToCloud = async (params: {
         title: cleanTitle,
         selectedMonth: cleanMonth,
         selectedAccountId: cleanAccountId,
+        societies: cleanSocieties,
         accounts: cleanAccounts,
+        sapOpenItems: cleanSapOpenItems,
+        sapBalanceRows: cleanSapBalanceRows,
         statementItems: cleanStatements,
         ledgerItems: cleanLedgers,
         matches: cleanMatches,

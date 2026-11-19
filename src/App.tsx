@@ -20,9 +20,12 @@ import {
   ReconciliationScope,
   DirectorySyncState,
   BankAccount,
+  BankSociety,
   BankStatementItem,
   BookLedgerItem,
   BankMatchGroup,
+  SapBalanceRow,
+  SapOpenItem,
   AccessControlPolicy,
   UserPermissionRecord,
   ViaticoConsultor,
@@ -42,7 +45,10 @@ import {
   getIntercompanyScopeLabel,
 } from './utils/demoData';
 import {
+  INITIAL_BANK_SOCIETIES,
   INITIAL_BANK_ACCOUNTS,
+  INITIAL_SAP_BALANCE_ROWS,
+  INITIAL_SAP_OPEN_ITEMS,
   INITIAL_BANK_STATEMENT_ITEMS,
   INITIAL_BOOK_LEDGER_ITEMS,
   INITIAL_BANK_MATCHES,
@@ -146,11 +152,14 @@ const RBAC_STORAGE_KEYS = {
   POLICY: 'premex_rbac_policy_v1',
 };
 const BANK_STORAGE_KEYS = {
-  ACCOUNTS: 'premex_bancos_accounts_v1',
+  SOCIETIES: 'premex_bancos_societies_v2',
+  ACCOUNTS: 'premex_bancos_accounts_v2',
+  SAP_OPEN_ITEMS: 'premex_bancos_sap_open_items_v2',
+  SAP_BALANCE_ROWS: 'premex_bancos_sap_balance_rows_v2',
   STATEMENTS: 'premex_bancos_statements_v1',
   LEDGER: 'premex_bancos_ledger_v1',
   MATCHES: 'premex_bancos_matches_v1',
-  SELECTED_ACCOUNT: 'premex_bancos_selected_account_v1',
+  SELECTED_ACCOUNT: 'premex_bancos_selected_account_v2',
   DOC_ID: 'premex_bancos_doc_id_v1',
 };
 const VIATICOS_STORAGE_KEYS = {
@@ -315,10 +324,45 @@ function getInitialModuleFromUrl(): ActiveModuleId {
   return 'launcher';
 }
 
+function deriveSocietiesFromAccounts(accounts: BankAccount[]): BankSociety[] {
+  const map = new Map<string, BankSociety>();
+  accounts.forEach((a, idx) => {
+    const code = (a.codigoSociedad || `${(idx + 1) * 1000}`).trim().toUpperCase();
+    const key = a.codigoSociedad ? code : a.sociedad.trim().toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, {
+        id: `soc-auto-${code}`,
+        codigoSociedad: code,
+        nombre: a.sociedad,
+        pais: a.pais || 'Colombia',
+        moneda: a.moneda || 'COP',
+        activa: true,
+      });
+    }
+  });
+  return Array.from(map.values());
+}
+
 function loadInitialBankWorkspace(): BankWorkspaceData {
   const accounts = readJsonStorage<BankAccount[]>(
     BANK_STORAGE_KEYS.ACCOUNTS,
     INITIAL_BANK_ACCOUNTS
+  );
+  const rawSocieties = readJsonStorage<BankSociety[]>(
+    BANK_STORAGE_KEYS.SOCIETIES,
+    INITIAL_BANK_SOCIETIES
+  );
+  const societies =
+    Array.isArray(rawSocieties) && rawSocieties.length > 0
+      ? rawSocieties
+      : deriveSocietiesFromAccounts(accounts);
+  const sapOpenItems = readJsonStorage<SapOpenItem[]>(
+    BANK_STORAGE_KEYS.SAP_OPEN_ITEMS,
+    INITIAL_SAP_OPEN_ITEMS
+  );
+  const sapBalanceRows = readJsonStorage<SapBalanceRow[]>(
+    BANK_STORAGE_KEYS.SAP_BALANCE_ROWS,
+    INITIAL_SAP_BALANCE_ROWS
   );
   const statementItems = readJsonStorage<BankStatementItem[]>(
     BANK_STORAGE_KEYS.STATEMENTS,
@@ -351,11 +395,19 @@ function loadInitialBankWorkspace(): BankWorkspaceData {
     return DEFAULT_BANK_REC_ID;
   })();
 
-  const firstMonth = statementItems[0]?.mes || ledgerItems[0]?.mes || 'Septiembre 2026';
+  const firstMonth =
+    sapOpenItems[0]?.mes ||
+    sapBalanceRows[0]?.mes ||
+    (accounts[0]?.saldosPorMes ? Object.keys(accounts[0].saldosPorMes)[0] : '') ||
+    statementItems[0]?.mes ||
+    'Octubre 2026';
 
   return {
     docId: savedDocId,
+    societies,
     accounts,
+    sapOpenItems,
+    sapBalanceRows,
     statementItems,
     ledgerItems,
     matches,
@@ -964,7 +1016,16 @@ export default function App() {
   // Persist Bank Reconciliation workspace to localStorage
   useEffect(() => {
     try {
+      localStorage.setItem(BANK_STORAGE_KEYS.SOCIETIES, JSON.stringify(bankWorkspace.societies));
       localStorage.setItem(BANK_STORAGE_KEYS.ACCOUNTS, JSON.stringify(bankWorkspace.accounts));
+      localStorage.setItem(
+        BANK_STORAGE_KEYS.SAP_OPEN_ITEMS,
+        JSON.stringify(bankWorkspace.sapOpenItems)
+      );
+      localStorage.setItem(
+        BANK_STORAGE_KEYS.SAP_BALANCE_ROWS,
+        JSON.stringify(bankWorkspace.sapBalanceRows)
+      );
       localStorage.setItem(
         BANK_STORAGE_KEYS.STATEMENTS,
         JSON.stringify(bankWorkspace.statementItems)
@@ -989,21 +1050,37 @@ export default function App() {
       (savedDoc) => {
         if (!savedDoc) return;
         if (bankUnsavedRef.current) return;
-        setBankWorkspace((prev) => ({
-          ...prev,
-          accounts: savedDoc.accounts.length > 0 ? savedDoc.accounts : prev.accounts,
-          statementItems: savedDoc.statementItems,
-          ledgerItems: savedDoc.ledgerItems,
-          matches: savedDoc.matches,
-          selectedMonth: savedDoc.selectedMonth || prev.selectedMonth,
-          selectedAccountId:
-            savedDoc.selectedAccountId &&
-            savedDoc.accounts.some((a) => a.id === savedDoc.selectedAccountId)
-              ? savedDoc.selectedAccountId
-              : savedDoc.accounts[0]?.id || prev.selectedAccountId,
-          lastSavedAtIso: savedDoc.updatedAtIso || new Date().toISOString(),
-          hasUnsavedChanges: false,
-        }));
+        setBankWorkspace((prev) => {
+          const nextAccounts = savedDoc.accounts.length > 0 ? savedDoc.accounts : prev.accounts;
+          const nextSocieties =
+            savedDoc.societies && savedDoc.societies.length > 0
+              ? savedDoc.societies
+              : prev.societies.length > 0
+              ? prev.societies
+              : deriveSocietiesFromAccounts(nextAccounts);
+          const hasSapPayload =
+            (savedDoc.societies && savedDoc.societies.length > 0) ||
+            (savedDoc.sapOpenItems && savedDoc.sapOpenItems.length > 0) ||
+            (savedDoc.sapBalanceRows && savedDoc.sapBalanceRows.length > 0);
+          return {
+            ...prev,
+            societies: nextSocieties,
+            accounts: nextAccounts,
+            sapOpenItems: hasSapPayload ? savedDoc.sapOpenItems || [] : prev.sapOpenItems,
+            sapBalanceRows: hasSapPayload ? savedDoc.sapBalanceRows || [] : prev.sapBalanceRows,
+            statementItems: savedDoc.statementItems,
+            ledgerItems: savedDoc.ledgerItems,
+            matches: savedDoc.matches,
+            selectedMonth: savedDoc.selectedMonth || prev.selectedMonth,
+            selectedAccountId:
+              savedDoc.selectedAccountId &&
+              nextAccounts.some((a) => a.id === savedDoc.selectedAccountId)
+                ? savedDoc.selectedAccountId
+                : nextAccounts[0]?.id || prev.selectedAccountId,
+            lastSavedAtIso: savedDoc.updatedAtIso || new Date().toISOString(),
+            hasUnsavedChanges: false,
+          };
+        });
       },
       (err) => {
         console.warn('Error loading cloud bank reconciliation:', err);
@@ -1241,7 +1318,10 @@ export default function App() {
       title: `Conciliación Bancaria Premex - ${bankWorkspace.selectedMonth}`,
       selectedMonth: bankWorkspace.selectedMonth,
       selectedAccountId: bankWorkspace.selectedAccountId,
+      societies: bankWorkspace.societies,
       accounts: bankWorkspace.accounts,
+      sapOpenItems: bankWorkspace.sapOpenItems,
+      sapBalanceRows: bankWorkspace.sapBalanceRows,
       statementItems: bankWorkspace.statementItems,
       ledgerItems: bankWorkspace.ledgerItems,
       matches: bankWorkspace.matches,
@@ -1692,11 +1772,18 @@ export default function App() {
 
     const bancosList = mergeRuntimeSocietyNames(
       standaloneModuleCompanies.bancos,
-      bankWorkspace.accounts.map((a) => ({
-        nombre: a.sociedad,
-        pais: a.pais,
-        moneda: a.moneda,
-      })),
+      [
+        ...bankWorkspace.societies.map((s) => ({
+          nombre: s.nombre,
+          pais: s.pais,
+          moneda: s.moneda,
+        })),
+        ...bankWorkspace.accounts.map((a) => ({
+          nombre: a.sociedad,
+          pais: a.pais,
+          moneda: a.moneda,
+        })),
+      ],
       'bnk'
     );
     const viaticosList = mergeRuntimeSocietyNames(
@@ -1719,6 +1806,7 @@ export default function App() {
   }, [
     intercompanyScopeCompanies,
     standaloneModuleCompanies,
+    bankWorkspace.societies,
     bankWorkspace.accounts,
     viaticosWorkspace.consultores,
     viaticosWorkspace.liquidaciones,
@@ -1756,14 +1844,20 @@ export default function App() {
       bankWorkspace.statementItems,
       bankWorkspace.ledgerItems,
       bankWorkspace.matches,
-      effectivePermissions
+      effectivePermissions,
+      bankWorkspace.societies,
+      bankWorkspace.sapOpenItems,
+      bankWorkspace.sapBalanceRows
     );
     const selectedValid = filtered.accounts.some(
       (a) => a.id === bankWorkspace.selectedAccountId
     );
     return {
       ...bankWorkspace,
+      societies: filtered.societies,
       accounts: filtered.accounts,
+      sapOpenItems: filtered.sapOpenItems,
+      sapBalanceRows: filtered.sapBalanceRows,
       statementItems: filtered.statementItems,
       ledgerItems: filtered.ledgerItems,
       matches: filtered.matches,
@@ -2090,8 +2184,7 @@ export default function App() {
   };
 
   const launcherMetrics = useMemo<LauncherLiveMetrics>(() => {
-    let totalBankItems = 0;
-    let totalBankMatched = 0;
+    let squaredAccounts = 0;
     let totalBankPending = 0;
 
     visibleBankWorkspace.accounts.forEach((acc) => {
@@ -2100,15 +2193,20 @@ export default function App() {
         visibleBankWorkspace.statementItems,
         visibleBankWorkspace.ledgerItems,
         visibleBankWorkspace.matches,
-        visibleBankWorkspace.selectedMonth
+        visibleBankWorkspace.selectedMonth,
+        visibleBankWorkspace.sapOpenItems
       );
-      totalBankItems += s.totalBankItems + s.totalLedgerItems;
-      totalBankMatched += s.matchedBankItemsCount + s.matchedLedgerItemsCount;
-      totalBankPending += s.unmatchedBankItemsCount + s.unmatchedLedgerItemsCount;
+      if (Math.abs(s.diferenciaNeta) <= 1) squaredAccounts += 1;
+      totalBankPending +=
+        s.sapItemsCount > 0
+          ? s.sapItemsCount
+          : s.unmatchedBankItemsCount + s.unmatchedLedgerItemsCount;
     });
 
     const bankReconciledPct =
-      totalBankItems > 0 ? Math.round((totalBankMatched / totalBankItems) * 100) : 100;
+      visibleBankWorkspace.accounts.length > 0
+        ? Math.round((squaredAccounts / visibleBankWorkspace.accounts.length) * 100)
+        : 100;
 
     const viatScope = resolveViaticosConsultantScope(
       viaticosWorkspace.consultores,
