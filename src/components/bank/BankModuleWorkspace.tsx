@@ -10,6 +10,9 @@ import {
   LockOpen,
   FolderPlus,
   History,
+  LayoutDashboard,
+  AlertCircle,
+  Landmark,
 } from 'lucide-react';
 import {
   ActiveModuleId,
@@ -1662,7 +1665,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
           </div>
         )}
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full print:p-0 print:max-w-none">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8 max-w-7xl mx-auto w-full print:p-0 print:max-w-none">
           {activeTab === 'resumen' && (
             <BankResumenView
               societies={data.societies}
@@ -1871,6 +1874,39 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
           onProceedToCloseCurrent={() => setIsCloseModalOpen(true)}
         />
       )}
+
+      {/* Mobile Bottom Navigation Bar (Bancos SAP) */}
+      <nav
+        aria-label="Navegación móvil bancaria"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe print:hidden"
+      >
+        <div className="grid grid-cols-4 h-14">
+          {(
+            [
+              { id: 'resumen' as BankTab, label: 'Cuadre', icon: LayoutDashboard },
+              { id: 'pendientes' as BankTab, label: 'Partidas', icon: AlertCircle },
+              { id: 'cuentas' as BankTab, label: 'Cuentas', icon: Landmark },
+              { id: 'historial' as BankTab, label: 'Historial', icon: History },
+            ] as const
+          ).map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors cursor-pointer ${
+                  isActive ? 'text-[#132B63]' : 'text-slate-500'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${isActive ? 'text-[#1E60A8]' : 'text-slate-400'}`} />
+                <span className="truncate max-w-[74px]">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 };

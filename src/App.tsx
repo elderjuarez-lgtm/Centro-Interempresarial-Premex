@@ -9,6 +9,10 @@ import {
   LogOut,
   ShieldAlert,
   ArrowLeft,
+  LayoutDashboard,
+  Grid3X3,
+  AlertTriangle,
+  ReceiptText,
 } from 'lucide-react';
 import {
   ActiveModuleId,
@@ -2908,11 +2912,14 @@ export default function App() {
             onUpdateData={handleUpdateViaticosWorkspace}
             onSaveToCloud={handleSaveViaticosToCloud}
             currentUser={currentUser}
+            accessToken={accessToken}
             onSignInWithGoogle={() => {
               handleSignInWithGoogle().catch((err) => {
                 console.error('Google sign in failed:', err);
               });
             }}
+            onReconnectWorkspace={handleReconnectGoogleWorkspace}
+            onInvalidateWorkspaceToken={() => setAccessToken(null)}
             onSignOut={handleSignOut}
             onSwitchModule={handleSwitchModule}
             permissions={effectivePermissions}
@@ -3105,7 +3112,7 @@ export default function App() {
         )}
 
         {/* Dynamic View Body */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8 max-w-7xl mx-auto w-full">
           {activeTab === 'inicio' && (
             <InicioView
               key={activeScope}
@@ -3237,10 +3244,50 @@ export default function App() {
               closedMonths={closedMonths}
               activeScope={activeScope}
               readOnly={effectivePermissions.isReadOnly}
+              accessToken={accessToken}
+              onReconnectWorkspace={handleReconnectGoogleWorkspace}
+              onInvalidateWorkspaceToken={() => setAccessToken(null)}
             />
           )}
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation Bar (Intercompany) */}
+      <nav
+        aria-label="Navegación móvil intercompany"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe print:hidden"
+      >
+        <div className="grid grid-cols-4 h-14">
+          {(
+            [
+              { id: 'inicio' as ActiveTab, label: 'Inicio', icon: LayoutDashboard },
+              { id: 'conciliacion' as ActiveTab, label: 'Matrices', icon: Grid3X3 },
+              {
+                id: 'diferencias' as ActiveTab,
+                label: differencesCount > 0 ? `Dif. (${differencesCount})` : 'Diferencias',
+                icon: AlertTriangle,
+              },
+              { id: 'movimientos' as ActiveTab, label: 'Movim.', icon: ReceiptText },
+            ] as const
+          ).map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors cursor-pointer ${
+                  isActive ? 'text-[#132B63]' : 'text-slate-500'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${isActive ? 'text-[#1E60A8]' : 'text-slate-400'}`} />
+                <span className="truncate max-w-[78px]">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
       {/* Save & Share Reconciliation Modal */}
       <SaveReconciliationModal

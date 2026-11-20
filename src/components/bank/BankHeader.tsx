@@ -79,14 +79,14 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
   }, [accounts]);
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 print:hidden">
-      <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3">
+    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 pt-safe print:hidden">
+      <div className="px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
         {/* Left: Mobile menu + Breadcrumb + Page title */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onToggleMobileMenu}
-            className="lg:hidden p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg cursor-pointer"
+            className="lg:hidden min-w-[44px] min-h-[44px] -ml-1.5 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
             aria-label="Abrir menú bancario"
           >
             <Menu className="w-5 h-5" />
@@ -199,20 +199,21 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
               type="button"
               onClick={onSaveCloud}
               disabled={isSavingCloud}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-3 sm:px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               {isSavingCloud ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <Save className="w-3.5 h-3.5" />
               )}
-              <span>
+              <span className="hidden sm:inline">
                 {isSavingCloud
                   ? 'Guardando...'
                   : hasUnsavedChanges
                   ? 'Guardar cambios'
                   : 'Guardar Nube'}
               </span>
+              <span className="sm:hidden">{isSavingCloud ? '...' : 'Guardar'}</span>
             </button>
           )}
 
@@ -265,13 +266,13 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
       </div>
 
       {/* Mobile account selector bar */}
-      <div className="md:hidden px-4 pb-2.5 flex items-center gap-2">
-        <Landmark className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+      <div className="md:hidden px-3 pb-2.5 flex items-center gap-2">
+        <Landmark className="w-4 h-4 text-[#1E60A8] shrink-0" />
         <select
           aria-label="Seleccionar cuenta bancaria en móvil"
           value={selectedAccountId}
           onChange={(e) => onSelectAccountId(e.target.value)}
-          className="w-full text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-hidden"
+          className="w-full min-h-[40px] text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-hidden"
         >
           {accountsByCompany.map(([socLabel, accList]) => (
             <optgroup key={socLabel} label={socLabel}>

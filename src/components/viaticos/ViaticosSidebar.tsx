@@ -12,6 +12,7 @@ import {
 import { ActiveModuleId, EffectivePermissions, ViaticosTab } from '../../types';
 import { PremexBrandLogo, ViaticosModuleLogo } from '../ModuleIcons';
 import { AppSwitcherMenu } from '../AppSwitcherMenu';
+import { PWAInstallButton } from '../PWAInstallPrompt';
 import { ROLE_METADATA } from '../../utils/permissions';
 
 interface ViaticosSidebarProps {
@@ -95,7 +96,7 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
         }`}
       >
         {/* Brand + App Switcher Header */}
-        <div className="px-4 py-3.5 flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
+        <div className="px-4 py-3.5 pt-safe flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
           <button
             type="button"
             onClick={() => onSwitchModule('launcher')}
@@ -206,12 +207,13 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
           </p>
         </div>
 
-        {/* Return to Launcher */}
-        <div className="p-3.5 border-t border-white/10 bg-[#0A1838]/70">
+        {/* Install App + Return to Launcher */}
+        <div className="p-3.5 pb-safe border-t border-white/10 bg-[#0A1838]/70 space-y-2">
+          <PWAInstallButton variant="sidebar" />
           <button
             type="button"
             onClick={() => onSwitchModule('launcher')}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-white/8 hover:bg-white/14 border border-white/12 text-xs font-semibold text-sky-100 transition-colors cursor-pointer"
+            className="w-full min-h-[42px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-white/8 hover:bg-white/14 border border-white/12 text-xs font-semibold text-sky-100 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>Volver al Portal de Módulos</span>

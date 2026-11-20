@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { ActiveModuleId, EffectivePermissions, SuiteModuleId } from '../types';
 import { PremexBrandLogo, ModuleEmblem } from './ModuleIcons';
+import { PWAInstallButton } from './PWAInstallPrompt';
 import { ROLE_METADATA, SUPER_ADMIN_EMAIL } from '../utils/permissions';
 
 export interface LauncherLiveMetrics {
@@ -204,6 +205,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
   });
   const [noteDraft, setNoteDraft] = useState('');
   const [savedNoteFeedback, setSavedNoteFeedback] = useState(false);
+  const [installBannerDismissed, setInstallBannerDismissed] = useState(false);
 
   const authorizedModules = useMemo(
     () => SUITE_MODULES.filter((mod) => permissions.canAccessModule(mod.id)),
@@ -360,8 +362,8 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
   return (
     <div className="min-h-screen bg-[#F5F8FC] text-slate-900 flex flex-col font-sans antialiased">
       {/* 3-Zone Premex Top Bar */}
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 pt-safe">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
           {/* Zone 1: Premex Brand */}
           <div className="flex items-center gap-3.5 min-w-0">
             <PremexBrandLogo className="h-10 w-auto shrink-0" />
@@ -409,8 +411,9 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
             })}
           </nav>
 
-          {/* Zone 3: Shared Google Account Control */}
+          {/* Zone 3: PWA Install + Shared Google Account Control */}
           <div className="flex items-center gap-2 shrink-0">
+            <PWAInstallButton variant="header" />
             {currentUser ? (
               <div className="flex items-center gap-2.5">
                 <div
@@ -481,9 +484,19 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
       </header>
 
       {/* Main Content Workspace */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-5 sm:py-10 pb-safe">
+        {/* Mobile PWA Install Prompt Banner (auto-hidden when already installed) */}
+        {!installBannerDismissed && (
+          <div className="md:hidden">
+            <PWAInstallButton
+              variant="banner"
+              onDismissBanner={() => setInstallBannerDismissed(true)}
+            />
+          </div>
+        )}
+
         {/* Executive Premex Hero Banner (Clean single-surface corporate blue band) */}
-        <section className="rounded-2xl bg-gradient-to-r from-[#132B63] via-[#1B4A8E] to-[#2470BC] text-white p-6 sm:p-8 border border-[#19377B]/30 mb-8">
+        <section className="rounded-2xl bg-gradient-to-r from-[#132B63] via-[#1B4A8E] to-[#2470BC] text-white p-5 sm:p-8 border border-[#19377B]/30 mb-6 sm:mb-8">
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
             <div className="max-w-2xl">
               <p className="text-xs font-semibold uppercase tracking-widest text-sky-200 mb-2">
@@ -593,7 +606,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
         </section>
 
         {/* Mobile Filter Tabs */}
-        <div className="flex md:hidden items-center gap-2 mb-5 overflow-x-auto pb-1">
+        <div className="flex md:hidden items-center gap-2 mb-5 overflow-x-auto pb-1 touch-scroll-x">
           {(
             [
               { id: 'all', label: `Todos (${authorizedModules.length})` },
@@ -605,7 +618,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setStatusFilter(tab.id)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`min-h-[40px] px-3.5 py-2 text-xs font-semibold rounded-xl border whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === tab.id
                   ? 'bg-[#19377B] text-white border-[#19377B]'
                   : 'bg-white text-slate-600 border-slate-200'

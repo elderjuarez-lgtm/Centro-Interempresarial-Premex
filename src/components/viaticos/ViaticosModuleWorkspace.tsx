@@ -1,6 +1,15 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { User } from 'firebase/auth';
-import { CheckCircle2, AlertTriangle, X, Building2 } from 'lucide-react';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  X,
+  Building2,
+  FileText,
+  Archive,
+  Calculator,
+  FolderClock,
+} from 'lucide-react';
 import {
   ActiveModuleId,
   EffectivePermissions,
@@ -51,7 +60,10 @@ interface ViaticosModuleWorkspaceProps {
   ) => void;
   onSaveToCloud: (overrideData?: ViaticosWorkspaceData) => Promise<void>;
   currentUser: User | null;
+  accessToken?: string | null;
   onSignInWithGoogle: () => void;
+  onReconnectWorkspace?: () => Promise<string | null>;
+  onInvalidateWorkspaceToken?: () => void;
   onSignOut: () => void;
   onSwitchModule: (moduleId: ActiveModuleId) => void;
   permissions: EffectivePermissions;
@@ -63,7 +75,10 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   onUpdateData,
   onSaveToCloud,
   currentUser,
+  accessToken,
   onSignInWithGoogle,
+  onReconnectWorkspace,
+  onInvalidateWorkspaceToken,
   onSignOut,
   onSwitchModule,
   permissions,
@@ -683,7 +698,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
           </div>
         )}
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1480px] mx-auto w-full">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8 max-w-[1480px] mx-auto w-full">
           {activeTab === 'liquidador' ? (
             <ViaticosLiquidadorView
               liquidation={activeLiquidation}
@@ -828,6 +843,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         }
         mediaMap={mediaMap}
         permissions={permissions}
+        accessToken={accessToken}
+        onReconnectWorkspace={onReconnectWorkspace}
+        onInvalidateWorkspaceToken={onInvalidateWorkspaceToken}
         onConfirmCloseLiquidation={() =>
           handleConfirmCloseLiquidation(modalLiquidation?.id)
         }
@@ -843,6 +861,39 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
             : undefined
         }
       />
+
+      {/* Mobile Bottom Navigation Bar */}
+      <nav
+        aria-label="Navegación móvil de viáticos"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe print:hidden"
+      >
+        <div className="grid grid-cols-4 h-14">
+          {(
+            [
+              { id: 'liquidador' as ViaticosTab, label: 'Activas', icon: FileText },
+              { id: 'cerradas' as ViaticosTab, label: 'Cerradas', icon: Archive },
+              { id: 'contabilidad' as ViaticosTab, label: 'Contab.', icon: Calculator },
+              { id: 'historial' as ViaticosTab, label: 'Historial', icon: FolderClock },
+            ] as const
+          ).map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors cursor-pointer ${
+                  isActive ? 'text-[#132B63]' : 'text-slate-500'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${isActive ? 'text-[#1E60A8]' : 'text-slate-400'}`} />
+                <span className="truncate max-w-[74px]">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 };

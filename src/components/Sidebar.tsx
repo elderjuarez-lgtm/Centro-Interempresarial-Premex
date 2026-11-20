@@ -24,6 +24,7 @@ import {
 } from '../utils/demoData';
 import { IntercompanyModuleLogo, PremexBrandLogo } from './ModuleIcons';
 import { AppSwitcherMenu } from './AppSwitcherMenu';
+import { PWAInstallButton } from './PWAInstallPrompt';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -121,7 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}
       >
         {/* Top Premex Brand & Modular App Switcher */}
-        <div className="px-4 py-3.5 flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
+        <div className="px-4 py-3.5 pt-safe flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
           <button
             type="button"
             onClick={() => onSwitchModule?.('launcher')}
@@ -286,8 +287,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Footer: Return to Modular Hub & Google Sheets Ready */}
-        <div className="p-3.5 border-t border-white/10 bg-[#0A1838]/70 space-y-2">
+        {/* Footer: PWA Install & Return to Modular Hub */}
+        <div className="p-3.5 pb-safe border-t border-white/10 bg-[#0A1838]/70 space-y-2">
+          <PWAInstallButton variant="sidebar" />
           {onSwitchModule && (
             <button
               type="button"
@@ -295,7 +297,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onCloseMobile();
                 onSwitchModule('launcher');
               }}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white/8 hover:bg-white/14 border border-white/12 text-xs font-semibold text-sky-100 transition-colors cursor-pointer"
+              className="w-full min-h-[42px] flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white/8 hover:bg-white/14 border border-white/12 text-xs font-semibold text-sky-100 transition-colors cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Volver al Portal de Módulos</span>

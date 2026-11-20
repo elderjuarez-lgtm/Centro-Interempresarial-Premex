@@ -818,8 +818,8 @@ export const downloadExcelTemplate = (entities: EntityMapping[] = []) => {
   XLSX.writeFile(wb, 'Plantilla_Centro_Interempresarial.xlsx');
 };
 
-// Export reconciliation reports to a local Excel file with exact Bilateral Matrix layout as sheet 1
-export const exportReconciliationToExcelFile = (
+// Generate official reconciliation Excel workbook bytes (for both local download and Gmail attachment)
+export const generateReconciliationExcelBytes = (
   differences: DifferenceRow[],
   matrizCxc: MatrixResult,
   matrizCxp: MatrixResult,
@@ -848,7 +848,7 @@ export const exportReconciliationToExcelFile = (
     'Insylo Technologies SL'
   ],
   periodLabel: string = 'SEPTIEMBRE 2026 - ( CIFRAS EN DOLARES )'
-) => {
+): { bytes: Uint8Array; filename: string } => {
   const wb = XLSX.utils.book_new();
 
   // Strictly use the configured entities list in its exact order
@@ -962,5 +962,40 @@ export const exportReconciliationToExcelFile = (
   XLSX.utils.book_append_sheet(wb, wsDetail, 'Movimientos');
 
   const dateStr = new Date().toISOString().split('T')[0];
-  XLSX.writeFile(wb, `Matriz_Bilateral_Interempresarial_${dateStr}.xlsx`);
+  const filename = `Matriz_Bilateral_Interempresarial_${dateStr}.xlsx`;
+  const arrayBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+  return {
+    bytes: new Uint8Array(arrayBuffer),
+    filename,
+  };
+};
+
+// Export reconciliation reports to a local Excel file with exact Bilateral Matrix layout as sheet 1
+export const exportReconciliationToExcelFile = (
+  differences: DifferenceRow[],
+  matrizCxc: MatrixResult,
+  matrizCxp: MatrixResult,
+  movements: Movement[],
+  orderedEntities?: string[],
+  periodLabel?: string
+) => {
+  const { bytes, filename } = generateReconciliationExcelBytes(
+    differences,
+    matrizCxc,
+    matrizCxp,
+    movements,
+    orderedEntities,
+    periodLabel
+  );
+  const blob = new Blob([new Uint8Array(bytes)], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 };

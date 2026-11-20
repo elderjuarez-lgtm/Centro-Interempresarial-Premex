@@ -8,10 +8,17 @@ import {
 import { ActivityGoogleTaskLink } from '../types';
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const GMAIL_UPLOAD_API_BASE = 'https://www.googleapis.com/upload/gmail/v1/users/me';
 const TASKS_API_BASE = 'https://tasks.googleapis.com/tasks/v1';
 
 export const PREMEX_GOOGLE_TASKS_LIST_TITLE = 'Mis tareas (Gmail)';
 export const LEGACY_PREMEX_GOOGLE_TASKS_LIST_TITLE = 'Premex · Panel de Actividades';
+
+export interface GmailAttachment {
+  filename: string;
+  mimeType: string;
+  bytes: Uint8Array;
+}
 
 export class GoogleWorkspaceAuthError extends Error {
   readonly statusCode?: number;
@@ -21,6 +28,17 @@ export class GoogleWorkspaceAuthError extends Error {
     this.statusCode = statusCode;
   }
 }
+
+export const parseEmailAddressList = (raw: string): string[] => {
+  return Array.from(
+    new Set(
+      String(raw || '')
+        .split(/[,;\n\r]+/)
+        .map((part) => part.trim())
+        .filter((part) => part.includes('@') && part.indexOf('@') > 0 && part.indexOf('.', part.indexOf('@')) > 0)
+    )
+  );
+};
 
 const requireToken = async (tokenOverride?: string | null): Promise<string> => {
   const candidate = (tokenOverride || '').trim() || (await getAccessToken()) || '';
@@ -107,14 +125,50 @@ const encodeMimeHeaderUtf8 = (text: string): string => {
     .join('\r\n ');
 };
 
-// RFC 4648 base64url encoding required by Gmail messages.send API
+// Safe chunked Base64 encoder for arbitrary binary payloads (prevents call-stack overflow on large PDFs)
+const encodeUint8ArrayToBase64Lines = (bytes: Uint8Array): string => {
+  const CHUNK_SIZE = 0x8000; // 32KB chunks (multiple of 3 would be 32766, but concatenating binary first is safe)
+  const binaryParts: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const slice = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+    let chunkStr = '';
+    for (let j = 0; j < slice.length; j++) {
+      chunkStr += String.fromCharCode(slice[j]);
+    }
+    binaryParts.push(chunkStr);
+  }
+  const b64 = btoa(binaryParts.join(''));
+  const lines: string[] = [];
+  for (let i = 0; i < b64.length; i += 76) {
+    lines.push(b64.slice(i, i + 76));
+  }
+  return lines.join('\r\n');
+};
+
+// RFC 4648 base64url encoding required by Gmail JSON messages.send API
 const encodeBase64UrlUtf8 = (rawMime: string): string => {
   const bytes = new TextEncoder().encode(rawMime);
-  let binary = '';
-  bytes.forEach((b) => {
-    binary += String.fromCharCode(b);
-  });
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const CHUNK_SIZE = 0x8000;
+  const binaryParts: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const slice = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+    let chunkStr = '';
+    for (let j = 0; j < slice.length; j++) {
+      chunkStr += String.fromCharCode(slice[j]);
+    }
+    binaryParts.push(chunkStr);
+  }
+  return btoa(binaryParts.join('')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+const sanitizeAsciiFilename = (filename: string): string => {
+  const cleaned = String(filename || 'archivo')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/["\\\r\n]/g, '')
+    .replace(/[^a-zA-Z0-9._ -]/g, '_')
+    .trim();
+  return cleaned || 'archivo';
 };
 
 const escapeHtml = (input: string): string =>
@@ -130,7 +184,68 @@ const getActivitiesAppUrl = (): string => {
 };
 
 /**
- * Sends a real HTML email via the authenticated user's Gmail account.
+ * Formats an editable corporate plain-text message body into a clean Premex HTML email
+ * preserving alignment/spacing (ideal for Intercompany statements & Viáticos summaries).
+ */
+export const buildCorporatePlainTextHtmlEmail = (params: {
+  moduleLabel: string;
+  title: string;
+  subtitle?: string;
+  bodyText: string;
+  attachmentNames?: string[];
+  accentHex?: string;
+  preserveMonospace?: boolean;
+}): string => {
+  const accent = params.accentHex || '#132B63';
+  const safeBody = escapeHtml(params.bodyText || '');
+  const bodyHtml = params.preserveMonospace
+    ? `<pre style="margin:0;white-space:pre-wrap;word-wrap:break-word;font-family:'Segoe UI',Roboto,Arial,Helvetica,sans-serif;font-size:13px;line-height:1.6;color:#1E293B;">${safeBody}</pre>`
+    : safeBody
+        .split(/\r?\n/)
+        .map((line) => (line.trim() === '' ? '<div style="height:10px;"></div>' : `<div style="margin:0 0 3px 0;">${line.replace(/  /g, '&nbsp;&nbsp;')}</div>`))
+        .join('');
+
+  const attachmentsBlock =
+    params.attachmentNames && params.attachmentNames.length > 0
+      ? `<div style="margin-top:18px;padding:12px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#475569;margin-bottom:6px;">
+            Archivos adjuntos incluidos (${params.attachmentNames.length})
+          </div>
+          <ul style="margin:0;padding-left:18px;font-size:12px;color:#0F172A;line-height:1.6;">
+            ${params.attachmentNames.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}
+          </ul>
+        </div>`
+      : '';
+
+  return `
+    <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:740px;margin:0 auto;background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;">
+      <div style="background:${accent};padding:18px 24px;color:#FFFFFF;">
+        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#BAE6FD;font-weight:600;">
+          Premex · ${escapeHtml(params.moduleLabel)}
+        </div>
+        <div style="font-size:17px;font-weight:700;margin-top:4px;">
+          ${escapeHtml(params.title)}
+        </div>
+        ${
+          params.subtitle
+            ? `<div style="font-size:12px;color:#DBEAFE;margin-top:3px;">${escapeHtml(params.subtitle)}</div>`
+            : ''
+        }
+      </div>
+      <div style="padding:22px 24px;color:#1E293B;font-size:13px;line-height:1.6;">
+        ${bodyHtml}
+        ${attachmentsBlock}
+        <p style="margin:20px 0 0 0;padding-top:12px;border-top:1px solid #E2E8F0;font-size:11px;color:#94A3B8;">
+          Enviado directamente desde la Suite Financiera Premex vía Gmail.
+        </p>
+      </div>
+    </div>
+  `;
+};
+
+/**
+ * Sends a real HTML email (with optional binary attachments such as Excel .xlsx and PDF .pdf)
+ * via the authenticated user's Gmail account.
  * Caller MUST present an explicit confirmation dialog before invoking this function.
  */
 export const sendGmailHtmlMessage = async (params: {
@@ -138,6 +253,7 @@ export const sendGmailHtmlMessage = async (params: {
   cc?: string[];
   subject: string;
   htmlBody: string;
+  attachments?: GmailAttachment[];
   accessTokenOverride?: string | null;
 }): Promise<{ id: string; threadId?: string }> => {
   const token = await requireToken(params.accessTokenOverride);
@@ -155,33 +271,90 @@ export const sendGmailHtmlMessage = async (params: {
     )
   );
 
-  const headers = [
-    `To: ${cleanTo.join(', ')}`,
-    ...(cleanCc.length > 0 ? [`Cc: ${cleanCc.join(', ')}`] : []),
-    `Subject: ${encodeMimeHeaderUtf8(params.subject)}`,
-    'MIME-Version: 1.0',
+  const attachments = (params.attachments || []).filter((a) => a && a.bytes && a.bytes.length > 0);
+  const htmlBytes = new TextEncoder().encode(params.htmlBody);
+  const base64Body = encodeUint8ArrayToBase64Lines(htmlBytes);
+
+  if (attachments.length === 0) {
+    const headers = [
+      `To: ${cleanTo.join(', ')}`,
+      ...(cleanCc.length > 0 ? [`Cc: ${cleanCc.join(', ')}`] : []),
+      `Subject: ${encodeMimeHeaderUtf8(params.subject)}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/html; charset="UTF-8"',
+      'Content-Transfer-Encoding: base64',
+    ];
+
+    const rawMime = `${headers.join('\r\n')}\r\n\r\n${base64Body}`;
+    const rawEncoded = encodeBase64UrlUtf8(rawMime);
+
+    const res = await fetch(`${GMAIL_API_BASE}/messages/send`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ raw: rawEncoded }),
+    });
+
+    if (!res.ok) {
+      throw await parseWorkspaceError(res, 'Gmail');
+    }
+
+    return (await res.json()) as { id: string; threadId?: string };
+  }
+
+  // Validate total payload size against Gmail's 25MB limit (~18.5MB raw before Base64 expansion)
+  const totalRawBytes = attachments.reduce((sum, att) => sum + att.bytes.byteLength, 0);
+  if (totalRawBytes > 18.5 * 1024 * 1024) {
+    const sizeMb = (totalRawBytes / (1024 * 1024)).toFixed(1);
+    throw new Error(
+      `Los archivos adjuntos suman ${sizeMb} MB y superan el límite seguro de Gmail (18.5 MB antes de codificación). Reduce el tamaño de las fotos de comprobantes o descarga los archivos manualmente.`
+    );
+  }
+
+  const boundary = `premex_mixed_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const mimeSections: string[] = [
+    [
+      `To: ${cleanTo.join(', ')}`,
+      ...(cleanCc.length > 0 ? [`Cc: ${cleanCc.join(', ')}`] : []),
+      `Subject: ${encodeMimeHeaderUtf8(params.subject)}`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    ].join('\r\n'),
+    '',
+    `--${boundary}`,
     'Content-Type: text/html; charset="UTF-8"',
     'Content-Transfer-Encoding: base64',
+    '',
+    base64Body,
   ];
 
-  // Base64-encode HTML body so accented characters and long lines survive SMTP/MIME cleanly
-  const bodyBytes = new TextEncoder().encode(params.htmlBody);
-  let bodyBin = '';
-  bodyBytes.forEach((b) => {
-    bodyBin += String.fromCharCode(b);
-  });
-  const base64Body = (btoa(bodyBin).match(/.{1,76}/g) || []).join('\r\n');
+  for (const att of attachments) {
+    const asciiName = sanitizeAsciiFilename(att.filename);
+    const utf8Name = encodeURIComponent(att.filename || asciiName);
+    const attBase64 = encodeUint8ArrayToBase64Lines(att.bytes);
+    mimeSections.push(
+      `--${boundary}`,
+      `Content-Type: ${att.mimeType}; name="${asciiName}"; name*=UTF-8''${utf8Name}`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+      '',
+      attBase64
+    );
+  }
 
-  const rawMime = `${headers.join('\r\n')}\r\n\r\n${base64Body}`;
-  const rawEncoded = encodeBase64UrlUtf8(rawMime);
+  mimeSections.push(`--${boundary}--`, '');
+  const rawMultipartMime = mimeSections.join('\r\n');
 
-  const res = await fetch(`${GMAIL_API_BASE}/messages/send`, {
+  // Use Gmail media upload endpoint (supports up to 35MB raw RFC822 messages cleanly without JSON overhead)
+  const res = await fetch(`${GMAIL_UPLOAD_API_BASE}/messages/send?uploadType=media`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
+      'Content-Type': 'message/rfc822',
     },
-    body: JSON.stringify({ raw: rawEncoded }),
+    body: rawMultipartMime,
   });
 
   if (!res.ok) {

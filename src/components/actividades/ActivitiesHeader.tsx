@@ -60,13 +60,13 @@ export const ActivitiesHeader: React.FC<ActivitiesHeaderProps> = ({
   const roleLabel = ROLE_METADATA[permissions.role].shortLabel;
 
   return (
-    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-slate-200/90 print:hidden">
-      <div className="px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
+    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-slate-200/90 pt-safe print:hidden">
+      <div className="px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onToggleMobileMenu}
-            className="lg:hidden p-2 -ml-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg cursor-pointer"
+            className="lg:hidden min-w-[44px] min-h-[44px] -ml-1.5 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
             aria-label="Abrir menú"
           >
             <Menu className="w-5 h-5" />

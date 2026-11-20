@@ -13,10 +13,14 @@ import {
   FileSearch,
   ArrowRight,
   Mail,
+  Send,
   ExternalLink,
   X,
   UserCheck,
-  Users
+  Users,
+  Loader2,
+  Paperclip,
+  RefreshCw,
 } from 'lucide-react';
 import {
   DifferenceRow,
@@ -28,9 +32,20 @@ import {
   ReconciliationScope,
 } from '../../types';
 import { formatCurrency, reconcileByDocument } from '../../utils/reconciliation';
-import { exportReconciliationToExcelFile } from '../../utils/excel';
+import {
+  exportReconciliationToExcelFile,
+  generateReconciliationExcelBytes,
+} from '../../utils/excel';
 import { extractPersonNameFromEmail } from '../../utils/diffEmailImage';
 import { INTERCOMPANY_SCOPE_META, getIntercompanyScopeLabel } from '../../utils/demoData';
+import { getAccessToken } from '../../services/auth';
+import {
+  GmailAttachment,
+  GoogleWorkspaceAuthError,
+  buildCorporatePlainTextHtmlEmail,
+  parseEmailAddressList,
+  sendGmailHtmlMessage,
+} from '../../services/googleWorkspaceActivities';
 
 interface DiferenciasViewProps {
   differences: DifferenceRow[];
@@ -49,6 +64,9 @@ interface DiferenciasViewProps {
   closedMonths?: Record<string, ClosedMonthRecord>;
   activeScope?: ReconciliationScope;
   readOnly?: boolean;
+  accessToken?: string | null;
+  onReconnectWorkspace?: () => Promise<string | null>;
+  onInvalidateWorkspaceToken?: () => void;
 }
 
 export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
@@ -68,6 +86,9 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
   closedMonths = {},
   activeScope = 'internacionales',
   readOnly = false,
+  accessToken,
+  onReconnectWorkspace,
+  onInvalidateWorkspaceToken,
 }) => {
   const scopeLabel = getIntercompanyScopeLabel(activeScope);
   const currencyBannerLabel = INTERCOMPANY_SCOPE_META[activeScope].currencyBannerLabel;
@@ -184,6 +205,12 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
   const [emailSubject, setEmailSubject] = useState<string>('');
   const [emailBody, setEmailBody] = useState<string>('');
   const [isBodyEditedManually, setIsBodyEditedManually] = useState(false);
+  const [attachExcelReport, setAttachExcelReport] = useState(true);
+  const [isSendingGmail, setIsSendingGmail] = useState(false);
+  const [isAuthorizingGoogle, setIsAuthorizingGoogle] = useState(false);
+  const [needsGoogleAuth, setNeedsGoogleAuth] = useState(false);
+  const [gmailSendError, setGmailSendError] = useState<string | null>(null);
+  const [gmailSendSuccess, setGmailSendSuccess] = useState<string | null>(null);
 
   const modalPairIdSet = useMemo(() => new Set(modalPairIds), [modalPairIds]);
   const excludedDocIdSet = useMemo(() => new Set(excludedDocIds), [excludedDocIds]);
@@ -492,6 +519,10 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
     setEmailTo(resolveCompanyEmail(initialRecipient));
     setEmailCc('');
     setIsBodyEditedManually(false);
+    setAttachExcelReport(true);
+    setGmailSendError(null);
+    setGmailSendSuccess(null);
+    setNeedsGoogleAuth(false);
     setIsEmailModalOpen(true);
   };
 
@@ -606,6 +637,118 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
     }
     return `https://mail.google.com/mail/?${params.toString()}`;
   }, [emailTo, emailCc, emailSubject, emailBody]);
+
+  const handleAuthorizeGoogleForEmail = async () => {
+    if (!onReconnectWorkspace) return;
+    setIsAuthorizingGoogle(true);
+    setGmailSendError(null);
+    try {
+      const renewed = await onReconnectWorkspace();
+      if (renewed) {
+        setNeedsGoogleAuth(false);
+        setGmailSendSuccess('Cuenta de Google conectada. Ya puedes presionar "Enviar por Gmail".');
+      } else {
+        setGmailSendError('No se completó la autorización de Google. Intenta nuevamente.');
+      }
+    } catch (err: any) {
+      setGmailSendError(err?.message || 'No se pudo autorizar Google.');
+    } finally {
+      setIsAuthorizingGoogle(false);
+    }
+  };
+
+  const handleSendDirectGmail = async () => {
+    setGmailSendError(null);
+    setGmailSendSuccess(null);
+    setNeedsGoogleAuth(false);
+
+    if (activeEmailRows.length === 0) {
+      setGmailSendError('Marca al menos una diferencia para enviar el correo.');
+      return;
+    }
+
+    const toList = parseEmailAddressList(emailTo);
+    const ccList = parseEmailAddressList(emailCc);
+    if (toList.length === 0) {
+      setGmailSendError('Ingresa al menos un correo destinatario válido en el campo "Para".');
+      return;
+    }
+
+    setIsSendingGmail(true);
+    try {
+      let token = (accessToken || '').trim() || (await getAccessToken()) || '';
+      if (!token && onReconnectWorkspace) {
+        token = (await onReconnectWorkspace()) || '';
+      }
+      if (!token) {
+        setNeedsGoogleAuth(true);
+        setGmailSendError(
+          'Autoriza tu cuenta de Google para enviar este correo directamente por Gmail.'
+        );
+        return;
+      }
+
+      const attachments: GmailAttachment[] = [];
+      if (attachExcelReport) {
+        const periodBanner = `${
+          selectedMonth === 'ALL' ? 'CONSOLIDADO GENERAL' : selectedMonth.toUpperCase()
+        } - ${currencyBannerLabel}`;
+        const excelPkg = generateReconciliationExcelBytes(
+          differences,
+          matrizCxc,
+          matrizCxp,
+          movements,
+          orderedEntities,
+          periodBanner
+        );
+        attachments.push({
+          filename: excelPkg.filename,
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          bytes: excelPkg.bytes,
+        });
+      }
+
+      const periodDisplay = selectedMonth === 'ALL' ? 'Consolidado General' : selectedMonth;
+      const htmlBody = buildCorporatePlainTextHtmlEmail({
+        moduleLabel: `Conciliación Intercompany · ${scopeLabel}`,
+        title: `Validación de Diferencias (${periodDisplay})`,
+        subtitle: recipientCompany
+          ? `${recipientCompany} · ${activeEmailRows.length} línea(s) con diferencia`
+          : `${activeEmailRows.length} línea(s) con diferencia`,
+        bodyText: emailBody,
+        attachmentNames: attachments.map((a) => a.filename),
+        accentHex: '#132B63',
+        preserveMonospace: true,
+      });
+
+      await sendGmailHtmlMessage({
+        to: toList,
+        cc: ccList,
+        subject: emailSubject.trim() || `Conciliación Intercompany (${periodDisplay})`,
+        htmlBody,
+        attachments,
+        accessTokenOverride: token,
+      });
+
+      recordEmailNotificationNotes();
+      setGmailSendSuccess(
+        `Correo enviado automáticamente por Gmail a ${toList.join(', ')}${
+          attachments.length > 0 ? ` con adjunto ${attachments[0].filename}` : ''
+        } y registrado en el historial de comentarios.`
+      );
+    } catch (err: any) {
+      if (err instanceof GoogleWorkspaceAuthError) {
+        onInvalidateWorkspaceToken?.();
+        setNeedsGoogleAuth(true);
+      }
+      setGmailSendError(
+        err?.message ||
+          'No se pudo enviar el correo por Gmail. Verifica tu sesión de Google e intenta de nuevo.'
+      );
+    } finally {
+      setIsSendingGmail(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1119,20 +1262,26 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
         </div>
       </div>
 
-      {/* Email Draft Modal */}
+      {/* Email Dispatch Modal (Direct Gmail API + Optional Excel Attachment) */}
       {isEmailModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/55 backdrop-blur-xs">
-          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
-            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-blue-600/30 border border-blue-400/30">
-                  <Mail className="w-5 h-5 text-blue-300" />
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/55 backdrop-blur-xs"
+          onClick={() => setIsEmailModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-4xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94dvh] sm:max-h-[92vh] pb-safe"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 sm:px-6 py-4 bg-[#132B63] text-white flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 rounded-xl bg-white/10 border border-white/15 shrink-0">
+                  <Mail className="w-5 h-5 text-sky-200" />
                 </div>
-                <div>
-                  <h4 className="font-bold text-sm text-white">
-                    Borrador de Correo — Diferencias y Documentos No Conciliados
+                <div className="min-w-0">
+                  <h4 className="font-bold text-sm text-white truncate">
+                    Enviar Correo por Gmail — Saldos Intercompany
                   </h4>
-                  <p className="text-[11px] text-slate-300">
+                  <p className="text-[11px] text-sky-200 truncate">
                     {activeEmailRows.length} línea(s) con diferencia y {activeUnreconciledDocs.length} documento(s) sin conciliar.
                   </p>
                 </div>
@@ -1140,14 +1289,44 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
               <button
                 type="button"
                 onClick={() => setIsEmailModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 cursor-pointer"
+                className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-sky-200 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer shrink-0"
                 aria-label="Cerrar ventana"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+              {/* Inline Gmail Status Alerts */}
+              {gmailSendError && (
+                <div className="px-4 py-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                    <span className="leading-relaxed">{gmailSendError}</span>
+                  </div>
+                  {needsGoogleAuth && onReconnectWorkspace && (
+                    <button
+                      type="button"
+                      onClick={handleAuthorizeGoogleForEmail}
+                      disabled={isAuthorizingGoogle}
+                      className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl shrink-0 cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 ${isAuthorizingGoogle ? 'animate-spin' : ''}`}
+                      />
+                      <span>{isAuthorizingGoogle ? 'Autorizando...' : 'Autorizar Google'}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {gmailSendSuccess && (
+                <div className="px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
+                  <span className="font-medium leading-relaxed">{gmailSendSuccess}</span>
+                </div>
+              )}
+
               {/* Recipient Company (All Companies) + To + CC */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -1159,7 +1338,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                     <select
                       value={recipientCompany}
                       onChange={(e) => handleSelectRecipientCompany(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl bg-white font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                      className="w-full min-h-[42px] pl-9 pr-3 py-2 border border-slate-300 rounded-xl bg-white font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                     >
                       {involvedCandidates.length > 0 && (
                         <optgroup label="Empresas en las diferencias seleccionadas">
@@ -1188,14 +1367,15 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                     Correo destinatario (Para)
                   </label>
                   <input
-                    type="email"
+                    type="text"
+                    inputMode="email"
                     value={emailTo}
                     onChange={(e) => {
                       setEmailTo(e.target.value);
                       setIsBodyEditedManually(false);
                     }}
                     placeholder="nombre.apellido@empresa.com"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    className="w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
@@ -1209,10 +1389,11 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                   </label>
                   <input
                     type="text"
+                    inputMode="email"
                     value={emailCc}
                     onChange={(e) => setEmailCc(e.target.value)}
                     placeholder="persona1@empresa.com, persona2@empresa.com"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    className="w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
@@ -1226,7 +1407,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                       if (e.target.value) handleAddCcFromDirectory(e.target.value);
                     }}
                     disabled={allDirectoryWithEmail.length === 0}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-xs text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    className="w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-xl bg-white text-xs text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                   >
                     <option value="">
                       {allDirectoryWithEmail.length === 0
@@ -1251,9 +1432,37 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                   type="text"
                   value={emailSubject}
                   onChange={(e) => setEmailSubject(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  className="w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+
+              {/* Automatic Excel Attachment Toggle */}
+              <label
+                className={`flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border cursor-pointer transition-colors ${
+                  attachExcelReport
+                    ? 'bg-emerald-50/70 border-emerald-300 text-slate-900'
+                    : 'bg-slate-50 border-slate-200 text-slate-600'
+                }`}
+              >
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={attachExcelReport}
+                    onChange={(e) => setAttachExcelReport(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600 shrink-0"
+                  />
+                  <Paperclip className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span className="min-w-0">
+                    <span className="font-bold block">
+                      Adjuntar reporte Excel de conciliación (.xlsx)
+                    </span>
+                    <span className="text-[11px] text-slate-600 block">
+                      Incluye Matrices Bilaterales CxC/CxP, Diferencias y Detalle de Movimientos
+                    </span>
+                  </span>
+                </span>
+                <FileSpreadsheet className="w-5 h-5 text-emerald-700 shrink-0 hidden sm:block" />
+              </label>
 
               {/* Discretionary Differences Selection inside Modal */}
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2.5">
@@ -1281,7 +1490,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                     return (
                       <label
                         key={`modal-pair-${pair.id}`}
-                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] cursor-pointer transition-colors ${
+                        className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border text-[11px] cursor-pointer transition-colors ${
                           checked
                             ? 'bg-blue-50 border-blue-300 text-slate-900 font-semibold'
                             : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -1295,7 +1504,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                               toggleModalPair(pair.id);
                               setIsBodyEditedManually(false);
                             }}
-                            className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
                           />
                           <span className="truncate">
                             {pair.sociedad} &rarr; {pair.contraparte}
@@ -1334,7 +1543,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                         return (
                           <label
                             key={`modal-doc-${doc.id}`}
-                            className={`flex items-center justify-between gap-2 px-2.5 py-1 rounded-md border text-[11px] cursor-pointer transition-colors ${
+                            className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md border text-[11px] cursor-pointer transition-colors ${
                               included
                                 ? 'bg-white border-slate-200 text-slate-800'
                                 : 'bg-slate-100 border-slate-200 text-slate-400 line-through'
@@ -1348,7 +1557,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                                   toggleModalDocument(doc.id);
                                   setIsBodyEditedManually(false);
                                 }}
-                                className="w-3 h-3 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
                               />
                               <span className="truncate">
                                 {doc.facturaDisplay} ({doc.sociedad} &rarr; {doc.contraparte})
@@ -1382,7 +1591,7 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                   )}
                 </div>
                 <textarea
-                  rows={11}
+                  rows={9}
                   value={emailBody}
                   onChange={(e) => {
                     setEmailBody(e.target.value);
@@ -1392,35 +1601,57 @@ export const DiferenciasView: React.FC<DiferenciasViewProps> = ({
                 />
                 {activeEmailRows.length === 0 && (
                   <p className="mt-1.5 text-[11px] text-amber-700 font-semibold">
-                    Marca al menos una diferencia en la lista superior para incluir su detalle en el borrador.
+                    Marca al menos una diferencia en la lista superior para incluir su detalle en el correo.
                   </p>
                 )}
               </div>
             </div>
 
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end">
-              <a
-                href={gmailComposeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-disabled={activeEmailRows.length === 0}
-                onClick={(e) => {
-                  if (activeEmailRows.length === 0) {
-                    e.preventDefault();
-                    return;
-                  }
-                  recordEmailNotificationNotes();
-                }}
-                className={`inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-bold text-white rounded-xl shadow-sm transition-colors ${
-                  activeEmailRows.length === 0
+            <div className="px-4 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEmailModalOpen(false)}
+                  className="min-h-[42px] px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cerrar
+                </button>
+                <a
+                  href={gmailComposeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 min-h-[42px] px-3 py-2 text-xs font-semibold text-slate-600 hover:text-[#1E60A8] rounded-xl transition-colors"
+                  title="Abrir borrador externo en Gmail web (sin adjunto automático)"
+                >
+                  <span>Abrir en Gmail web</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+
+              <button
+                type="button"
+                disabled={activeEmailRows.length === 0 || isSendingGmail}
+                onClick={handleSendDirectGmail}
+                className={`inline-flex items-center justify-center gap-2 min-h-[46px] px-5 py-2.5 text-xs font-bold text-white rounded-xl shadow-sm transition-colors cursor-pointer ${
+                  activeEmailRows.length === 0 || isSendingGmail
                     ? 'bg-slate-400 cursor-not-allowed opacity-70'
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'
+                    : 'bg-[#1E60A8] hover:bg-[#132B63]'
                 }`}
               >
-                <Mail className="w-4 h-4 text-blue-100" />
-                <span>Abrir Borrador en Gmail</span>
-                <ExternalLink className="w-3.5 h-3.5 text-blue-100" />
-              </a>
+                {isSendingGmail ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Enviando por Gmail...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>
+                      Enviar por Gmail{attachExcelReport ? ' (con Excel)' : ''}
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

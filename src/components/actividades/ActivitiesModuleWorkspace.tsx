@@ -1,6 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
-import { CheckCircle2, AlertTriangle, Info, X, RefreshCw } from 'lucide-react';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Info,
+  X,
+  RefreshCw,
+  LayoutGrid,
+  CheckSquare,
+  MailCheck,
+  SlidersHorizontal,
+} from 'lucide-react';
 import {
   ActiveModuleId,
   ActivitiesTab,
@@ -1204,7 +1214,7 @@ export const ActivitiesModuleWorkspace: React.FC<ActivitiesModuleWorkspaceProps>
           }}
         />
 
-        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 max-w-[1600px] w-full mx-auto space-y-5">
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-5 sm:py-6 pb-24 lg:pb-6 max-w-[1600px] w-full mx-auto space-y-5">
           {feedbackBanner && (
             <div
               className={`sticky top-[4.5rem] z-20 shadow-md rounded-2xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
@@ -1357,6 +1367,45 @@ export const ActivitiesModuleWorkspace: React.FC<ActivitiesModuleWorkspaceProps>
         payload={workspaceConfirm}
         onClose={() => setWorkspaceConfirm(null)}
       />
+
+      {/* Mobile Bottom Navigation Bar (Panel de Actividades) */}
+      <nav
+        aria-label="Navegación móvil de actividades"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe print:hidden"
+      >
+        <div className={`grid h-14 ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
+          {(
+            [
+              { id: 'matriz' as ActivitiesTab, label: 'Matriz', icon: LayoutGrid },
+              {
+                id: 'pendientes' as ActivitiesTab,
+                label: isAdmin ? 'Tareas' : 'Mis Act.',
+                icon: CheckSquare,
+              },
+              { id: 'sincronizacion' as ActivitiesTab, label: 'Gmail/Tasks', icon: MailCheck },
+              ...(isAdmin
+                ? [{ id: 'configuracion' as ActivitiesTab, label: 'Catálogo', icon: SlidersHorizontal }]
+                : []),
+            ]
+          ).map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors cursor-pointer ${
+                  isActive ? 'text-[#132B63]' : 'text-slate-500'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${isActive ? 'text-[#0F766E]' : 'text-slate-400'}`} />
+                <span className="truncate max-w-[78px]">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 };

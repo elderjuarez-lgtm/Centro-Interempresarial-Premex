@@ -41,10 +41,10 @@ async function fetchPremexLogoBytes(): Promise<ArrayBuffer | null> {
  * exact 14 columns with #B7DEE8 header shading, Total Liquidación row, plus
  * a secondary "Detalle Impuestos" worksheet prepared for accounting workflows).
  */
-export async function exportViaticosExcel(
+export async function generateViaticosExcelBytes(
   liquidation: ViaticoLiquidation,
   costCenter?: string
-): Promise<string> {
+): Promise<{ bytes: Uint8Array; filename: string }> {
   const resolvedCostCenter = String(costCenter ?? liquidation.centroCosto ?? '').trim();
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Suite Corporativa Premex';
@@ -361,12 +361,21 @@ export async function exportViaticosExcel(
   });
 
   const buffer = await wb.xlsx.writeBuffer();
-  const blob = new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
+  const bytes = new Uint8Array(buffer);
   const filename = `Liquidacion_Viaticos_Sem${sanitizeFileSlug(
     liquidation.semana || '00'
   )}_${sanitizeFileSlug(liquidation.consultorNombre)}.xlsx`;
+  return { bytes, filename };
+}
+
+export async function exportViaticosExcel(
+  liquidation: ViaticoLiquidation,
+  costCenter?: string
+): Promise<string> {
+  const { bytes, filename } = await generateViaticosExcelBytes(liquidation, costCenter);
+  const blob = new Blob([new Uint8Array(bytes)], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
   triggerBlobDownload(blob, filename);
   return filename;
 }
@@ -445,10 +454,10 @@ function truncateText(text: string, maxLen: number): string {
  *  - Subsequent Pages: Every attached receipt image (fitted cleanly with header metadata)
  *    AND every page of attached PDF invoices merged directly via pdf-lib!
  */
-export async function exportViaticosReceiptsPdf(
+export async function generateViaticosReceiptsPdfBytes(
   liquidation: ViaticoLiquidation,
   mediaMap: Record<string, StoredReceiptMedia>
-): Promise<{ filename: string; embeddedCount: number; totalItems: number }> {
+): Promise<{ bytes: Uint8Array; filename: string; embeddedCount: number; totalItems: number }> {
   const pdfDoc = await PDFDocument.create();
   const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -875,13 +884,25 @@ export async function exportViaticosReceiptsPdf(
   }
 
   const pdfBytes = await pdfDoc.save();
-  const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
+  const bytes = new Uint8Array(pdfBytes);
   const filename = `Comprobantes_Viaticos_Sem${sanitizeFileSlug(
     liquidation.semana || '00'
   )}_${sanitizeFileSlug(liquidation.consultorNombre)}.pdf`;
-  triggerBlobDownload(blob, filename);
 
-  return { filename, embeddedCount, totalItems: liquidation.items.length };
+  return { bytes, filename, embeddedCount, totalItems: liquidation.items.length };
+}
+
+export async function exportViaticosReceiptsPdf(
+  liquidation: ViaticoLiquidation,
+  mediaMap: Record<string, StoredReceiptMedia>
+): Promise<{ filename: string; embeddedCount: number; totalItems: number }> {
+  const { bytes, filename, embeddedCount, totalItems } = await generateViaticosReceiptsPdfBytes(
+    liquidation,
+    mediaMap
+  );
+  const blob = new Blob([new Uint8Array(bytes)], { type: 'application/pdf' });
+  triggerBlobDownload(blob, filename);
+  return { filename, embeddedCount, totalItems };
 }
 
 function wrapPdfText(
