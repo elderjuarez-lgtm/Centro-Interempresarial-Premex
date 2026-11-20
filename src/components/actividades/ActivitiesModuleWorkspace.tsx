@@ -23,16 +23,15 @@ import {
 import {
   CLOSURE_ACTIVITY_ID,
   CLOSURE_SOCIETY_CODE,
-  DEFAULT_START_PERIOD,
   MaterializedActivityAssignment,
   assignmentIncludesEmail,
-  buildResetToNov2026Workspace,
   collectResponsibleNotifyEmails,
   computeSuggestedDateForPeriod,
   formatDateTimeEs,
   formatPeriodLabel,
   formatShortDateEs,
   getGoogleTaskLinkForEmail,
+  getPeriodActivationStatus,
   hasAnyGoogleTaskLink,
   makeClosureExecutionId,
   materializePeriodAssignments,
@@ -279,8 +278,8 @@ export const ActivitiesModuleWorkspace: React.FC<ActivitiesModuleWorkspaceProps>
       const latest = sortedDates[sortedDates.length - 1];
       if (latest) return latest;
     }
-    return computeSuggestedDateForPeriod(data.selectedPeriod, 28);
-  }, [myPeriodAssignments, data.selectedPeriod]);
+    return computeSuggestedDateForPeriod(data.selectedPeriod, 28, data.societies[0]?.pais);
+  }, [myPeriodAssignments, data.selectedPeriod, data.societies]);
 
   const closureStatus = useMemo<PeriodClosureStatus>(() => {
     const rec = data.executions[closureExecutionId];
@@ -927,36 +926,6 @@ export const ActivitiesModuleWorkspace: React.FC<ActivitiesModuleWorkspaceProps>
         } catch (err) {
           handleWorkspaceError(err, 'No se pudo completar el envío por Gmail.');
         }
-      },
-    });
-  };
-
-  // ---------- Reset Period to Noviembre 2026 (Admin Only) ----------
-  const handleRequestResetPeriodToNov2026 = () => {
-    if (!isAdmin || !permissions.canOperate) return;
-    setWorkspaceConfirm({
-      kind: 'period_reset',
-      title: 'Reiniciar periodo a Noviembre 2026',
-      description:
-        'Se reiniciará el Panel de Actividades para iniciar desde Noviembre 2026. Se conservarán todas tus sociedades, responsables, catálogo de actividades y destinatarios configurados, limpiando el histórico previo de ejecuciones.',
-      itemsSummary: [
-        `Periodo inicial: ${formatPeriodLabel(DEFAULT_START_PERIOD)}`,
-        'Activación automática mensual: día 15 de cada mes para todos los responsables',
-        'Sociedades, responsables, actividades y destinatarios: se conservan intactos',
-      ],
-      confirmLabel: 'Reiniciar a Noviembre 2026',
-      onConfirm: async () => {
-        const nextWs = buildResetToNov2026Workspace(data);
-        onUpdateWorkspace(() => nextWs);
-        setRemoteCompletedPendingMyTasks([]);
-        if (currentUser && permissions.canOperate) {
-          await onSaveToCloud({ overrideWorkspace: nextWs });
-        }
-        setFeedbackBanner({
-          type: 'success',
-          message:
-            'Panel de Actividades reiniciado correctamente. Periodo activo: Noviembre 2026 (activación automática cada día 15).',
-        });
       },
     });
   };
@@ -1763,9 +1732,21 @@ export const ActivitiesModuleWorkspace: React.FC<ActivitiesModuleWorkspaceProps>
         <ActivitiesHeader
           activeTab={activeTab}
           selectedPeriod={data.selectedPeriod}
-          onChangePeriod={(periodKey) =>
-            onUpdateWorkspace((prev) => ({ ...prev, selectedPeriod: periodKey }))
-          }
+          onChangePeriod={(periodKey) => {
+            const actStatus = getPeriodActivationStatus(periodKey);
+            if (!actStatus.isActive) {
+              setFeedbackBanner({
+                type: 'info',
+                message: `El periodo ${formatPeriodLabel(
+                  periodKey
+                )} se habilitará automáticamente el ${formatShortDateEs(
+                  actStatus.activationDateIso
+                )}.`,
+              });
+              return;
+            }
+            onUpdateWorkspace((prev) => ({ ...prev, selectedPeriod: periodKey }));
+          }}
           onToggleMobileMenu={() => setIsMobileSidebarOpen((v) => !v)}
           onSwitchModule={onSwitchModule}
           currentUser={currentUser}
@@ -1786,7 +1767,6 @@ export const ActivitiesModuleWorkspace: React.FC<ActivitiesModuleWorkspaceProps>
           onPullFromGoogleTasks={() => {
             handlePullFromGoogleTasks({ silent: false }).catch(() => {});
           }}
-          onRequestResetPeriod={handleRequestResetPeriodToNov2026}
         />
 
         <main className="flex-1 px-4 sm:px-6 lg:px-8 py-5 sm:py-6 pb-24 lg:pb-6 max-w-[1600px] w-full mx-auto space-y-5">

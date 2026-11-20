@@ -26,6 +26,7 @@ import {
   ActivityTemplate,
 } from '../types';
 import { getCurrentPeriodKey, normalizeResponsibleIds } from '../utils/activities';
+import { normalizeActivityCountry } from '../utils/countryHolidays';
 import { normalizeEmail } from '../utils/permissions';
 
 export const DEFAULT_ACTIVITIES_DOC_ID = 'premex-actividades-principal';
@@ -65,6 +66,7 @@ const sanitizeSociety = (s: ActivitySociety, idx = 0): ActivitySociety => {
     id: String(s.id || `soc-${codigo.toLowerCase()}`).slice(0, 120),
     codigo,
     nombre: String(s.nombre || codigo).trim().slice(0, 120),
+    pais: normalizeActivityCountry(s.pais).slice(0, 80),
     activa: s.activa !== false,
   };
   if (cleanRespIds.length > 0) {

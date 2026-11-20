@@ -24,9 +24,18 @@ import {
 } from '../../types';
 import {
   ACTIVITY_PERIODICITY_OPTIONS,
+  formatPeriodLabel,
+  formatShortDateEs,
   normalizeResponsibleIds,
   resolveCompletionNotificationRecipients,
 } from '../../utils/activities';
+import {
+  COUNTRY_HOLIDAY_OPTIONS,
+  DEFAULT_ACTIVITY_COUNTRY,
+  getCountryHolidaysForPeriod,
+  normalizeActivityCountry,
+  resolveBusinessDayDateForPeriod,
+} from '../../utils/countryHolidays';
 import { normalizeEmail } from '../../utils/permissions';
 
 export type ActivitiesConfigSubTab =
@@ -76,10 +85,11 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
   const [respNotificarA, setRespNotificarA] = useState<string[]>([]);
   const [respNotifInput, setRespNotifInput] = useState('');
 
-  // Society editor state (with 1 or multiple responsibles selection)
+  // Society editor state (with country for official holidays + 1 or multiple responsibles selection)
   const [editingSocId, setEditingSocId] = useState<string | null>(null);
   const [socCodigo, setSocCodigo] = useState('');
   const [socNombre, setSocNombre] = useState('');
+  const [socPais, setSocPais] = useState<string>(DEFAULT_ACTIVITY_COUNTRY);
   const [socRespIds, setSocRespIds] = useState<string[]>([]);
 
   // Notification recipient editor state (strictly custom list, independent of admin permissions)
@@ -99,6 +109,26 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
   const respById = useMemo(
     () => new Map(data.responsibles.map((r) => [r.id, r])),
     [data.responsibles]
+  );
+
+  const activeCountries = useMemo(() => {
+    const set = new Set<string>();
+    activeSocieties.forEach((s) => set.add(normalizeActivityCountry(s.pais)));
+    if (set.size === 0) set.add(DEFAULT_ACTIVITY_COUNTRY);
+    return Array.from(set);
+  }, [activeSocieties]);
+
+  const actBusinessDayPreviews = useMemo(
+    () =>
+      activeCountries.map((country) =>
+        resolveBusinessDayDateForPeriod(data.selectedPeriod, actDiaSugerido, country)
+      ),
+    [activeCountries, data.selectedPeriod, actDiaSugerido]
+  );
+
+  const selectedSocHolidays = useMemo(
+    () => getCountryHolidaysForPeriod(data.selectedPeriod, socPais),
+    [data.selectedPeriod, socPais]
   );
 
   const knownPeopleForNotifyPicker = useMemo(() => {
@@ -467,11 +497,12 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     }));
   };
 
-  // ---------- Society CRUD (With 1 or Multiple Responsibles Assignment) ----------
+  // ---------- Society CRUD (With Country + 1 or Multiple Responsibles Assignment) ----------
   const startEditSociety = (soc: ActivitySociety) => {
     setEditingSocId(soc.id);
     setSocCodigo(soc.codigo);
     setSocNombre(soc.nombre);
+    setSocPais(normalizeActivityCountry(soc.pais));
     setSocRespIds(normalizeResponsibleIds(soc.responsablesIds));
   };
 
@@ -479,6 +510,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     setEditingSocId(null);
     setSocCodigo('');
     setSocNombre('');
+    setSocPais(DEFAULT_ACTIVITY_COUNTRY);
     setSocRespIds([]);
   };
 
@@ -492,6 +524,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     e.preventDefault();
     const cleanCode = socCodigo.trim().toUpperCase().replace(/\s+/g, '_');
     const cleanName = socNombre.trim() || cleanCode;
+    const cleanPais = normalizeActivityCountry(socPais);
     if (!cleanCode) return;
     const cleanRespIds = normalizeResponsibleIds(socRespIds);
 
@@ -501,7 +534,13 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
           ...prev,
           societies: prev.societies.map((s) =>
             s.id === editingSocId
-              ? { ...s, codigo: cleanCode, nombre: cleanName, responsablesIds: cleanRespIds }
+              ? {
+                  ...s,
+                  codigo: cleanCode,
+                  nombre: cleanName,
+                  pais: cleanPais,
+                  responsablesIds: cleanRespIds,
+                }
               : s
           ),
         };
@@ -511,7 +550,13 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
           ...prev,
           societies: prev.societies.map((s) =>
             s.codigo.toUpperCase() === cleanCode
-              ? { ...s, nombre: cleanName, responsablesIds: cleanRespIds, activa: true }
+              ? {
+                  ...s,
+                  nombre: cleanName,
+                  pais: cleanPais,
+                  responsablesIds: cleanRespIds,
+                  activa: true,
+                }
               : s
           ),
         };
@@ -520,6 +565,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
         id: `soc-${cleanCode.toLowerCase()}-${Date.now().toString(36)}`,
         codigo: cleanCode,
         nombre: cleanName,
+        pais: cleanPais,
         responsablesIds: cleanRespIds,
         activa: true,
       };
@@ -701,7 +747,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Día sugerido (1-31)
+                    Día hábil sugerido (1-31)
                   </label>
                   <input
                     type="number"
@@ -711,6 +757,18 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                     onChange={(e) => setActDiaSugerido(Number(e.target.value))}
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900 tabular-nums"
                   />
+                </div>
+
+                <div className="md:col-span-4 rounded-xl border border-blue-200/80 bg-blue-50/50 px-3.5 py-2.5 text-[11px] text-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span>
+                    <strong className="text-[#132B63]">Cálculo por días hábiles:</strong> se excluyen sábados, domingos y los feriados oficiales del país de cada empresa.
+                  </span>
+                  <span className="font-mono font-semibold text-[#132B63] shrink-0">
+                    {formatPeriodLabel(data.selectedPeriod)}:{' '}
+                    {actBusinessDayPreviews
+                      .map((p) => `${p.country} ${formatShortDateEs(p.dateYmd)}`)
+                      .join(' · ')}
+                  </span>
                 </div>
 
                 <div className="md:col-span-2">
@@ -749,10 +807,10 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                 />
                 <div className="text-xs">
                   <div className="font-bold text-emerald-950">
-                    Activar automáticamente cada día 15 para todos los responsables
+                    Activar automáticamente el día 15 del mes anterior para todos los responsables
                   </div>
                   <div className="text-emerald-800/90 mt-0.5">
-                    Habilita esta tarea automáticamente en todas las sociedades para sus responsables sin depender de asignación manual. (Las tareas sin asignación manual también se activan automáticamente.)
+                    Habilita esta tarea automáticamente en el periodo del mes siguiente al llegar el día 15 de cada mes, para todas las sociedades y sus responsables.
                   </div>
                 </div>
               </label>
@@ -927,7 +985,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                   <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                     <th className="px-4 py-3">Actividad</th>
                     <th className="px-3 py-3">Periodicidad</th>
-                    <th className="px-3 py-3">Día sugerido</th>
+                    <th className="px-3 py-3">Día hábil</th>
                     <th className="px-3 py-3">Empresas asignadas</th>
                     <th className="px-3 py-3">Estado</th>
                     {canEdit && <th className="px-4 py-3 text-right">Acciones</th>}
@@ -952,12 +1010,12 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                           {act.periodicidad}
                         </td>
                         <td className="px-3 py-3 font-mono tabular-nums text-slate-700">
-                          Día {act.diaSugerido}
+                          Día hábil #{act.diaSugerido}
                         </td>
                         <td className="px-3 py-3 text-slate-700">
                           {act.aplicarATodosResponsables || assignedSocs.length === 0 ? (
                             <span className="inline-flex items-center gap-1 text-emerald-800 font-semibold">
-                              Automática día 15 · Todos los responsables
+                              Automática (día 15) · Todos los responsables
                             </span>
                           ) : (
                             <span className="font-medium">{assignedSocs.join(', ')}</span>
@@ -1051,7 +1109,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
 
             {canEdit && (
               <form onSubmit={handleSaveSociety} className="space-y-4 pt-2 border-t border-slate-100">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <input
                     type="text"
                     required
@@ -1067,6 +1125,18 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                     placeholder="Razón social"
                     className="rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900"
                   />
+                  <select
+                    aria-label="País de la sociedad"
+                    value={socPais}
+                    onChange={(e) => setSocPais(e.target.value)}
+                    className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-800 bg-white"
+                  >
+                    {COUNTRY_HOLIDAY_OPTIONS.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     type="submit"
                     className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl cursor-pointer"
@@ -1078,6 +1148,21 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                     )}
                     <span>{editingSocId ? 'Guardar Sociedad' : 'Agregar Sociedad'}</span>
                   </button>
+                </div>
+
+                <div className="rounded-xl border border-blue-200/80 bg-blue-50/50 px-3.5 py-2.5 text-[11px] text-slate-700">
+                  <strong className="text-[#132B63]">
+                    Feriados oficiales ({normalizeActivityCountry(socPais)} ·{' '}
+                    {formatPeriodLabel(data.selectedPeriod)}):
+                  </strong>{' '}
+                  {selectedSocHolidays.length > 0
+                    ? selectedSocHolidays
+                        .map((h) => `${formatShortDateEs(h.dateYmd)} (${h.name})`)
+                        .join(' · ')
+                    : 'Sin feriados oficiales en este mes.'}{' '}
+                  <span className="text-slate-500">
+                    (Se excluyen sábados, domingos y feriados oficiales.)
+                  </span>
                 </div>
 
                 {/* Multi-Responsible Picker when creating/editing society */}
@@ -1156,6 +1241,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                   <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                     <th className="px-4 py-3">Código</th>
                     <th className="px-3 py-3">Nombre</th>
+                    <th className="px-3 py-3">País (Feriados)</th>
                     <th className="px-3 py-3">Responsables</th>
                     <th className="px-3 py-3">Estado</th>
                     {canEdit && <th className="px-4 py-3 text-right">Acciones</th>}
@@ -1166,10 +1252,25 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                     const assignedNames = normalizeResponsibleIds(soc.responsablesIds)
                       .map((id) => respById.get(id)?.nombre)
                       .filter(Boolean) as string[];
+                    const socCountry = normalizeActivityCountry(soc.pais);
+                    const periodHolidays = getCountryHolidaysForPeriod(
+                      data.selectedPeriod,
+                      socCountry
+                    );
                     return (
                       <tr key={soc.id} className="hover:bg-slate-50/70">
                         <td className="px-4 py-3 font-bold text-slate-900">{soc.codigo}</td>
                         <td className="px-3 py-3 text-slate-700">{soc.nombre}</td>
+                        <td className="px-3 py-3">
+                          <div className="font-semibold text-[#132B63]">{socCountry}</div>
+                          <div className="text-[10px] text-slate-500">
+                            {periodHolidays.length > 0
+                              ? `${periodHolidays.length} feriado(s) en ${formatPeriodLabel(
+                                  data.selectedPeriod
+                                )}`
+                              : `Sin feriados en ${formatPeriodLabel(data.selectedPeriod)}`}
+                          </div>
+                        </td>
                         <td className="px-3 py-3 text-slate-700">
                           {assignedNames.length > 0 ? (
                             <span className="font-medium">{assignedNames.join(', ')}</span>

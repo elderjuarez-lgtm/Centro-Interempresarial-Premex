@@ -644,6 +644,8 @@ export interface ActivitySociety {
   id: string;
   codigo: string;
   nombre: string;
+  /** País de la empresa para calcular días hábiles según sus feriados oficiales (ej. 'Colombia', 'Guatemala', 'Estados Unidos') */
+  pais?: string;
   /** Uno o varios responsables asignados directamente a esta sociedad */
   responsablesIds?: string[];
   activa: boolean;
@@ -663,7 +665,7 @@ export interface ActivityTemplate {
   id: string;
   nombre: string;
   periodicidad: ActivityPeriodicity;
-  /** Día sugerido del mes para cumplimiento (1..28/31) */
+  /** Día hábil sugerido del mes para cumplimiento (1..31; excluye sábados, domingos y feriados oficiales del país de cada empresa) */
   diaSugerido: number;
   descripcion?: string;
   /** Mapa codigoSociedad -> lista de responsibleIds (vacío si no aplica a esa sociedad) */

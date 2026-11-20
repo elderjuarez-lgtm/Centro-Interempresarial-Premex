@@ -12,6 +12,11 @@ import {
   UserPermissionRecord,
 } from '../types';
 import { normalizeEmail } from './permissions';
+import {
+  BusinessDayResolution,
+  normalizeActivityCountry,
+  resolveBusinessDayDateForPeriod,
+} from './countryHolidays';
 
 export const DEFAULT_START_PERIOD = '2026-11';
 export const AUTO_ACTIVATION_DAY = 15;
@@ -71,6 +76,7 @@ export const normalizeActivitySociety = (society: ActivitySociety): ActivitySoci
   ...society,
   codigo: String(society.codigo || society.nombre || '').trim().toUpperCase(),
   nombre: String(society.nombre || society.codigo || '').trim(),
+  pais: normalizeActivityCountry(society.pais),
   responsablesIds: normalizeResponsibleIds(society.responsablesIds),
   activa: society.activa !== false,
 });
@@ -80,6 +86,7 @@ export const INITIAL_ACTIVITY_SOCIETIES: ActivitySociety[] = [
     id: 'soc-premex',
     codigo: 'PREMEX',
     nombre: 'PREMEX',
+    pais: 'Colombia',
     responsablesIds: ['resp-diana', 'resp-ana'],
     activa: true,
   },
@@ -87,6 +94,7 @@ export const INITIAL_ACTIVITY_SOCIETIES: ActivitySociety[] = [
     id: 'soc-adiquim',
     codigo: 'ADIQUIM',
     nombre: 'ADIQUIM',
+    pais: 'Colombia',
     responsablesIds: ['resp-alejandro', 'resp-diana', 'resp-ana'],
     activa: true,
   },
@@ -94,6 +102,7 @@ export const INITIAL_ACTIVITY_SOCIETIES: ActivitySociety[] = [
     id: 'soc-nutreo',
     codigo: 'NUTREO',
     nombre: 'NUTREO',
+    pais: 'Colombia',
     responsablesIds: ['resp-kelly', 'resp-ana'],
     activa: true,
   },
@@ -101,6 +110,7 @@ export const INITIAL_ACTIVITY_SOCIETIES: ActivitySociety[] = [
     id: 'soc-alura',
     codigo: 'ALURA',
     nombre: 'ALURA',
+    pais: 'Colombia',
     responsablesIds: ['resp-ana'],
     activa: true,
   },
@@ -108,6 +118,7 @@ export const INITIAL_ACTIVITY_SOCIETIES: ActivitySociety[] = [
     id: 'soc-asimetrix',
     codigo: 'ASIMETRIX',
     nombre: 'ASIMETRIX',
+    pais: 'Colombia',
     responsablesIds: ['resp-kelly', 'resp-diana', 'resp-ana'],
     activa: true,
   },
@@ -115,6 +126,7 @@ export const INITIAL_ACTIVITY_SOCIETIES: ActivitySociety[] = [
     id: 'soc-prizma',
     codigo: 'PRIZMA',
     nombre: 'PRIZMA',
+    pais: 'Colombia',
     responsablesIds: ['resp-kelly', 'resp-diana', 'resp-ana'],
     activa: true,
   },
@@ -122,6 +134,7 @@ export const INITIAL_ACTIVITY_SOCIETIES: ActivitySociety[] = [
     id: 'soc-mesage',
     codigo: 'MESAGE',
     nombre: 'MESAGE',
+    pais: 'Colombia',
     responsablesIds: ['resp-ana'],
     activa: true,
   },
@@ -336,48 +349,55 @@ export const formatPeriodLabel = (periodKey: string): string => {
   return `${MONTHS_ES[monthIdx]} ${year}`;
 };
 
-export const buildRecentPeriodOptions = (
-  selectedPeriodKey?: string
-): { key: string; label: string }[] => {
-  const startMatch = /^(\d{4})-(\d{2})$/.exec(DEFAULT_START_PERIOD);
-  const startYear = startMatch ? Number(startMatch[1]) : 2026;
-  const startMonth = startMatch ? Number(startMatch[2]) - 1 : 10; // Nov 2026
+export interface RecentPeriodOption {
+  key: string;
+  label: string;
+  isActive: boolean;
+  activationDateIso: string;
+}
 
-  const options: { key: string; label: string }[] = [];
-  const seen = new Set<string>();
-
-  // Always start from Noviembre 2026 forward (14 months: Nov 2026 -> Dic 2027)
-  for (let offset = 0; offset < 14; offset++) {
-    const d = new Date(startYear, startMonth + offset, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    seen.add(key);
-    options.push({ key, label: formatPeriodLabel(key) });
-  }
-
-  // Ensure the currently selected period is always present even if beyond Dec 2027
-  if (selectedPeriodKey && /^\d{4}-\d{2}$/.test(selectedPeriodKey) && !seen.has(selectedPeriodKey)) {
-    options.push({ key: selectedPeriodKey, label: formatPeriodLabel(selectedPeriodKey) });
-    options.sort((a, b) => a.key.localeCompare(b.key));
-  }
-
-  return options;
+const getPreviousPeriodKey = (periodKey: string): string => {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(periodKey || '').trim());
+  if (!match) return DEFAULT_START_PERIOD;
+  const year = Number(match[1]);
+  const monthIdx = Number(match[2]) - 1;
+  const prev = new Date(year, monthIdx - 1, 1);
+  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
 };
 
 export interface PeriodActivationStatus {
   isActive: boolean;
+  isInitialPeriod: boolean;
   activationDateIso: string;
   daysUntilActivation: number;
   statusLabel: string;
 }
 
 /**
- * Evaluates the automatic monthly day-15 activation rule for a given YYYY-MM period.
+ * Evaluates the monthly day-15 next-period activation rule:
+ * - Noviembre 2026 (`DEFAULT_START_PERIOD`) is the initial baseline period and is always active.
+ * - Each subsequent period `P` activates automatically on the 15th of the previous month (`P - 1`).
  */
 export const getPeriodActivationStatus = (
   periodKey: string,
   referenceDate: Date = new Date()
 ): PeriodActivationStatus => {
-  const activationDateIso = computeSuggestedDateForPeriod(periodKey, AUTO_ACTIVATION_DAY);
+  const cleanKey = /^\d{4}-\d{2}$/.test(String(periodKey || '').trim())
+    ? String(periodKey).trim()
+    : DEFAULT_START_PERIOD;
+
+  if (cleanKey <= DEFAULT_START_PERIOD) {
+    return {
+      isActive: true,
+      isInitialPeriod: true,
+      activationDateIso: `${DEFAULT_START_PERIOD}-01`,
+      daysUntilActivation: 0,
+      statusLabel: 'Periodo inicial activo · siguiente mes se habilita cada día 15',
+    };
+  }
+
+  const prevMonthKey = getPreviousPeriodKey(cleanKey);
+  const activationDateIso = `${prevMonthKey}-${String(AUTO_ACTIVATION_DAY).padStart(2, '0')}`;
   const todayYmd = `${referenceDate.getFullYear()}-${String(referenceDate.getMonth() + 1).padStart(
     2,
     '0'
@@ -391,14 +411,54 @@ export const getPeriodActivationStatus = (
 
   return {
     isActive,
+    isInitialPeriod: false,
     activationDateIso,
     daysUntilActivation: Math.max(0, diffDays),
     statusLabel: isActive
-      ? `Activación día 15 activa (desde ${formatShortDateEs(activationDateIso)})`
-      : `Se activa automáticamente el ${formatShortDateEs(activationDateIso)} (en ${diffDays} ${
+      ? `Habilitado automáticamente desde el ${formatShortDateEs(activationDateIso)}`
+      : `Se habilita el ${formatShortDateEs(activationDateIso)} (en ${diffDays} ${
           diffDays === 1 ? 'día' : 'días'
         })`,
   };
+};
+
+export const buildRecentPeriodOptions = (
+  selectedPeriodKey?: string,
+  referenceDate: Date = new Date()
+): RecentPeriodOption[] => {
+  const startMatch = /^(\d{4})-(\d{2})$/.exec(DEFAULT_START_PERIOD);
+  const startYear = startMatch ? Number(startMatch[1]) : 2026;
+  const startMonth = startMatch ? Number(startMatch[2]) - 1 : 10; // Nov 2026
+
+  const options: RecentPeriodOption[] = [];
+  const seen = new Set<string>();
+
+  // Always start from Noviembre 2026 forward (14 months: Nov 2026 -> Dic 2027)
+  for (let offset = 0; offset < 14; offset++) {
+    const d = new Date(startYear, startMonth + offset, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const act = getPeriodActivationStatus(key, referenceDate);
+    seen.add(key);
+    options.push({
+      key,
+      label: formatPeriodLabel(key),
+      isActive: act.isActive,
+      activationDateIso: act.activationDateIso,
+    });
+  }
+
+  if (selectedPeriodKey && /^\d{4}-\d{2}$/.test(selectedPeriodKey) && !seen.has(selectedPeriodKey)) {
+    const act = getPeriodActivationStatus(selectedPeriodKey, referenceDate);
+    options.push({
+      key: selectedPeriodKey,
+      label: formatPeriodLabel(selectedPeriodKey),
+      isActive: act.isActive,
+      activationDateIso: act.activationDateIso,
+    });
+    options.sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  return options;
 };
 
 export const makeExecutionId = (
@@ -414,32 +474,20 @@ export const isClosureExecutionId = (executionId?: string | null): boolean =>
   String(executionId || '').startsWith('closure__');
 
 /**
- * Resets the Activities workspace to start fresh at Noviembre 2026 while preserving
- * all configured societies, responsibles, activities, and notification recipients.
+ * Computes the N-th business day (`día hábil`) date in `periodKey` (YYYY-MM) for a company's country.
+ * Saturdays, Sundays, and official public holidays of that country are excluded as non-working days.
  */
-export const buildResetToNov2026Workspace = (
-  prev: ActivitiesWorkspaceData
-): ActivitiesWorkspaceData => ({
-  ...prev,
-  selectedPeriod: DEFAULT_START_PERIOD,
-  executions: {},
-  notifyAdminsAutomatically: false,
-  lastGoogleTasksSyncIso: null,
-  hasUnsavedChanges: true,
-});
+export const computeBusinessDayDetailsForPeriod = (
+  periodKey: string,
+  diaSugerido: number,
+  country?: string | null
+): BusinessDayResolution => resolveBusinessDayDateForPeriod(periodKey, diaSugerido, country);
 
 export const computeSuggestedDateForPeriod = (
   periodKey: string,
-  diaSugerido: number
-): string => {
-  const match = /^(\d{4})-(\d{2})$/.exec(String(periodKey || '').trim());
-  const now = new Date();
-  const year = match ? Number(match[1]) : now.getFullYear();
-  const month = match ? Number(match[2]) : now.getMonth() + 1;
-  const maxDay = new Date(year, month, 0).getDate();
-  const clampedDay = Math.min(Math.max(1, Math.round(diaSugerido || 10)), maxDay);
-  return `${year}-${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
-};
+  diaSugerido: number,
+  country?: string | null
+): string => resolveBusinessDayDateForPeriod(periodKey, diaSugerido, country).dateYmd;
 
 export const formatShortDateEs = (isoOrYmd?: string): string => {
   if (!isoOrYmd) return '—';
@@ -515,6 +563,8 @@ export interface MaterializedActivityAssignment {
   isAutoAssignedAll?: boolean;
   /** True when the period has reached or passed the automatic day-15 activation date */
   isPeriodActivated?: boolean;
+  /** Business day resolution metadata (country, N-th business day, skipped official holidays) */
+  businessDayInfo: BusinessDayResolution;
 }
 
 export const assignmentIncludesEmail = (
@@ -655,7 +705,12 @@ export const materializePeriodAssignments = (
         const responsibleNamesLabel = resolvedResponsibles.map((r) => r.nombre).join(', ');
         const executionId = makeExecutionId(periodKey, activity.id, society.codigo);
         const existing = data.executions[executionId];
-        const defaultDate = computeSuggestedDateForPeriod(periodKey, activity.diaSugerido);
+        const businessDayInfo = resolveBusinessDayDateForPeriod(
+          periodKey,
+          activity.diaSugerido,
+          society.pais
+        );
+        const computedDate = businessDayInfo.dateYmd;
 
         const execution: ActivityExecutionRecord = existing
           ? {
@@ -666,7 +721,10 @@ export const materializePeriodAssignments = (
               responsibleIds: resolvedResponsibles.map((r) => r.id),
               responsibleNames: resolvedResponsibles.map((r) => r.nombre),
               responsibleEmails: resolvedResponsibles.map((r) => r.email).filter(Boolean),
-              fechaSugerida: existing.fechaSugerida || defaultDate,
+              fechaSugerida:
+                existing.estado === 'realizada'
+                  ? existing.fechaSugerida || computedDate
+                  : computedDate,
             }
           : {
               id: executionId,
@@ -679,7 +737,7 @@ export const materializePeriodAssignments = (
               responsibleIds: resolvedResponsibles.map((r) => r.id),
               responsibleNames: resolvedResponsibles.map((r) => r.nombre),
               responsibleEmails: resolvedResponsibles.map((r) => r.email).filter(Boolean),
-              fechaSugerida: defaultDate,
+              fechaSugerida: computedDate,
               estado: 'pendiente',
             };
 
@@ -699,6 +757,7 @@ export const materializePeriodAssignments = (
           daysLeft,
           isAutoAssignedAll,
           isPeriodActivated: activationStatus.isActive,
+          businessDayInfo,
         });
       });
     });
@@ -906,8 +965,8 @@ export const exportActivitiesMatrixToExcel = (
   const matrixHeader = [
     'ACTIVIDADES',
     'PERIODICIDAD',
-    'FECHA SUGERIDA',
-    ...activeSocieties.map((s) => s.codigo),
+    'DÍA HÁBIL SUG.',
+    ...activeSocieties.map((s) => `${s.codigo} (${normalizeActivityCountry(s.pais)})`),
   ];
 
   const matrixRows: (string | number)[][] = [
@@ -920,11 +979,10 @@ export const exportActivitiesMatrixToExcel = (
   data.activities
     .filter((a) => a.activa)
     .forEach((act) => {
-      const defaultDate = computeSuggestedDateForPeriod(data.selectedPeriod, act.diaSugerido);
       const row: (string | number)[] = [
         act.nombre,
         act.periodicidad,
-        formatShortDateEs(defaultDate),
+        `Día hábil #${act.diaSugerido}`,
       ];
       activeSocieties.forEach((soc) => {
         const { ids: respIds } = getEffectiveResponsibleIdsForCell(
@@ -944,8 +1002,12 @@ export const exportActivitiesMatrixToExcel = (
             .map((id) => respById.get(id)?.nombre)
             .filter(Boolean)
             .join(', ');
-        const statusTag = item?.execution.estado === 'realizada' ? ' [REALIZADA]' : ' [PENDIENTE]';
-        row.push(`${names}${statusTag}`);
+        const dateTag = formatShortDateEs(
+          item?.execution.fechaSugerida ||
+            computeSuggestedDateForPeriod(data.selectedPeriod, act.diaSugerido, soc.pais)
+        );
+        const statusTag = item?.execution.estado === 'realizada' ? 'REALIZADA' : 'PENDIENTE';
+        row.push(`${names} (${dateTag}) [${statusTag}]`);
       });
       matrixRows.push(row);
     });
@@ -955,7 +1017,7 @@ export const exportActivitiesMatrixToExcel = (
     { wch: 46 },
     { wch: 15 },
     { wch: 16 },
-    ...activeSocieties.map(() => ({ wch: 28 })),
+    ...activeSocieties.map(() => ({ wch: 32 })),
   ];
 
   const detailRows = assignments.map((item) => ({
@@ -963,6 +1025,8 @@ export const exportActivitiesMatrixToExcel = (
     Actividad: item.activity.nombre,
     Periodicidad: item.activity.periodicidad,
     Sociedad: item.society.codigo,
+    País: normalizeActivityCountry(item.society.pais),
+    'Día Hábil': `Día hábil #${item.activity.diaSugerido}`,
     Responsables: item.responsibleNamesLabel,
     Correos: item.responsibles.map((r) => r.email).filter(Boolean).join(', '),
     'Fecha Sugerida': formatShortDateEs(item.execution.fechaSugerida),
@@ -986,6 +1050,8 @@ export const exportActivitiesMatrixToExcel = (
     { wch: 18 },
     { wch: 42 },
     { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
     { wch: 14 },
     { wch: 30 },
     { wch: 36 },

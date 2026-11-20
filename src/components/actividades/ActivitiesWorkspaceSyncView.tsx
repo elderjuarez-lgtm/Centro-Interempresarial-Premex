@@ -564,7 +564,10 @@ export const ActivitiesWorkspaceSyncView: React.FC<ActivitiesWorkspaceSyncViewPr
                               <strong className="text-slate-800">{item.society.codigo}</strong> ·{' '}
                               {item.activity.nombre}
                             </span>
-                            <span className="text-[11px] font-mono tabular-nums text-slate-500 shrink-0">
+                            <span
+                              title={`Día hábil #${item.activity.diaSugerido} · ${item.businessDayInfo.country}`}
+                              className="text-[11px] font-mono tabular-nums text-slate-500 shrink-0"
+                            >
                               {formatShortDateEs(item.execution.fechaSugerida)}
                             </span>
                           </li>

@@ -26,6 +26,7 @@ import {
   hasAnyGoogleTaskLink,
   makeExecutionId,
 } from '../../utils/activities';
+import { normalizeActivityCountry } from '../../utils/countryHolidays';
 import { PeriodClosureStatus } from './ActivitiesExecutionListView';
 
 interface ActivitiesMatrixViewProps {
@@ -414,13 +415,16 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                     ACTIVIDADES
                   </th>
                   <th className="px-3 py-3 w-28 border-r border-slate-200">PERIODICIDAD</th>
-                  <th className="px-3 py-3 w-28 border-r border-slate-200">FECHA SUG.</th>
+                  <th className="px-3 py-3 w-32 border-r border-slate-200">DÍA HÁBIL</th>
                   {activeSocieties.map((soc) => (
                     <th
                       key={soc.id}
                       className="px-3 py-3 text-center min-w-[146px] border-r last:border-r-0 border-slate-200"
                     >
-                      {soc.codigo}
+                      <div>{soc.codigo}</div>
+                      <div className="text-[9px] font-semibold text-slate-500 normal-case tracking-normal mt-0.5">
+                        {normalizeActivityCountry(soc.pais)}
+                      </div>
                     </th>
                   ))}
                 </tr>
@@ -437,10 +441,30 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                   </tr>
                 ) : (
                   filteredActivities.map((act) => {
-                    const defaultDueDate = computeSuggestedDateForPeriod(
-                      data.selectedPeriod,
-                      act.diaSugerido
+                    const resolvedDates = Array.from(
+                      new Set(
+                        activeSocieties.map((s) =>
+                          computeSuggestedDateForPeriod(
+                            data.selectedPeriod,
+                            act.diaSugerido,
+                            s.pais
+                          )
+                        )
+                      )
                     );
+                    const uniformDate = resolvedDates.length === 1 ? resolvedDates[0] : null;
+                    const countryBreakdownTitle = activeSocieties
+                      .map(
+                        (s) =>
+                          `${s.codigo} (${normalizeActivityCountry(s.pais)}): ${formatShortDateEs(
+                            computeSuggestedDateForPeriod(
+                              data.selectedPeriod,
+                              act.diaSugerido,
+                              s.pais
+                            )
+                          )}`
+                      )
+                      .join(' · ');
 
                     return (
                       <tr key={act.id} className="hover:bg-slate-50/70 transition-colors">
@@ -467,11 +491,17 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                           </span>
                         </td>
 
-                        <td className="px-3 py-3 border-r border-slate-200 align-middle whitespace-nowrap tabular-nums text-slate-600 font-medium">
-                          <span className="inline-flex items-center gap-1">
-                            <Calendar className="w-3 h-3 text-slate-400" />
-                            {formatShortDateEs(defaultDueDate)}
-                          </span>
+                        <td
+                          title={countryBreakdownTitle}
+                          className="px-3 py-3 border-r border-slate-200 align-middle whitespace-nowrap tabular-nums"
+                        >
+                          <div className="inline-flex items-center gap-1 font-bold text-slate-800">
+                            <Calendar className="w-3 h-3 text-[#1E60A8]" />
+                            <span>Hábil #{act.diaSugerido}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-medium mt-0.5">
+                            {uniformDate ? formatShortDateEs(uniformDate) : 'Según país'}
+                          </div>
                         </td>
 
                         {activeSocieties.map((soc) => {
@@ -515,6 +545,13 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                               )
                             : formatShortDateEs(item.execution.fechaSugerida);
 
+                          const skippedText =
+                            item.businessDayInfo.skippedHolidays.length > 0
+                              ? ` · Omite feriados: ${item.businessDayInfo.skippedHolidays
+                                  .map((h) => `${formatShortDateEs(h.dateYmd)} (${h.name})`)
+                                  .join(', ')}`
+                              : '';
+
                           return (
                             <td
                               key={soc.id}
@@ -526,7 +563,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                                 title={
                                   isDone && item.execution.completadaPorNombre
                                     ? `${item.responsibleNamesLabel} · Cumplida por ${item.execution.completadaPorNombre} (${displayDate})`
-                                    : `${item.responsibleNamesLabel} · ${displayDate}`
+                                    : `${item.responsibleNamesLabel} · Día hábil #${item.activity.diaSugerido} (${item.businessDayInfo.country}): ${displayDate}${skippedText}`
                                 }
                                 className={`w-full min-h-[54px] px-2.5 py-2 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${cellStyle}`}
                               >

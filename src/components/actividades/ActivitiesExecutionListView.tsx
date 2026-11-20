@@ -22,6 +22,7 @@ import {
   formatShortDateEs,
   getGoogleTaskLinkForEmail,
 } from '../../utils/activities';
+import { normalizeActivityCountry } from '../../utils/countryHolidays';
 
 export interface PeriodClosureStatus {
   closureExecutionId: string;
@@ -458,7 +459,10 @@ export const ActivitiesExecutionListView: React.FC<ActivitiesExecutionListViewPr
                       </td>
 
                       <td className="px-3 py-3.5 align-middle whitespace-nowrap">
-                        <span className="font-bold text-slate-800">{item.society.codigo}</span>
+                        <div className="font-bold text-slate-800">{item.society.codigo}</div>
+                        <div className="text-[10px] font-medium text-slate-500">
+                          {normalizeActivityCountry(item.society.pais)}
+                        </div>
                       </td>
 
                       <td className="px-3 py-3.5 align-middle">
@@ -478,7 +482,16 @@ export const ActivitiesExecutionListView: React.FC<ActivitiesExecutionListViewPr
                         </div>
                       </td>
 
-                      <td className="px-3 py-3.5 align-middle whitespace-nowrap tabular-nums">
+                      <td
+                        className="px-3 py-3.5 align-middle whitespace-nowrap tabular-nums"
+                        title={
+                          item.businessDayInfo.skippedHolidays.length > 0
+                            ? `Feriados omitidos (${item.businessDayInfo.country}): ${item.businessDayInfo.skippedHolidays
+                                .map((h) => `${formatShortDateEs(h.dateYmd)} (${h.name})`)
+                                .join(', ')}`
+                            : `${item.businessDayInfo.country}: sin feriados previos en este mes`
+                        }
+                      >
                         <div className="inline-flex items-center gap-1.5 font-semibold text-slate-800">
                           <Calendar className="w-3.5 h-3.5 text-slate-400" />
                           <span>
@@ -502,11 +515,13 @@ export const ActivitiesExecutionListView: React.FC<ActivitiesExecutionListViewPr
                         >
                           {isDone
                             ? 'Fecha cumplimiento'
-                            : isOverdue
-                            ? `Vencida hace ${Math.abs(item.daysLeft)} d.`
-                            : item.daysLeft === 0
-                            ? 'Vence hoy'
-                            : `En ${item.daysLeft} día(s)`}
+                            : `Día hábil #${item.activity.diaSugerido} · ${
+                                isOverdue
+                                  ? `Vencida hace ${Math.abs(item.daysLeft)} d.`
+                                  : item.daysLeft === 0
+                                  ? 'Vence hoy'
+                                  : `En ${item.daysLeft} día(s)`
+                              }`}
                         </div>
                       </td>
 

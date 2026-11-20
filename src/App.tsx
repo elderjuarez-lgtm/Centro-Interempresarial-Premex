@@ -2197,7 +2197,10 @@ export default function App() {
     );
     const actividadesList = mergeRuntimeSocietyNames(
       standaloneModuleCompanies.actividades,
-      activitiesWorkspace.societies.map((s) => ({ nombre: s.codigo })),
+      activitiesWorkspace.societies.map((s) => ({
+        nombre: s.codigo,
+        pais: s.pais || 'Colombia',
+      })),
       'act'
     );
 
