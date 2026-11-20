@@ -654,6 +654,8 @@ export interface ActivityResponsible {
   nombre: string;
   email: string;
   cargo?: string;
+  /** Correos de responsables/destinatarios a quienes notificar cuando este usuario cumpla actividades o cierre el periodo */
+  notificarA?: string[];
   activo: boolean;
 }
 
@@ -666,6 +668,8 @@ export interface ActivityTemplate {
   descripcion?: string;
   /** Mapa codigoSociedad -> lista de responsibleIds (vacío si no aplica a esa sociedad) */
   responsablesPorSociedad: Record<string, string[]>;
+  /** Si es true, activa automáticamente para los responsables de cada sociedad sin asignación manual previa */
+  aplicarATodosResponsables?: boolean;
   /** Correos adicionales específicos de esta actividad para notificar cumplimiento */
   notificarAdicionales?: string[];
   activa: boolean;

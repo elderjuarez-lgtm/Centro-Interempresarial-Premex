@@ -516,6 +516,55 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidViaticosReceipt(data) {
+      return data.keys().hasAll([
+          'id',
+          'parentReceiptId',
+          'chunkIndex',
+          'chunkCount',
+          'workspaceId',
+          'ownerId',
+          'fileName',
+          'mimeType',
+          'size',
+          'dataUrl',
+          'createdAtIso',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'parentReceiptId',
+          'chunkIndex',
+          'chunkCount',
+          'workspaceId',
+          'ownerId',
+          'ownerName',
+          'fileName',
+          'mimeType',
+          'size',
+          'dataUrl',
+          'createdAtIso',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.id is string && isValidId(data.id) &&
+        data.parentReceiptId is string && isValidId(data.parentReceiptId) &&
+        data.chunkIndex is int && data.chunkIndex >= 0 && data.chunkIndex <= 20 &&
+        data.chunkCount is int && data.chunkCount >= 1 && data.chunkCount <= 20 &&
+        data.chunkIndex < data.chunkCount &&
+        data.workspaceId is string && isValidId(data.workspaceId) &&
+        data.ownerId is string && isValidId(data.ownerId) &&
+        (!('ownerName' in data) || (data.ownerName is string && data.ownerName.size() <= 120)) &&
+        data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 200 &&
+        data.mimeType is string && data.mimeType.size() >= 1 && data.mimeType.size() <= 80 &&
+        data.size is int && data.size >= 0 && data.size <= 20000000 &&
+        data.dataUrl is string && data.dataUrl.size() >= 1 && data.dataUrl.size() <= 800000 &&
+        data.createdAtIso is string && data.createdAtIso.size() >= 1 && data.createdAtIso.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     match /reconciliations/{reconciliationId} {
       // Strictly requires verified Google sign-in and authorization for the Intercompany module
       allow get: if isVerifiedUser() &&
@@ -871,6 +920,53 @@ service cloud.firestore {
       // Only verified admins or owners who can operate viaticos can delete
       allow delete: if isVerifiedUser() &&
         isValidId(viaticosId) &&
+        (isAdmin() || (existing().ownerId == request.auth.uid && canOperateModule('viaticos')));
+    }
+
+    match /viaticos_receipts/{receiptId} {
+      // Strictly readable by verified users authorized for Viáticos (all admins, accounting reviewers, and viaticos operators)
+      allow get: if isVerifiedUser() &&
+        isValidId(receiptId) &&
+        canReadModule('viaticos');
+
+      // Clients fetch receipts directly by attachmentId from the workspace; prevent collection listing/scraping
+      allow list: if false;
+
+      // Verified admins or active viaticos operators can upload scanned invoice receipts
+      allow create: if isVerifiedUser() &&
+        isValidId(receiptId) &&
+        isValidViaticosReceipt(incoming()) &&
+        incoming().id == receiptId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        canOperateModule('viaticos');
+
+      // Verified admins or active viaticos operators can update rotated/replaced receipts
+      allow update: if isVerifiedUser() &&
+        isValidId(receiptId) &&
+        isValidViaticosReceipt(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().parentReceiptId == existing().parentReceiptId &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'ownerName',
+          'fileName',
+          'mimeType',
+          'size',
+          'chunkIndex',
+          'chunkCount',
+          'workspaceId',
+          'dataUrl',
+          'updatedAt'
+        ]) &&
+        (isAdmin() || canOperateModule('viaticos'));
+
+      // Only verified admins or the creator who can operate viaticos can delete receipt media
+      allow delete: if isVerifiedUser() &&
+        isValidId(receiptId) &&
         (isAdmin() || (existing().ownerId == request.auth.uid && canOperateModule('viaticos')));
     }
 

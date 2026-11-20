@@ -557,13 +557,13 @@ const matchesAccountBalanceRow = (
 };
 
 /**
- * Generates Corporate Deliverable Excel (.xlsx) with LIVE formulas:
+ * Generates Corporate Deliverable Excel (.xlsx) bytes with LIVE formulas:
  * - Individual mode: 1 official `Conciliacion Bancos` sheet + account-scoped `Partidas Abiertas SAP` + `Balance 00-01-02`.
  * - Masivo mode: `Centro Conciliaciones` consolidated overview + 1 dedicated live-formula `CONCILIACION DE BANCOS` sheet per account/period + `Partidas Abiertas SAP` + `Balance 00-01-02`.
  */
-export const exportSapDeliverableWorkbook = async (
+export const generateSapDeliverableWorkbookBytes = async (
   opts: SapDeliverableWorkbookOptions
-): Promise<string> => {
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; filename: string } | null> => {
   const {
     activeSummary,
     centerSummaries,
@@ -587,8 +587,8 @@ export const exportSapDeliverableWorkbook = async (
   const effectiveMode: BankExportMode =
     mode || (resolvedEntries.length > 1 ? 'masivo' : 'individual');
 
-  if (effectiveMode === 'individual' && !activeSummary.account) return '';
-  if (effectiveMode === 'masivo' && resolvedEntries.length === 0) return '';
+  if (effectiveMode === 'individual' && !activeSummary.account) return null;
+  if (effectiveMode === 'masivo' && resolvedEntries.length === 0) return null;
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Centro Interempresarial Premex';
@@ -863,11 +863,23 @@ export const exportSapDeliverableWorkbook = async (
       : `Conciliacion_Masiva_${sanitizeSlug(scopeLabel)}_${resolvedEntries.length}Cuentas_${sanitizeSlug(
           isMultiPeriod ? 'MultiPeriodo' : selectedMonth === 'ALL' ? 'Consolidado' : selectedMonth
         )}.xlsx`;
-  const blob = new Blob([buffer], {
+
+  return {
+    bytes: new Uint8Array(buffer as ArrayBuffer),
+    filename,
+  };
+};
+
+export const exportSapDeliverableWorkbook = async (
+  opts: SapDeliverableWorkbookOptions
+): Promise<string> => {
+  const generated = await generateSapDeliverableWorkbookBytes(opts);
+  if (!generated) return '';
+  const blob = new Blob([generated.bytes], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
-  triggerBlobDownload(blob, filename);
-  return filename;
+  triggerBlobDownload(blob, generated.filename);
+  return generated.filename;
 };
 
 /**

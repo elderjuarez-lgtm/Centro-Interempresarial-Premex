@@ -18,6 +18,8 @@ import {
   Pencil,
   Check,
   BookOpen,
+  Eye,
+  Loader2,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -28,6 +30,7 @@ import {
   ViaticoLiquidationStatus,
   ViaticoOdooConfig,
 } from '../../types';
+import { StoredReceiptMedia } from '../../services/viaticosMediaStore';
 import {
   CURRENCY_SYMBOLS,
   DEFAULT_VIATICO_ODOO_CONFIG,
@@ -38,6 +41,7 @@ import {
   saveViaticoOdooConfig,
 } from '../../utils/viaticos';
 import {
+  OdooConsolidatedExpenseRow,
   buildOdooAccountingDataset,
   exportViaticosContabilidadPdf,
   exportViaticosOdooCsv,
@@ -48,8 +52,13 @@ interface ViaticosContabilidadViewProps {
   liquidaciones: ViaticoLiquidation[];
   consultores: ViaticoConsultor[];
   permissions: EffectivePermissions;
+  mediaMap?: Record<string, StoredReceiptMedia>;
+  loadingMediaIds?: Set<string>;
+  onEnsureMediaLoaded?: (ids: string[]) => Promise<void>;
+  onLoadReceiptMedia?: (attachmentId: string) => Promise<StoredReceiptMedia | null>;
   onPreviewPlanillaPdf: (liq: ViaticoLiquidation) => void;
   onDownloadLiquidationExcel: (liq: ViaticoLiquidation) => void;
+  onDownloadLiquidationPdf?: (liq: ViaticoLiquidation) => void;
   onAssignConsultorCostCenter: (params: {
     consultorId: string;
     consultorNombre: string;
@@ -67,8 +76,13 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
   liquidaciones,
   consultores,
   permissions,
+  mediaMap = {},
+  loadingMediaIds,
+  onEnsureMediaLoaded,
+  onLoadReceiptMedia,
   onPreviewPlanillaPdf,
   onDownloadLiquidationExcel,
+  onDownloadLiquidationPdf,
   onAssignConsultorCostCenter,
   onNotify,
 }) => {
@@ -91,6 +105,12 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
   // Export loading states
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  // Scanned invoice Lightbox modal state
+  const [receiptLightbox, setReceiptLightbox] = useState<{
+    row: OdooConsolidatedExpenseRow;
+    media: StoredReceiptMedia;
+  } | null>(null);
 
   // Quick inline modal for assigning/updating a consultant's Cost Center directly from Contabilidad
   const [editingCC, setEditingCC] = useState<{
@@ -209,6 +229,16 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     () => buildOdooAccountingDataset(selectedLiquidaciones, consultores, odooConfig),
     [selectedLiquidaciones, consultores, odooConfig]
   );
+
+  // Preload scanned invoice attachments from Firestore when viewing consolidated invoices
+  useEffect(() => {
+    if (subTab !== 'facturas' || !onEnsureMediaLoaded) return;
+    const ids = dataset.expenseRows
+      .map((r) => r.attachmentId || '')
+      .filter(Boolean);
+    if (ids.length === 0) return;
+    void onEnsureMediaLoaded(ids);
+  }, [subTab, dataset.expenseRows, onEnsureMediaLoaded]);
 
   // Distinct liquidadores represented in the active batch
   const distinctSelectedLiquidadores = useMemo(() => {
@@ -957,12 +987,13 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                   <th className="py-3 px-2.5 text-right">Base Sin Imp.</th>
                   <th className="py-3 px-2.5 text-right">IVA / Imp.</th>
                   <th className="py-3 px-3 text-right">Total Reintegrar</th>
+                  <th className="py-3 px-2.5 text-center">Soporte</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {dataset.expenseRows.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-12 text-center text-slate-500">
+                    <td colSpan={11} className="py-12 text-center text-slate-500">
                       No hay facturas en las liquidaciones seleccionadas. Ajusta los filtros o selecciona liquidaciones en la pestaña &ldquo;Centros de Costo y Lote&rdquo;.
                     </td>
                   </tr>
@@ -1053,6 +1084,54 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                       </td>
                       <td className="py-2.5 px-3 text-right font-mono font-bold tabular-nums text-[#132B63] whitespace-nowrap">
                         {formatViaticoAmount(row.valorReintegrar, row.monedaBase, true)}
+                      </td>
+                      <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
+                        {row.attachmentId ? (
+                          mediaMap[row.attachmentId] ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setReceiptLightbox({
+                                  row,
+                                  media: mediaMap[row.attachmentId!],
+                                })
+                              }
+                              title={`Ver factura escaneada: ${mediaMap[row.attachmentId].fileName}`}
+                              className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          ) : loadingMediaIds?.has(row.attachmentId) ? (
+                            <span
+                              title="Descargando factura escaneada..."
+                              className="p-1.5 text-[#1E60A8] inline-flex"
+                            >
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!row.attachmentId || !onLoadReceiptMedia) return;
+                                const loaded = await onLoadReceiptMedia(row.attachmentId);
+                                if (loaded) {
+                                  setReceiptLightbox({ row, media: loaded });
+                                } else {
+                                  onNotify(
+                                    'info',
+                                    `La factura "${row.attachmentName || row.documentoCompleto}" aún no está sincronizada en la nube desde el equipo del liquidador.`
+                                  );
+                                }
+                              }}
+                              title={`Cargar y ver factura escaneada: ${row.attachmentName || row.documentoCompleto}`}
+                              className="p-1.5 text-[#1E60A8] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          )
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -1406,6 +1485,17 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                             >
                               <FileSpreadsheet className="w-4 h-4" />
                             </button>
+                            {onDownloadLiquidationPdf && (
+                              <button
+                                type="button"
+                                onClick={() => onDownloadLiquidationPdf(liq)}
+                                disabled={liq.items.length === 0}
+                                title="Descargar PDF con comprobantes escaneados"
+                                className="p-1.5 text-rose-700 hover:bg-rose-50 disabled:opacity-40 rounded-lg cursor-pointer"
+                              >
+                                <FileText className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1492,6 +1582,72 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Scanned Invoice Lightbox Viewer (Admin / Contabilidad) */}
+      {receiptLightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setReceiptLightbox(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3.5 bg-[#132B63] text-white flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-bold truncate">
+                  {receiptLightbox.row.proveedor} ·{' '}
+                  {formatViaticoAmount(
+                    receiptLightbox.row.valorReintegrar,
+                    receiptLightbox.row.monedaBase,
+                    true
+                  )}
+                </div>
+                <div className="text-[11px] text-sky-200 truncate">
+                  {receiptLightbox.row.consultorNombre} · Fecha:{' '}
+                  {receiptLightbox.row.fechaDoc || '-'} · Doc:{' '}
+                  {receiptLightbox.row.documentoCompleto} · Archivo:{' '}
+                  {receiptLightbox.media.fileName}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <a
+                  href={receiptLightbox.media.dataUrl}
+                  download={receiptLightbox.media.fileName || 'factura.jpg'}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold bg-white/15 hover:bg-white/25 text-white rounded-lg transition-colors"
+                  title="Descargar factura escaneada"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Descargar</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setReceiptLightbox(null)}
+                  className="p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
+                  aria-label="Cerrar vista previa"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 bg-slate-900/5 overflow-auto flex items-center justify-center p-4 min-h-[420px]">
+              {receiptLightbox.media.mimeType === 'application/pdf' ? (
+                <iframe
+                  src={receiptLightbox.media.dataUrl}
+                  title={receiptLightbox.media.fileName}
+                  className="w-full h-[70vh] rounded-lg border border-slate-200 bg-white"
+                />
+              ) : (
+                <img
+                  src={receiptLightbox.media.dataUrl}
+                  alt={receiptLightbox.media.fileName}
+                  className="max-h-[72vh] max-w-full object-contain rounded-lg shadow-md"
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

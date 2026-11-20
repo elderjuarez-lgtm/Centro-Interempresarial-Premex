@@ -9,6 +9,8 @@ import {
   Users,
   Calendar,
   X,
+  Send,
+  Flag,
 } from 'lucide-react';
 import { ActivitiesWorkspaceData } from '../../types';
 import {
@@ -21,16 +23,36 @@ import {
   getGoogleTaskLinkForEmail,
 } from '../../utils/activities';
 
+export interface PeriodClosureStatus {
+  closureExecutionId: string;
+  periodKey: string;
+  totalTasks: number;
+  completedTasks: number;
+  pendingTasks: number;
+  isClosureConfirmed: boolean;
+  confirmedAtIso?: string;
+  confirmedByName?: string;
+  origin?: 'panel' | 'google_tasks';
+  isLinkedInGoogleTasks: boolean;
+  emailSentAtIso?: string;
+  recipientsCount: number;
+  recipientEmails: string[];
+}
+
 interface ActivitiesExecutionListViewProps {
   data: ActivitiesWorkspaceData;
   assignments: MaterializedActivityAssignment[];
+  closureStatus: PeriodClosureStatus;
   currentUserEmail?: string | null;
   isAdmin: boolean;
   canOperate: boolean;
+  isSyncingGoogleTasks: boolean;
   onOpenCompleteModal: (assignment: MaterializedActivityAssignment) => void;
   onReopenActivity: (assignment: MaterializedActivityAssignment) => void;
   onRequestSendSubtleReminder: (assignment: MaterializedActivityAssignment) => void;
   onRequestSyncSingleTask: (assignment: MaterializedActivityAssignment) => void;
+  onRequestSyncClosureTask: () => void;
+  onRequestConfirmPeriodClosure: () => void;
 }
 
 type StatusFilter = 'ALL' | 'PENDING' | 'URGENT' | 'COMPLETED';
@@ -38,13 +60,17 @@ type StatusFilter = 'ALL' | 'PENDING' | 'URGENT' | 'COMPLETED';
 export const ActivitiesExecutionListView: React.FC<ActivitiesExecutionListViewProps> = ({
   data,
   assignments,
+  closureStatus,
   currentUserEmail,
   isAdmin,
   canOperate,
+  isSyncingGoogleTasks,
   onOpenCompleteModal,
   onReopenActivity,
   onRequestSendSubtleReminder,
   onRequestSyncSingleTask,
+  onRequestSyncClosureTask,
+  onRequestConfirmPeriodClosure,
 }) => {
   const myAssignmentsCount = useMemo(
     () => assignments.filter((a) => assignmentIncludesEmail(a, currentUserEmail)).length,
@@ -267,6 +293,104 @@ export const ActivitiesExecutionListView: React.FC<ActivitiesExecutionListViewPr
         </div>
       </section>
 
+      {/* Independent Monthly Closure Confirmation Task Card */}
+      {(closureStatus.totalTasks > 0 || closureStatus.isClosureConfirmed) && (
+        <section
+          className={`rounded-2xl border p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+            closureStatus.isClosureConfirmed
+              ? 'bg-emerald-50/70 border-emerald-300'
+              : 'bg-white border-[#1E60A8]/30 shadow-2xs'
+          }`}
+        >
+          <div className="space-y-1.5 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider ${
+                  closureStatus.isClosureConfirmed ? 'text-emerald-800' : 'text-[#1E60A8]'
+                }`}
+              >
+                <Flag className="w-3.5 h-3.5" />
+                <span>Tarea Independiente de Cierre · {formatPeriodLabel(closureStatus.periodKey)}</span>
+              </span>
+              {closureStatus.isLinkedInGoogleTasks && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                  <ListTodo className="w-3 h-3" />
+                  <span>Habilitada en Google Tasks</span>
+                </span>
+              )}
+            </div>
+
+            <div className="text-sm font-extrabold text-slate-900">
+              Confirmar cumplimiento total de actividades ({closureStatus.completedTasks} de{' '}
+              {closureStatus.totalTasks} cumplidas)
+            </div>
+
+            <div className="text-xs text-slate-600 leading-relaxed">
+              {closureStatus.isClosureConfirmed ? (
+                <span>
+                  Cierre confirmado el{' '}
+                  <strong>{formatDateTimeEs(closureStatus.confirmedAtIso)}</strong>
+                  {closureStatus.origin === 'google_tasks'
+                    ? ' desde Google Tasks (Gmail)'
+                    : ' desde el Panel Premex'}
+                  {closureStatus.emailSentAtIso
+                    ? ` · Notificación enviada por Gmail (${formatDateTimeEs(
+                        closureStatus.emailSentAtIso
+                      )}).`
+                    : '.'}
+                </span>
+              ) : (
+                <span>
+                  Al concluir tus tareas, marca esta tarea independiente (aquí o directamente en Google Tasks) para enviar el correo de cumplimiento a{' '}
+                  <strong className="font-mono text-slate-800">
+                    {closureStatus.recipientEmails.length > 0
+                      ? closureStatus.recipientEmails.join(', ')
+                      : 'los destinatarios configurados'}
+                  </strong>
+                  .
+                </span>
+              )}
+            </div>
+          </div>
+
+          {canOperate && (
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={isSyncingGoogleTasks}
+                onClick={onRequestSyncClosureTask}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#132B63] bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap cursor-pointer disabled:opacity-60"
+              >
+                <ListTodo className="w-3.5 h-3.5 text-emerald-600" />
+                <span>
+                  {closureStatus.isLinkedInGoogleTasks
+                    ? 'Actualizar [CIERRE] en Tasks'
+                    : 'Habilitar [CIERRE] en Tasks'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isSyncingGoogleTasks}
+                onClick={onRequestConfirmPeriodClosure}
+                className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white rounded-xl transition-colors whitespace-nowrap cursor-pointer disabled:opacity-60 ${
+                  closureStatus.isClosureConfirmed
+                    ? 'bg-[#1E60A8] hover:bg-[#132B63]'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>
+                  {closureStatus.isClosureConfirmed
+                    ? 'Reenviar cierre por Gmail'
+                    : 'Confirmar cierre y notificar'}
+                </span>
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-2xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[860px]">
@@ -338,10 +462,15 @@ export const ActivitiesExecutionListView: React.FC<ActivitiesExecutionListViewPr
                       </td>
 
                       <td className="px-3 py-3.5 align-middle">
-                        <div className="font-semibold text-slate-800">
-                          {item.responsibleNamesLabel}
+                        <div className="font-semibold text-slate-800 flex flex-wrap items-center gap-1.5">
+                          <span>{item.responsibleNamesLabel}</span>
+                          {item.responsibles.length > 1 && (
+                            <span className="text-[10px] font-bold text-[#1E60A8] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-md">
+                              Compartida ({item.responsibles.length})
+                            </span>
+                          )}
                         </div>
-                        <div className="text-[11px] font-mono text-slate-500 truncate max-w-[220px]">
+                        <div className="text-[11px] font-mono text-slate-500 truncate max-w-[240px]">
                           {item.responsibles
                             .map((r) => r.email)
                             .filter(Boolean)
@@ -395,6 +524,11 @@ export const ActivitiesExecutionListView: React.FC<ActivitiesExecutionListViewPr
                         </span>
 
                         <div className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+                          {isDone && item.execution.completadaPorNombre && (
+                            <div className="text-slate-700 font-medium">
+                              Por: {item.execution.completadaPorNombre}
+                            </div>
+                          )}
                           {isDone && item.execution.origenConfirmacion === 'google_tasks' && (
                             <div className="text-emerald-700 font-medium">Vía Google Tasks</div>
                           )}

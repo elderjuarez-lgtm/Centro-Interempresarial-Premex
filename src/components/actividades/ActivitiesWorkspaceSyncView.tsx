@@ -12,6 +12,7 @@ import {
   Loader2,
   AlertCircle,
   Settings2,
+  Flag,
 } from 'lucide-react';
 import { ActivitiesWorkspaceData } from '../../types';
 import {
@@ -21,9 +22,11 @@ import {
   formatPeriodLabel,
   formatShortDateEs,
   getGoogleTaskLinkForEmail,
+  getPeriodActivationStatus,
   hasAnyGoogleTaskLink,
 } from '../../utils/activities';
 import { PREMEX_GOOGLE_TASKS_LIST_TITLE } from '../../services/googleWorkspaceActivities';
+import { PeriodClosureStatus } from './ActivitiesExecutionListView';
 
 export interface ResponsibleDigestGroup {
   responsibleId: string;
@@ -38,6 +41,8 @@ export interface ResponsibleDigestGroup {
 interface ActivitiesWorkspaceSyncViewProps {
   data: ActivitiesWorkspaceData;
   assignments: MaterializedActivityAssignment[];
+  closureStatus: PeriodClosureStatus;
+  remoteCompletedPendingCount: number;
   currentUserEmail?: string | null;
   hasWorkspaceToken: boolean;
   isAdmin: boolean;
@@ -46,8 +51,15 @@ interface ActivitiesWorkspaceSyncViewProps {
   isConnectingWorkspace: boolean;
   resolvedCompletionRecipients: { email: string; nombre: string; origen: string }[];
   onConnectWorkspace: () => Promise<void>;
-  onRequestPushTasks: (items: MaterializedActivityAssignment[], scopeLabel: string) => void;
+  onRequestPushTasks: (
+    items: MaterializedActivityAssignment[],
+    scopeLabel: string,
+    includeClosureTask?: boolean
+  ) => void;
   onPullFromGoogleTasks: () => Promise<void>;
+  onRequestSyncClosureTask: () => void;
+  onRequestConfirmPeriodClosure: () => void;
+  onRequestSyncRemoteCompletedToMyTasks: () => void;
   onRequestSendSubtleDigest: (group: ResponsibleDigestGroup, customMessage?: string) => void;
   onRequestSendBatchDigests: (groups: ResponsibleDigestGroup[], customMessage?: string) => void;
   onNavigateConfigRecipients: () => void;
@@ -56,6 +68,8 @@ interface ActivitiesWorkspaceSyncViewProps {
 export const ActivitiesWorkspaceSyncView: React.FC<ActivitiesWorkspaceSyncViewProps> = ({
   data,
   assignments,
+  closureStatus,
+  remoteCompletedPendingCount,
   currentUserEmail,
   hasWorkspaceToken,
   isAdmin,
@@ -66,6 +80,9 @@ export const ActivitiesWorkspaceSyncView: React.FC<ActivitiesWorkspaceSyncViewPr
   onConnectWorkspace,
   onRequestPushTasks,
   onPullFromGoogleTasks,
+  onRequestSyncClosureTask,
+  onRequestConfirmPeriodClosure,
+  onRequestSyncRemoteCompletedToMyTasks,
   onRequestSendSubtleDigest,
   onRequestSendBatchDigests,
   onNavigateConfigRecipients,
@@ -213,20 +230,46 @@ export const ActivitiesWorkspaceSyncView: React.FC<ActivitiesWorkspaceSyncViewPr
 
       {/* 2. Two-Way Google Tasks Sync */}
       <section className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 space-y-5">
-        <div className="border-b border-slate-100 pb-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-            {formatPeriodLabel(data.selectedPeriod)}
+        <div className="border-b border-slate-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+              <span>{formatPeriodLabel(data.selectedPeriod)}</span>
+              <span className="text-slate-300">·</span>
+              <span className="normal-case font-semibold text-slate-600">
+                {getPeriodActivationStatus(data.selectedPeriod).statusLabel}
+              </span>
+            </div>
+            <h3 className="text-base font-extrabold text-slate-900 mt-0.5">
+              Google Tasks · {PREMEX_GOOGLE_TASKS_LIST_TITLE}
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 tabular-nums">
+              {linkedTasksCount} tarea(s) vinculada(s) · Última sincronización:{' '}
+              <span className="font-medium text-slate-700">
+                {formatDateTimeEs(data.lastGoogleTasksSyncIso)}
+              </span>
+            </p>
           </div>
-          <h3 className="text-base font-extrabold text-slate-900 mt-0.5">
-            Google Tasks · {PREMEX_GOOGLE_TASKS_LIST_TITLE}
-          </h3>
-          <p className="text-xs text-slate-500 mt-1 tabular-nums">
-            {linkedTasksCount} tarea(s) vinculada(s) · Última sincronización:{' '}
-            <span className="font-medium text-slate-700">
-              {formatDateTimeEs(data.lastGoogleTasksSyncIso)}
-            </span>
-          </p>
         </div>
+
+        {canOperate && remoteCompletedPendingCount > 0 && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="text-xs text-emerald-950">
+              <strong className="font-bold">
+                {remoteCompletedPendingCount} tarea(s) compartida(s) ya fueron cumplidas por otro responsable.
+              </strong>{' '}
+              Actualiza tu lista de Google Tasks para marcarlas como completadas en tu correo.
+            </div>
+            <button
+              type="button"
+              disabled={isSyncingGoogleTasks}
+              onClick={onRequestSyncRemoteCompletedToMyTasks}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Actualizar en mi Google Tasks ({remoteCompletedPendingCount})</span>
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* Push to Google Tasks */}
@@ -282,13 +325,14 @@ export const ActivitiesWorkspaceSyncView: React.FC<ActivitiesWorkspaceSyncViewPr
                   tasksToPush,
                   effectiveTasksScope === 'mine'
                     ? 'tus actividades pendientes'
-                    : `todas las pendientes de ${formatPeriodLabel(data.selectedPeriod)}`
+                    : `todas las pendientes de ${formatPeriodLabel(data.selectedPeriod)}`,
+                  true
                 )
               }
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
             >
               <ListTodo className="w-4 h-4" />
-              <span>Enviar {tasksToPush.length} tarea(s) a Google Tasks</span>
+              <span>Enviar {tasksToPush.length} tarea(s) + Cierre a Google Tasks</span>
             </button>
           </div>
 
@@ -303,7 +347,7 @@ export const ActivitiesWorkspaceSyncView: React.FC<ActivitiesWorkspaceSyncViewPr
                   Sincronizar desde Google Tasks
                 </div>
                 <div className="text-xs text-slate-500">
-                  Importa las tareas marcadas como completadas en Gmail.
+                  Importa cumplimientos, detecta el cierre total [CIERRE] y sincroniza tareas compartidas entre usuarios.
                 </div>
               </div>
             </div>
@@ -322,10 +366,67 @@ export const ActivitiesWorkspaceSyncView: React.FC<ActivitiesWorkspaceSyncViewPr
               <span>
                 {isSyncingGoogleTasks
                   ? 'Sincronizando...'
-                  : 'Traer completadas desde Google Tasks'}
+                  : 'Sincronizar completadas desde Google Tasks'}
               </span>
             </button>
           </div>
+        </div>
+
+        {/* Independent Monthly Closure Confirmation Task Panel */}
+        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-[#132B63]">
+              <Flag className="w-4 h-4 text-[#1E60A8] shrink-0" />
+              <span>
+                Tarea independiente de confirmación de cierre ({closureStatus.completedTasks}/
+                {closureStatus.totalTasks})
+              </span>
+              {closureStatus.isClosureConfirmed && (
+                <span className="text-[11px] font-semibold text-emerald-700">· Confirmada</span>
+              )}
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Al concluir todas tus actividades del mes, marca la tarea{' '}
+              <strong className="text-slate-800">[CIERRE] Confirmar cumplimiento total</strong> en Google Tasks (o aquí) para enviar el correo de cumplimiento a:{' '}
+              <span className="font-mono text-[11px] text-slate-800">
+                {closureStatus.recipientEmails.length > 0
+                  ? closureStatus.recipientEmails.join(', ')
+                  : 'Sin destinatarios configurados'}
+              </span>
+              .
+            </p>
+          </div>
+
+          {canOperate && (
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={isSyncingGoogleTasks}
+                onClick={onRequestSyncClosureTask}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#132B63] bg-white hover:bg-slate-100 border border-slate-300 rounded-xl whitespace-nowrap cursor-pointer disabled:opacity-50"
+              >
+                <ListTodo className="w-3.5 h-3.5 text-emerald-600" />
+                <span>
+                  {closureStatus.isLinkedInGoogleTasks
+                    ? 'Actualizar [CIERRE] en Tasks'
+                    : 'Crear [CIERRE] en Tasks'}
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={isSyncingGoogleTasks}
+                onClick={onRequestConfirmPeriodClosure}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl whitespace-nowrap cursor-pointer disabled:opacity-50"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>
+                  {closureStatus.isClosureConfirmed
+                    ? 'Reenviar cierre Gmail'
+                    : 'Confirmar cierre y notificar'}
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
@@ -501,12 +602,12 @@ export const ActivitiesWorkspaceSyncView: React.FC<ActivitiesWorkspaceSyncViewPr
               <Users className="w-4 h-4 text-[#0F766E] shrink-0 mt-0.5" />
               <div className="text-xs min-w-0">
                 <div className="font-bold text-slate-900">
-                  Destinatarios de cierre ({resolvedCompletionRecipients.length})
+                  Destinatarios generales de cierre ({resolvedCompletionRecipients.length})
                 </div>
                 <div className="text-slate-600 font-mono text-[11px] break-words mt-0.5">
                   {resolvedCompletionRecipients.length > 0
                     ? resolvedCompletionRecipients.map((r) => r.email).join(', ')
-                    : 'Sin destinatarios configurados.'}
+                    : 'Sin destinatarios generales (se usarán únicamente los configurados en cada responsable).'}
                 </div>
               </div>
             </div>

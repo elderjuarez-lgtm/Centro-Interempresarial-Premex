@@ -17,6 +17,7 @@ import {
   Calendar,
   User as UserIcon,
   Layers,
+  Send,
 } from 'lucide-react';
 import { BankAccount, BankClosedReconciliation } from '../../types';
 import {
@@ -33,6 +34,8 @@ import {
   BankExportMode,
   exportBankBatchPdf,
   exportSapDeliverableWorkbook,
+  generateBankBatchPdfBytes,
+  generateSapDeliverableWorkbookBytes,
 } from '../../utils/bankOfficialExport';
 import { BankOfficialSheet } from './BankOfficialSheet';
 import { BankPrintPreviewModal } from './BankPrintPreviewModal';
@@ -41,11 +44,15 @@ import {
   BankExportFormat,
   BankExportModal,
 } from './BankExportModal';
+import { BankEmailModal } from './BankEmailModal';
 
 interface BankHistorialViewProps {
   closedReconciliations: BankClosedReconciliation[];
   openPeriod: string | null;
   isReadOnly?: boolean;
+  accessToken?: string | null;
+  onReconnectWorkspace?: () => Promise<string | null>;
+  onInvalidateWorkspaceToken?: () => void;
   onRequestOpenReconciliation: () => void;
   onRequestCloseCurrent: () => void;
   onGoToCentroCuadre: () => void;
@@ -57,6 +64,15 @@ interface HistorialExportContext {
   items: BankExportAccountItem[];
   format: BankExportFormat;
   mode: BankExportMode;
+  initialAccountId?: string;
+  initialSocietyKey?: string;
+  title: string;
+  subtitle: string;
+}
+
+interface HistorialEmailContext {
+  records: BankClosedReconciliation[];
+  items: BankExportAccountItem[];
   initialAccountId?: string;
   initialSocietyKey?: string;
   title: string;
@@ -118,6 +134,9 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
   closedReconciliations,
   openPeriod,
   isReadOnly = false,
+  accessToken = null,
+  onReconnectWorkspace,
+  onInvalidateWorkspaceToken,
   onRequestOpenReconciliation,
   onRequestCloseCurrent,
   onGoToCentroCuadre,
@@ -129,6 +148,7 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
   const [detailSocietyKey, setDetailSocietyKey] = useState<string>('ALL');
   const [detailAccountId, setDetailAccountId] = useState<string>('');
   const [exportContext, setExportContext] = useState<HistorialExportContext | null>(null);
+  const [emailContext, setEmailContext] = useState<HistorialEmailContext | null>(null);
   const [printPreview, setPrintPreview] = useState<HistorialPrintPreviewState | null>(null);
 
   const selectedClosed = useMemo(
@@ -306,6 +326,76 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
     });
   };
 
+  const openHistorialEmailModal = (opts: {
+    records: BankClosedReconciliation[];
+    initialAccountId?: string;
+    initialSocietyKey?: string;
+  }) => {
+    const items = buildExportItemsFromRecords(opts.records);
+    if (items.length === 0) {
+      onNotify('info', 'No hay cuentas bancarias visibles en los cierres seleccionados.');
+      return;
+    }
+    const isSingleRec = opts.records.length === 1;
+    setEmailContext({
+      records: opts.records,
+      items,
+      initialAccountId: opts.initialAccountId,
+      initialSocietyKey: opts.initialSocietyKey || 'ALL',
+      title: isSingleRec
+        ? `Enviar Conciliación Cerrada · ${opts.records[0].period}`
+        : `Enviar Historial por Correo (${opts.records.length} periodos)`,
+      subtitle: isSingleRec
+        ? `Cierre archivado · ${items.length} cuenta(s) bancaria(s)`
+        : `${opts.records.map((r) => r.period).join(', ')} · ${items.length} conciliación(es)`,
+    });
+  };
+
+  const buildHistorialExcelBytes = async (
+    records: BankClosedReconciliation[],
+    selectedItems: BankExportAccountItem[],
+    mode: BankExportMode,
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return null;
+    const selectedPairKeys = new Set(selectedItems.map((it) => `${it.period}::${it.account.id}`));
+    const selectedPeriods = new Set(selectedItems.map((it) => it.period));
+    const scopedOpenItems = records.flatMap((rec) =>
+      selectedPeriods.has(rec.period)
+        ? rec.sapOpenItems.filter((i) => selectedPairKeys.has(`${rec.period}::${i.cuentaId}`))
+        : []
+    );
+    const scopedBalanceRows = records.flatMap((rec) =>
+      selectedPeriods.has(rec.period) ? rec.sapBalanceRows : []
+    );
+    const primaryPeriod = selectedItems[0].period;
+    const cleanScope = scopeLabel.replace(/^Historial_/i, '');
+    return generateSapDeliverableWorkbookBytes({
+      activeSummary: selectedItems[0].summary,
+      centerSummaries: selectedItems.map((i) => i.summary),
+      batchEntries: selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+      mode,
+      sapOpenItems: scopedOpenItems,
+      sapBalanceRows: scopedBalanceRows,
+      statementItems: [],
+      ledgerItems: [],
+      matches: [],
+      selectedMonth: selectedPeriods.size === 1 ? primaryPeriod : 'MultiPeriodo',
+      scopeLabel: `Historial_${cleanScope}`,
+    });
+  };
+
+  const buildHistorialPdfBytes = async (
+    selectedItems: BankExportAccountItem[],
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return null;
+    return generateBankBatchPdfBytes(
+      selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+      `Historial_${scopeLabel}`
+    );
+  };
+
   const executeHistorialExcel = async (
     records: BankClosedReconciliation[],
     selectedItems: BankExportAccountItem[],
@@ -450,6 +540,26 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
         />
       )}
 
+      {emailContext && (
+        <BankEmailModal
+          isOpen={true}
+          onClose={() => setEmailContext(null)}
+          title={emailContext.title}
+          subtitle={emailContext.subtitle}
+          items={emailContext.items}
+          initialAccountId={emailContext.initialAccountId}
+          initialSocietyKey={emailContext.initialSocietyKey}
+          buildExcelBytes={(sel, mode, scope) =>
+            buildHistorialExcelBytes(emailContext.records, sel, mode, scope)
+          }
+          buildPdfBytes={buildHistorialPdfBytes}
+          accessToken={accessToken}
+          onReconnectWorkspace={onReconnectWorkspace}
+          onInvalidateWorkspaceToken={onInvalidateWorkspaceToken}
+          onSentSuccess={(msg) => onNotify('success', msg)}
+        />
+      )}
+
       {printPreview && (
         <BankPrintPreviewModal
           isOpen={true}
@@ -544,6 +654,22 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>Descargar Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                openHistorialEmailModal({
+                  records: [selectedClosed],
+                  initialAccountId: activeClosedEntry?.account.id,
+                  initialSocietyKey: detailSocietyKey,
+                })
+              }
+              disabled={selectedClosed.accounts.length === 0}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              title="Enviar conciliación cerrada por correo Gmail (PDF, Excel o ambos)"
+            >
+              <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span>Enviar Correo</span>
             </button>
           </div>
         </section>
@@ -825,21 +951,36 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           {closedReconciliations.length > 0 && (
-            <button
-              type="button"
-              onClick={() =>
-                openHistorialExportModal({
-                  records: checkedRecords.length > 0 ? checkedRecords : closedReconciliations,
-                  format: 'excel',
-                  mode: 'masivo',
-                })
-              }
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              title="Descargar múltiples cuentas o periodos cerrados en Excel o PDF"
-            >
-              <Layers className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Descarga Masiva</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  openHistorialExportModal({
+                    records: checkedRecords.length > 0 ? checkedRecords : closedReconciliations,
+                    format: 'excel',
+                    mode: 'masivo',
+                  })
+                }
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                title="Descargar múltiples cuentas o periodos cerrados en Excel o PDF"
+              >
+                <Layers className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Descarga Masiva</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  openHistorialEmailModal({
+                    records: checkedRecords.length > 0 ? checkedRecords : closedReconciliations,
+                  })
+                }
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                title="Enviar conciliaciones cerradas por correo Gmail"
+              >
+                <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
+                <span>Enviar Correo</span>
+              </button>
+            </>
           )}
           {!isReadOnly && openPeriod && (
             <button
@@ -972,6 +1113,18 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
                 >
                   <FileText className="w-3.5 h-3.5" />
                   <span>PDF Masivo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openHistorialEmailModal({
+                      records: checkedRecords,
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-sky-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Enviar Correo</span>
                 </button>
                 <button
                   type="button"
@@ -1118,6 +1271,19 @@ export const BankHistorialView: React.FC<BankHistorialViewProps> = ({
                             >
                               <Printer className="w-3.5 h-3.5 text-[#132B63]" />
                               <span>PDF</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openHistorialEmailModal({
+                                  records: [rec],
+                                })
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                              title="Enviar este periodo cerrado por correo Gmail"
+                            >
+                              <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
+                              <span>Correo</span>
                             </button>
                           </div>
                         </td>

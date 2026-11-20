@@ -543,6 +543,107 @@
         "updatedAt"
       ]
     },
+    "ViaticosReceipt": {
+      "title": "ViaticosReceipt",
+      "description": "Cloud-synced scanned invoice image or PDF receipt attachment (or deterministic chunk for oversized PDFs) belonging to a Viáticos expense item so authorized administrative users across devices can view and compile receipts.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching attachmentId (or attachmentId__cN for chunk N)",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "parentReceiptId": {
+          "type": "string",
+          "description": "Root attachmentId linking single docs and multi-chunk PDF segments",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "chunkIndex": {
+          "type": "integer",
+          "description": "Zero-based segment index (0 for single-document receipts or first PDF segment)"
+        },
+        "chunkCount": {
+          "type": "integer",
+          "description": "Total number of segments (1 for standard images/small PDFs; >1 for chunked PDFs)"
+        },
+        "workspaceId": {
+          "type": "string",
+          "description": "Parent Viáticos workspace document ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who uploaded the scanned invoice",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of the uploader",
+          "maxLength": 120
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Original filename of the scanned invoice or PDF",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "MIME type of the stored receipt media (e.g. image/jpeg, application/pdf)",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "size": {
+          "type": "integer",
+          "description": "Byte size of the original uploaded file"
+        },
+        "dataUrl": {
+          "type": "string",
+          "description": "Base64 data URL (or bounded chunk slice <= 800,000 chars) of the scanned receipt",
+          "minLength": 1,
+          "maxLength": 800000
+        },
+        "createdAtIso": {
+          "type": "string",
+          "description": "Client ISO timestamp when the receipt was scanned",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial cloud upload"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "id",
+        "parentReceiptId",
+        "chunkIndex",
+        "chunkCount",
+        "workspaceId",
+        "ownerId",
+        "fileName",
+        "mimeType",
+        "size",
+        "dataUrl",
+        "createdAtIso",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
     "ModuleCompanyDirectory": {
       "title": "ModuleCompanyDirectory",
       "description": "Independent master database of companies/societies dedicated to a specific functional module (bancos, viaticos, actividades, anticipos, cxc, cxp), containing no personal PII.",
@@ -731,6 +832,12 @@
         "$ref": "#/entities/ViaticosWorkspace"
       },
       "description": "Stores corporate travel expense settlements (Liquidación de Viáticos) and consultants catalog; readable only by verified users authorized for viaticos."
+    },
+    "/viaticos_receipts/{receiptId}": {
+      "schema": {
+        "$ref": "#/entities/ViaticosReceipt"
+      },
+      "description": "Stores scanned invoice images and PDF receipts for Viáticos so all authorized administrators and module reviewers can view receipts from any device."
     },
     "/activity_workspaces/{workspaceId}": {
       "schema": {

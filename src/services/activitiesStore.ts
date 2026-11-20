@@ -73,13 +73,28 @@ const sanitizeSociety = (s: ActivitySociety, idx = 0): ActivitySociety => {
   return clean;
 };
 
-const sanitizeResponsible = (r: ActivityResponsible, idx = 0): ActivityResponsible => ({
-  id: String(r.id || `resp-${idx + 1}`).slice(0, 120),
-  nombre: String(r.nombre || 'Responsable').trim().slice(0, 120),
-  email: normalizeEmail(r.email || '').slice(0, 160),
-  cargo: r.cargo ? String(r.cargo).trim().slice(0, 120) : '',
-  activo: r.activo !== false,
-});
+const sanitizeResponsible = (r: ActivityResponsible, idx = 0): ActivityResponsible => {
+  const clean: ActivityResponsible = {
+    id: String(r.id || `resp-${idx + 1}`).slice(0, 120),
+    nombre: String(r.nombre || 'Responsable').trim().slice(0, 120),
+    email: normalizeEmail(r.email || '').slice(0, 160),
+    cargo: r.cargo ? String(r.cargo).trim().slice(0, 120) : '',
+    activo: r.activo !== false,
+  };
+  if (Array.isArray(r.notificarA) && r.notificarA.length > 0) {
+    const cleanEmails = Array.from(
+      new Set(
+        r.notificarA
+          .map((em) => normalizeEmail(em).slice(0, 160))
+          .filter((em) => em.includes('@'))
+      )
+    ).slice(0, 30);
+    if (cleanEmails.length > 0) {
+      clean.notificarA = cleanEmails;
+    }
+  }
+  return clean;
+};
 
 const sanitizeTemplate = (a: ActivityTemplate, idx = 0): ActivityTemplate => {
   const cleanMap: Record<string, string[]> = {};
@@ -110,6 +125,10 @@ const sanitizeTemplate = (a: ActivityTemplate, idx = 0): ActivityTemplate => {
     responsablesPorSociedad: cleanMap,
     activa: a.activa !== false,
   };
+
+  if (a.aplicarATodosResponsables) {
+    clean.aplicarATodosResponsables = true;
+  }
 
   if (Array.isArray(a.notificarAdicionales) && a.notificarAdicionales.length > 0) {
     clean.notificarAdicionales = Array.from(

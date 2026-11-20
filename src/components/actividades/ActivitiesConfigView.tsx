@@ -62,16 +62,19 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
   const [actDiaSugerido, setActDiaSugerido] = useState(10);
   const [actDescripcion, setActDescripcion] = useState('');
   const [actExtraEmails, setActExtraEmails] = useState('');
+  const [actAplicarATodos, setActAplicarATodos] = useState(false);
   const [actRespBySoc, setActRespBySoc] = useState<Record<string, string[]>>({});
   const [brushRespIds, setBrushRespIds] = useState<string[]>([]);
   const [confirmDeleteActId, setConfirmDeleteActId] = useState<string | null>(null);
 
-  // Responsible editor state (with easy multi-society selection)
+  // Responsible editor state (with easy multi-society selection + per-user notification targets)
   const [editingRespId, setEditingRespId] = useState<string | null>(null);
   const [respNombre, setRespNombre] = useState('');
   const [respEmail, setRespEmail] = useState('');
   const [respCargo, setRespCargo] = useState('');
   const [respSocietyCodes, setRespSocietyCodes] = useState<string[]>([]);
+  const [respNotificarA, setRespNotificarA] = useState<string[]>([]);
+  const [respNotifInput, setRespNotifInput] = useState('');
 
   // Society editor state (with 1 or multiple responsibles selection)
   const [editingSocId, setEditingSocId] = useState<string | null>(null);
@@ -79,10 +82,9 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
   const [socNombre, setSocNombre] = useState('');
   const [socRespIds, setSocRespIds] = useState<string[]>([]);
 
-  // Notification recipient editor state
+  // Notification recipient editor state (strictly custom list, independent of admin permissions)
   const [notifNombre, setNotifNombre] = useState('');
   const [notifEmail, setNotifEmail] = useState('');
-  const [notifTipo, setNotifTipo] = useState<'administrador' | 'designado'>('designado');
 
   const activeResponsibles = useMemo(
     () => data.responsibles.filter((r) => r.activo),
@@ -99,6 +101,29 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     [data.responsibles]
   );
 
+  const knownPeopleForNotifyPicker = useMemo(() => {
+    const byEmail = new Map<string, { email: string; nombre: string }>();
+    data.responsibles.forEach((r) => {
+      const em = normalizeEmail(r.email);
+      if (em && em.includes('@') && !byEmail.has(em)) {
+        byEmail.set(em, { email: em, nombre: r.nombre || em });
+      }
+    });
+    data.notificationRecipients.forEach((r) => {
+      const em = normalizeEmail(r.email);
+      if (em && em.includes('@') && !byEmail.has(em)) {
+        byEmail.set(em, { email: em, nombre: r.nombre || em });
+      }
+    });
+    suitePermissionRecords.forEach((u) => {
+      const em = normalizeEmail(u.email);
+      if (u.active && em && em.includes('@') && !byEmail.has(em)) {
+        byEmail.set(em, { email: em, nombre: u.displayName || em });
+      }
+    });
+    return Array.from(byEmail.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [data.responsibles, data.notificationRecipients, suitePermissionRecords]);
+
   useEffect(() => {
     setSubTab(initialSubTab);
   }, [initialSubTab]);
@@ -112,6 +137,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
       setActDiaSugerido(10);
       setActDescripcion('');
       setActExtraEmails('');
+      setActAplicarATodos(false);
       setActRespBySoc({});
       setBrushRespIds(activeResponsibles[0] ? [activeResponsibles[0].id] : []);
       setShowActivityForm(true);
@@ -122,10 +148,9 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     () =>
       resolveCompletionNotificationRecipients({
         notificationRecipients: data.notificationRecipients,
-        notifyAdminsAutomatically: data.notifyAdminsAutomatically,
-        suitePermissionRecords,
+        allResponsibles: data.responsibles,
       }),
-    [data.notificationRecipients, data.notifyAdminsAutomatically, suitePermissionRecords]
+    [data.notificationRecipients, data.responsibles]
   );
 
   const importableSuiteUsers = useMemo(() => {
@@ -143,6 +168,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     setActDiaSugerido(10);
     setActDescripcion('');
     setActExtraEmails('');
+    setActAplicarATodos(false);
     setActRespBySoc({});
     setBrushRespIds(activeResponsibles[0] ? [activeResponsibles[0].id] : []);
     setShowActivityForm(true);
@@ -155,6 +181,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     setActDiaSugerido(act.diaSugerido || 10);
     setActDescripcion(act.descripcion || '');
     setActExtraEmails((act.notificarAdicionales || []).join(', '));
+    setActAplicarATodos(Boolean(act.aplicarATodosResponsables));
     const normalizedMap: Record<string, string[]> = {};
     Object.entries(act.responsablesPorSociedad || {}).forEach(([socCode, val]) => {
       const ids = normalizeResponsibleIds(val);
@@ -270,6 +297,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                   diaSugerido: Math.min(31, Math.max(1, Math.round(Number(actDiaSugerido) || 10))),
                   descripcion: actDescripcion.trim(),
                   responsablesPorSociedad: cleanMap,
+                  aplicarATodosResponsables: actAplicarATodos ? true : undefined,
                   notificarAdicionales: cleanExtras.length > 0 ? cleanExtras : undefined,
                 }
               : a
@@ -283,6 +311,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
         diaSugerido: Math.min(31, Math.max(1, Math.round(Number(actDiaSugerido) || 10))),
         descripcion: actDescripcion.trim(),
         responsablesPorSociedad: cleanMap,
+        aplicarATodosResponsables: actAplicarATodos ? true : undefined,
         notificarAdicionales: cleanExtras.length > 0 ? cleanExtras : undefined,
         activa: true,
       };
@@ -296,7 +325,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     setEditingActivityId(null);
   };
 
-  // ---------- Responsible CRUD (Society-First Multi-Select) ----------
+  // ---------- Responsible CRUD (Society-First Multi-Select + Per-User Notification Targets) ----------
   const startEditResponsible = (r: ActivityResponsible) => {
     setEditingRespId(r.id);
     setRespNombre(r.nombre);
@@ -306,6 +335,16 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
       .filter((s) => normalizeResponsibleIds(s.responsablesIds).includes(r.id))
       .map((s) => s.codigo);
     setRespSocietyCodes(assignedSocs);
+    setRespNotificarA(
+      Array.from(
+        new Set(
+          (r.notificarA || [])
+            .map((e) => normalizeEmail(e))
+            .filter((e) => e.includes('@'))
+        )
+      )
+    );
+    setRespNotifInput('');
   };
 
   const resetResponsibleForm = () => {
@@ -314,6 +353,8 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     setRespEmail('');
     setRespCargo('');
     setRespSocietyCodes([]);
+    setRespNotificarA([]);
+    setRespNotifInput('');
   };
 
   const toggleRespSocietyCode = (socCode: string) => {
@@ -322,11 +363,42 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     );
   };
 
+  const toggleRespNotificarEmail = (emailRaw: string) => {
+    const clean = normalizeEmail(emailRaw);
+    if (!clean || !clean.includes('@')) return;
+    setRespNotificarA((prev) =>
+      prev.includes(clean) ? prev.filter((e) => e !== clean) : [...prev, clean]
+    );
+  };
+
+  const handleAddRespNotifInput = () => {
+    const parsed = respNotifInput
+      .split(/[,;\s]+/)
+      .map((e) => normalizeEmail(e))
+      .filter((e) => e.includes('@'));
+    if (parsed.length === 0) return;
+    setRespNotificarA((prev) => Array.from(new Set([...prev, ...parsed])));
+    setRespNotifInput('');
+  };
+
   const handleSaveResponsible = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = respNombre.trim();
     const cleanEmail = normalizeEmail(respEmail);
     if (!cleanName) return;
+
+    // Also pick up any typed email still sitting in respNotifInput
+    const pendingInputEmails = respNotifInput
+      .split(/[,;\s]+/)
+      .map((em) => normalizeEmail(em))
+      .filter((em) => em.includes('@'));
+    const cleanNotificarA = Array.from(
+      new Set(
+        [...respNotificarA, ...pendingInputEmails]
+          .map((em) => normalizeEmail(em))
+          .filter((em) => em.includes('@'))
+      )
+    );
 
     const targetRespId = editingRespId || `resp-${Date.now()}`;
     const selectedSocSet = new Set(respSocietyCodes);
@@ -335,7 +407,13 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
       const nextResponsibles = editingRespId
         ? prev.responsibles.map((r) =>
             r.id === editingRespId
-              ? { ...r, nombre: cleanName, email: cleanEmail, cargo: respCargo.trim() }
+              ? {
+                  ...r,
+                  nombre: cleanName,
+                  email: cleanEmail,
+                  cargo: respCargo.trim(),
+                  notificarA: cleanNotificarA.length > 0 ? cleanNotificarA : undefined,
+                }
               : r
           )
         : [
@@ -345,6 +423,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
               nombre: cleanName,
               email: cleanEmail,
               cargo: respCargo.trim() || 'Analista',
+              notificarA: cleanNotificarA.length > 0 ? cleanNotificarA : undefined,
               activo: true,
             },
           ];
@@ -453,7 +532,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     resetSocietyForm();
   };
 
-  // ---------- Notification Recipients CRUD ----------
+  // ---------- Notification Recipients CRUD (Strictly Custom List) ----------
   const handleAddRecipient = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = normalizeEmail(notifEmail);
@@ -466,7 +545,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
           ...prev,
           notificationRecipients: prev.notificationRecipients.map((r) =>
             normalizeEmail(r.email) === cleanEmail
-              ? { ...r, nombre: cleanName, tipo: notifTipo, activo: true }
+              ? { ...r, nombre: cleanName, tipo: 'designado', activo: true }
               : r
           ),
         };
@@ -475,7 +554,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
         id: `notif-${Date.now()}`,
         nombre: cleanName,
         email: cleanEmail,
-        tipo: notifTipo,
+        tipo: 'designado',
         activo: true,
       };
       return {
@@ -486,7 +565,6 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
 
     setNotifNombre('');
     setNotifEmail('');
-    setNotifTipo('designado');
   };
 
   const tabs: {
@@ -661,6 +739,23 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                   />
                 </div>
               </div>
+
+              <label className="flex items-start gap-2.5 p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/60 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={actAplicarATodos}
+                  onChange={(e) => setActAplicarATodos(e.target.checked)}
+                  className="mt-0.5 rounded border-emerald-300 text-emerald-700 focus:ring-emerald-600"
+                />
+                <div className="text-xs">
+                  <div className="font-bold text-emerald-950">
+                    Activar automáticamente cada día 15 para todos los responsables
+                  </div>
+                  <div className="text-emerald-800/90 mt-0.5">
+                    Habilita esta tarea automáticamente en todas las sociedades para sus responsables sin depender de asignación manual. (Las tareas sin asignación manual también se activan automáticamente.)
+                  </div>
+                </div>
+              </label>
 
               {/* Society-First Easy Multi-Selection Grid */}
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3.5">
@@ -860,10 +955,12 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                           Día {act.diaSugerido}
                         </td>
                         <td className="px-3 py-3 text-slate-700">
-                          {assignedSocs.length > 0 ? (
-                            <span className="font-medium">{assignedSocs.join(', ')}</span>
+                          {act.aplicarATodosResponsables || assignedSocs.length === 0 ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-800 font-semibold">
+                              Automática día 15 · Todos los responsables
+                            </span>
                           ) : (
-                            <span className="text-slate-400">Sin asignar</span>
+                            <span className="font-medium">{assignedSocs.join(', ')}</span>
                           )}
                         </td>
                         <td className="px-3 py-3">
@@ -1243,6 +1340,100 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                     })}
                   </div>
                 </div>
+
+                {/* Per-Responsible Notification Recipients ("Notificar cumplimiento a") */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-700 inline-flex items-center gap-1.5">
+                      <Bell className="w-3.5 h-3.5 text-[#1E60A8]" />
+                      <span>
+                        A quién notificar cuando este usuario cumpla ({respNotificarA.length})
+                      </span>
+                    </span>
+                    {respNotificarA.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setRespNotificarA([])}
+                        className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 hover:underline cursor-pointer"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Quick-select from known Premex users/recipients */}
+                  {knownPeopleForNotifyPicker.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {knownPeopleForNotifyPicker
+                        .filter((p) => p.email !== normalizeEmail(respEmail))
+                        .map((person) => {
+                          const selected = respNotificarA.includes(person.email);
+                          return (
+                            <button
+                              key={person.email}
+                              type="button"
+                              onClick={() => toggleRespNotificarEmail(person.email)}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors cursor-pointer ${
+                                selected
+                                  ? 'bg-[#132B63] text-white border-[#132B63]'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:border-[#1E60A8]/50'
+                              }`}
+                            >
+                              {selected && <Check className="w-3 h-3 text-sky-200" />}
+                              <span>{person.nombre}</span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  )}
+
+                  {/* Add custom email directly */}
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={respNotifInput}
+                      onChange={(e) => setRespNotifInput(e.target.value)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === 'Enter') {
+                          ev.preventDefault();
+                          handleAddRespNotifInput();
+                        }
+                      }}
+                      placeholder="Agregar otro correo a notificar (ej. jefe@premexcorp.com)"
+                      className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddRespNotifInput}
+                      className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-white hover:bg-blue-50 border border-slate-300 rounded-xl cursor-pointer whitespace-nowrap"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Agregar correo</span>
+                    </button>
+                  </div>
+
+                  {/* Selected notification chips */}
+                  {respNotificarA.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {respNotificarA.map((em) => (
+                        <span
+                          key={em}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono font-semibold bg-white border border-blue-200 text-[#132B63] rounded-lg"
+                        >
+                          <span>{em}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleRespNotificarEmail(em)}
+                            className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                            aria-label={`Quitar ${em}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </form>
             )}
 
@@ -1270,12 +1461,13 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
 
           <div className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs min-w-[720px]">
+              <table className="w-full text-left border-collapse text-xs min-w-[820px]">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                     <th className="px-4 py-3">Responsable</th>
                     <th className="px-3 py-3">Correo</th>
                     <th className="px-3 py-3">Empresas</th>
+                    <th className="px-3 py-3">Notifica a</th>
                     <th className="px-3 py-3">Estado</th>
                     {canEdit && <th className="px-4 py-3 text-right">Acciones</th>}
                   </tr>
@@ -1285,6 +1477,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                     const socCodes = data.societies
                       .filter((s) => normalizeResponsibleIds(s.responsablesIds).includes(r.id))
                       .map((s) => s.codigo);
+                    const notifyTargets = r.notificarA || [];
                     return (
                       <tr key={r.id} className="hover:bg-slate-50/70">
                         <td className="px-4 py-3">
@@ -1297,6 +1490,15 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                             <span className="font-medium">{socCodes.join(', ')}</span>
                           ) : (
                             <span className="text-slate-400">Sin asignar</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-slate-700 max-w-[240px]">
+                          {notifyTargets.length > 0 ? (
+                            <div className="font-mono text-[11px] text-[#132B63] break-all">
+                              {notifyTargets.join(', ')}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">Lista general</span>
                           )}
                         </td>
                         <td className="px-3 py-3">
@@ -1326,7 +1528,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-[#1E60A8] hover:bg-blue-50 rounded-lg cursor-pointer"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
-                              <span>Editar / Empresas</span>
+                              <span>Editar</span>
                             </button>
                           </td>
                         )}
@@ -1340,37 +1542,24 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
         </section>
       )}
 
-      {/* TAB 4: DESTINATARIOS DE NOTIFICACIÓN DE CIERRE */}
+      {/* TAB 4: DESTINATARIOS DE NOTIFICACIÓN DE CIERRE (SOLO LISTA CONFIGURADA, SIN DEPENDER DE ROL ADMIN) */}
       {subTab === 'destinatarios' && (
         <section className="space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-4">
             <h3 className="text-base font-extrabold text-slate-900">
-              Reglas de Notificación
+              Reglas de Notificación y Cierre
             </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
-              <label className="flex items-start gap-3 p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 cursor-pointer">
-                <input
-                  type="checkbox"
-                  disabled={!canEdit}
-                  checked={data.notifyAdminsAutomatically}
-                  onChange={(e) =>
-                    onUpdateWorkspace((prev) => ({
-                      ...prev,
-                      notifyAdminsAutomatically: e.target.checked,
-                    }))
-                  }
-                  className="mt-0.5 rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
-                />
-                <div className="text-xs">
-                  <div className="font-bold text-slate-900">
-                    Notificar automáticamente a administradores
-                  </div>
-                  <div className="text-slate-500 mt-0.5">
-                    Incluye los usuarios con rol Administrador activos.
-                  </div>
+              <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/50 text-xs space-y-1">
+                <div className="font-bold text-[#132B63] flex items-center gap-1.5">
+                  <Bell className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Destinatarios estrictamente configurados</span>
                 </div>
-              </label>
+                <p className="text-slate-600 leading-relaxed">
+                  Los correos de cumplimiento y cierre se envían únicamente a las personas agregadas en esta lista y a los destinatarios asignados en cada responsable, sin depender de si tienen rol de Administrador.
+                </p>
+              </div>
 
               <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 flex items-center justify-between gap-3">
                 <div className="text-xs">
@@ -1402,17 +1591,17 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
 
           <div className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-4">
             <h4 className="text-sm font-bold text-slate-900">
-              Destinatarios de Confirmación de Cierre
+              Lista General de Destinatarios de Cierre
             </h4>
 
             {canEdit && (
-              <form onSubmit={handleAddRecipient} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <form onSubmit={handleAddRecipient} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <input
                   type="text"
                   required
                   value={notifNombre}
                   onChange={(e) => setNotifNombre(e.target.value)}
-                  placeholder="Nombre *"
+                  placeholder="Nombre del destinatario *"
                   className="rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900"
                 />
                 <input
@@ -1423,22 +1612,12 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                   placeholder="correo@premexcorp.com *"
                   className="rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900 font-mono"
                 />
-                <select
-                  value={notifTipo}
-                  onChange={(e) =>
-                    setNotifTipo(e.target.value as 'administrador' | 'designado')
-                  }
-                  className="rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-800 bg-white"
-                >
-                  <option value="designado">Usuario designado</option>
-                  <option value="administrador">Administrador</option>
-                </select>
                 <button
                   type="submit"
                   className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Agregar</span>
+                  <span>Agregar destinatario</span>
                 </button>
               </form>
             )}
@@ -1449,56 +1628,65 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                   <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                     <th className="px-4 py-2.5">Nombre</th>
                     <th className="px-3 py-2.5">Correo</th>
-                    <th className="px-3 py-2.5">Tipo</th>
                     <th className="px-3 py-2.5">Estado</th>
                     {canEdit && <th className="px-4 py-2.5 text-right">Quitar</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200/80">
-                  {data.notificationRecipients.map((rec) => (
-                    <tr key={rec.id} className="hover:bg-slate-50/70">
-                      <td className="px-4 py-2.5 font-bold text-slate-900">{rec.nombre}</td>
-                      <td className="px-3 py-2.5 font-mono text-slate-700">{rec.email}</td>
-                      <td className="px-3 py-2.5 capitalize text-slate-600">{rec.tipo}</td>
-                      <td className="px-3 py-2.5">
-                        <button
-                          type="button"
-                          disabled={!canEdit}
-                          onClick={() =>
-                            onUpdateWorkspace((prev) => ({
-                              ...prev,
-                              notificationRecipients: prev.notificationRecipients.map((item) =>
-                                item.id === rec.id ? { ...item, activo: !item.activo } : item
-                              ),
-                            }))
-                          }
-                          className={`font-semibold cursor-pointer ${
-                            rec.activo ? 'text-emerald-700' : 'text-slate-400'
-                          }`}
-                        >
-                          {rec.activo ? 'Activo' : 'Pausado'}
-                        </button>
+                  {data.notificationRecipients.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={canEdit ? 4 : 3}
+                        className="px-4 py-6 text-center text-slate-500"
+                      >
+                        No hay destinatarios generales agregados. Agrega aquí quién recibirá los avisos de cierre o configúralos en cada responsable.
                       </td>
-                      {canEdit && (
-                        <td className="px-4 py-2.5 text-right">
+                    </tr>
+                  ) : (
+                    data.notificationRecipients.map((rec) => (
+                      <tr key={rec.id} className="hover:bg-slate-50/70">
+                        <td className="px-4 py-2.5 font-bold text-slate-900">{rec.nombre}</td>
+                        <td className="px-3 py-2.5 font-mono text-slate-700">{rec.email}</td>
+                        <td className="px-3 py-2.5">
                           <button
                             type="button"
+                            disabled={!canEdit}
                             onClick={() =>
                               onUpdateWorkspace((prev) => ({
                                 ...prev,
-                                notificationRecipients: prev.notificationRecipients.filter(
-                                  (item) => item.id !== rec.id
+                                notificationRecipients: prev.notificationRecipients.map((item) =>
+                                  item.id === rec.id ? { ...item, activo: !item.activo } : item
                                 ),
                               }))
                             }
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                            className={`font-semibold cursor-pointer ${
+                              rec.activo ? 'text-emerald-700' : 'text-slate-400'
+                            }`}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            {rec.activo ? 'Activo' : 'Pausado'}
                           </button>
                         </td>
-                      )}
-                    </tr>
-                  ))}
+                        {canEdit && (
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onUpdateWorkspace((prev) => ({
+                                  ...prev,
+                                  notificationRecipients: prev.notificationRecipients.filter(
+                                    (item) => item.id !== rec.id
+                                  ),
+                                }))
+                              }
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1506,22 +1694,28 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
             <div className="rounded-xl bg-emerald-50/60 border border-emerald-200 p-4 space-y-2">
               <div className="flex items-center gap-2 text-xs font-bold text-emerald-900">
                 <Mail className="w-4 h-4 text-emerald-700" />
-                <span>Destinatarios activos ({resolvedRecipients.length})</span>
+                <span>Destinatarios generales activos ({resolvedRecipients.length})</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
-                {resolvedRecipients.map((r) => (
-                  <div
-                    key={r.email}
-                    className="bg-white rounded-lg border border-emerald-200/80 px-3 py-2"
-                  >
-                    <div className="font-bold text-slate-900 truncate">{r.nombre}</div>
-                    <div className="font-mono text-[11px] text-slate-600 truncate">{r.email}</div>
-                    <div className="text-[10px] font-semibold text-emerald-700 mt-0.5">
-                      {r.origen}
+              {resolvedRecipients.length === 0 ? (
+                <div className="text-xs text-emerald-800/80">
+                  Ningún destinatario general activo (solo se notificará a los correos configurados individualmente en cada responsable).
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                  {resolvedRecipients.map((r) => (
+                    <div
+                      key={r.email}
+                      className="bg-white rounded-lg border border-emerald-200/80 px-3 py-2"
+                    >
+                      <div className="font-bold text-slate-900 truncate">{r.nombre}</div>
+                      <div className="font-mono text-[11px] text-slate-600 truncate">{r.email}</div>
+                      <div className="text-[10px] font-semibold text-emerald-700 mt-0.5">
+                        {r.origen}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </section>

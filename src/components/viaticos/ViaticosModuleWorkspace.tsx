@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { User } from 'firebase/auth';
 import {
   CheckCircle2,
@@ -24,7 +24,10 @@ import {
 import {
   StoredReceiptMedia,
   deleteReceiptMedia,
+  getReceiptMedia,
   getReceiptMediaBatch,
+  syncLocalReceiptsToCloud,
+  uploadReceiptMediaToCloud,
 } from '../../services/viaticosMediaStore';
 import {
   filterLiquidacionesByPermissions,
@@ -90,6 +93,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [mediaMap, setMediaMap] = useState<Record<string, StoredReceiptMedia>>({});
+  const [loadingMediaIds, setLoadingMediaIds] = useState<Set<string>>(() => new Set());
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [closeConfirmLiqId, setCloseConfirmLiqId] = useState<string | null>(null);
   const [closeModalLiqId, setCloseModalLiqId] = useState<string | null>(null);
@@ -98,6 +102,21 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     type: 'success' | 'info' | 'error';
     message: string;
   } | null>(null);
+
+  // Keep synchronous ref + serialized queue so rapid factura uploads never race cloud saves
+  const latestDataRef = useRef<ViaticosWorkspaceData>(data);
+  latestDataRef.current = data;
+  const cloudSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingCloudSavesRef = useRef<number>(0);
+  const headerSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (headerSyncTimerRef.current) {
+        clearTimeout(headerSyncTimerRef.current);
+      }
+    };
+  }, []);
 
   // Resolve consultant identity automatically from corporate email (primerNombre.primerApellido) & RBAC
   const scope = useMemo(
@@ -168,7 +187,73 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     );
   }, [planillaPreviewLiqId, accountingLiquidaciones, visibleLiquidaciones, activeLiquidation]);
 
-  // Load IndexedDB receipt media for active, close-confirm & email-modal liquidations
+  const mediaMapRef = useRef<Record<string, StoredReceiptMedia>>({});
+  mediaMapRef.current = mediaMap;
+
+  const ensureReceiptMediaIdsLoaded = useCallback(
+    async (rawIds: string[]) => {
+      const missingIds = Array.from(
+        new Set(rawIds.filter((id) => Boolean(id) && !mediaMapRef.current[id]))
+      );
+      if (missingIds.length === 0) return;
+
+      setLoadingMediaIds((prev) => {
+        const next = new Set(prev);
+        missingIds.forEach((id) => next.add(id));
+        return next;
+      });
+
+      try {
+        const loaded = await getReceiptMediaBatch(missingIds);
+        if (Object.keys(loaded).length > 0) {
+          setMediaMap((prev) => ({ ...prev, ...loaded }));
+        }
+        if (currentUser && permissions.canOperate) {
+          void syncLocalReceiptsToCloud(missingIds);
+        }
+      } finally {
+        setLoadingMediaIds((prev) => {
+          const next = new Set(prev);
+          missingIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+    },
+    [currentUser, permissions.canOperate]
+  );
+
+  const loadSingleReceiptMedia = useCallback(
+    async (attachmentId: string): Promise<StoredReceiptMedia | null> => {
+      if (!attachmentId) return null;
+      const existing = mediaMapRef.current[attachmentId];
+      if (existing) return existing;
+
+      setLoadingMediaIds((prev) => new Set(prev).add(attachmentId));
+      try {
+        const loaded = await getReceiptMedia(attachmentId);
+        if (loaded) {
+          setMediaMap((prev) => ({ ...prev, [attachmentId]: loaded }));
+          if (currentUser && permissions.canOperate && !loaded.cloudSynced) {
+            void uploadReceiptMediaToCloud(loaded).then((res) => {
+              if (res.cloudSynced) {
+                setMediaMap((prev) => ({ ...prev, [attachmentId]: res.media }));
+              }
+            });
+          }
+        }
+        return loaded;
+      } finally {
+        setLoadingMediaIds((prev) => {
+          const next = new Set(prev);
+          next.delete(attachmentId);
+          return next;
+        });
+      }
+    },
+    [currentUser, permissions.canOperate]
+  );
+
+  // Load IndexedDB + Firestore receipt media for active, close-confirm & email-modal liquidations
   useEffect(() => {
     const ids: string[] = [];
     activeLiquidation?.items.forEach((it) => {
@@ -182,18 +267,93 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     });
     if (ids.length === 0) return;
 
-    let cancelled = false;
-    getReceiptMediaBatch(ids).then((loaded) => {
-      if (cancelled || Object.keys(loaded).length === 0) return;
-      setMediaMap((prev) => ({ ...prev, ...loaded }));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeLiquidation, closeConfirmLiquidation, modalLiquidation]);
+    void ensureReceiptMediaIdsLoaded(ids);
+  }, [
+    activeLiquidation,
+    closeConfirmLiquidation,
+    modalLiquidation,
+    currentUser?.uid,
+    ensureReceiptMediaIdsLoaded,
+  ]);
 
   const showToast = (type: 'success' | 'info' | 'error', message: string) => {
     setToast({ type, message });
+  };
+
+  const enqueueAutoCloudSync = (
+    snapshot: ViaticosWorkspaceData,
+    opts?: {
+      successMessage?: string;
+      offlineMessage?: string;
+      errorPrefix?: string;
+    }
+  ) => {
+    if (!permissions.canOperate) return;
+    if (!currentUser) {
+      if (opts?.offlineMessage) {
+        showToast('info', opts.offlineMessage);
+      }
+      return;
+    }
+
+    pendingCloudSavesRef.current += 1;
+    setIsSavingCloud(true);
+
+    cloudSyncQueueRef.current = cloudSyncQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        try {
+          await onSaveToCloud(snapshot);
+          if (opts?.successMessage) {
+            showToast('success', opts.successMessage);
+          }
+        } catch (err: any) {
+          const errDetail = err?.message || 'Sin conexión a Firestore.';
+          showToast(
+            'error',
+            `${opts?.errorPrefix || 'Cambio guardado localmente, pero falló la sincronización en la nube'}: ${errDetail}`
+          );
+        } finally {
+          pendingCloudSavesRef.current = Math.max(0, pendingCloudSavesRef.current - 1);
+          if (pendingCloudSavesRef.current === 0) {
+            setIsSavingCloud(false);
+          }
+        }
+      });
+  };
+
+  const mutateAndAutoSync = (
+    mutator: (prev: ViaticosWorkspaceData) => ViaticosWorkspaceData,
+    opts?: {
+      debounceMs?: number;
+      successMessage?: string;
+      offlineMessage?: string;
+      errorPrefix?: string;
+    }
+  ) => {
+    if (!permissions.canOperate) return;
+    const nextWorkspace: ViaticosWorkspaceData = {
+      ...mutator(latestDataRef.current),
+      hasUnsavedChanges: true,
+    };
+    latestDataRef.current = nextWorkspace;
+    onUpdateData(() => nextWorkspace, true);
+
+    if (opts?.debounceMs && opts.debounceMs > 0) {
+      if (headerSyncTimerRef.current) {
+        clearTimeout(headerSyncTimerRef.current);
+      }
+      headerSyncTimerRef.current = setTimeout(() => {
+        headerSyncTimerRef.current = null;
+        enqueueAutoCloudSync(latestDataRef.current, opts);
+      }, opts.debounceMs);
+    } else {
+      if (headerSyncTimerRef.current) {
+        clearTimeout(headerSyncTimerRef.current);
+        headerSyncTimerRef.current = null;
+      }
+      enqueueAutoCloudSync(nextWorkspace, opts);
+    }
   };
 
   const handleOpenNewLiquidationModal = () => {
@@ -230,18 +390,17 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       updatedAtIso: nowIso,
     };
 
-    onUpdateData(
+    setActiveTab('liquidador');
+    mutateAndAutoSync(
       (prev) => ({
         ...prev,
         liquidaciones: [newLiq, ...prev.liquidaciones],
         activeLiquidationId: newLiq.id,
       }),
-      true
-    );
-    setActiveTab('liquidador');
-    showToast(
-      'success',
-      `Nueva liquidación abierta: "${newLiq.lineaLiquidacion}" (Semana #${newLiq.semana} · ${newLiq.monedaBase}). Las liquidaciones abiertas anteriores siguen disponibles.`
+      {
+        successMessage: `Nueva liquidación creada y sincronizada en la nube: "${newLiq.lineaLiquidacion}" (Semana #${newLiq.semana} · ${newLiq.monedaBase}).`,
+        offlineMessage: `Nueva liquidación abierta localmente: "${newLiq.lineaLiquidacion}". Inicia sesión con Google para respaldar en la nube.`,
+      }
     );
   };
 
@@ -266,74 +425,113 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     monedaBase?: ViaticoCurrency;
   }) => {
     if (!activeLiquidation || !permissions.canOperate) return;
-    onUpdateData((prev) => {
-      const nextList = prev.liquidaciones.map((l) => {
-        if (l.id !== activeLiquidation.id) return l;
-        const nextBaseCurrency = patch.monedaBase || l.monedaBase;
-        // If base currency changed, normalize 1:1 items in that currency cleanly
-        const updatedItems = patch.monedaBase
-          ? l.items.map((it) => {
-              const fx = it.moneda === nextBaseCurrency ? 1 : it.tipoCambio;
-              return {
-                ...it,
-                tipoCambio: fx,
-                valorReintegrar: roundMoney(it.valorFactura * fx),
-              };
-            })
-          : l.items;
-        return recalculateLiquidationTotals({
-          ...l,
-          ...patch,
-          monedaBase: nextBaseCurrency,
-          items: updatedItems,
-          updatedAtIso: new Date().toISOString(),
+    const targetLiqId = activeLiquidation.id;
+    mutateAndAutoSync(
+      (prev) => {
+        const nextList = prev.liquidaciones.map((l) => {
+          if (l.id !== targetLiqId) return l;
+          const nextBaseCurrency = patch.monedaBase || l.monedaBase;
+          const updatedItems = patch.monedaBase
+            ? l.items.map((it) => {
+                const fx = it.moneda === nextBaseCurrency ? 1 : it.tipoCambio;
+                return {
+                  ...it,
+                  tipoCambio: fx,
+                  valorReintegrar: roundMoney(it.valorFactura * fx),
+                };
+              })
+            : l.items;
+          return recalculateLiquidationTotals({
+            ...l,
+            ...patch,
+            monedaBase: nextBaseCurrency,
+            items: updatedItems,
+            updatedAtIso: new Date().toISOString(),
+          });
         });
-      });
-      return { ...prev, liquidaciones: nextList };
-    }, true);
+        return { ...prev, liquidaciones: nextList };
+      },
+      {
+        debounceMs: 800,
+        errorPrefix: 'Encabezado actualizado localmente, pero falló el respaldo automático',
+      }
+    );
   };
 
   const handleAddOrUpdateItem = (item: ViaticoExpenseItem, isEdit: boolean) => {
     if (!activeLiquidation || !permissions.canOperate) return;
-    onUpdateData((prev) => {
-      const nextList = prev.liquidaciones.map((l) => {
-        if (l.id !== activeLiquidation.id) return l;
-        const nextItems = isEdit
-          ? l.items.map((existing) => (existing.id === item.id ? item : existing))
-          : [...l.items, item];
-        return recalculateLiquidationTotals({
-          ...l,
-          items: nextItems,
-          updatedAtIso: new Date().toISOString(),
+    const targetLiqId = activeLiquidation.id;
+    if (currentUser && item.attachmentId) {
+      const localMedia = mediaMapRef.current[item.attachmentId];
+      if (localMedia && !localMedia.cloudSynced) {
+        void uploadReceiptMediaToCloud(localMedia).then((res) => {
+          if (res.cloudSynced) {
+            setMediaMap((prev) => ({ ...prev, [item.attachmentId!]: res.media }));
+          }
         });
-      });
-      return { ...prev, liquidaciones: nextList };
-    }, true);
-    showToast(
-      'success',
-      isEdit
-        ? `Factura de ${item.proveedor} actualizada.`
-        : `Factura de ${item.proveedor} agregada a la liquidación.`
+      }
+    }
+    if (currentUser) {
+      showToast(
+        'info',
+        isEdit
+          ? `Actualizando factura de ${item.proveedor} en la nube...`
+          : `Guardando factura de ${item.proveedor} en la nube...`
+      );
+    }
+    mutateAndAutoSync(
+      (prev) => {
+        const nextList = prev.liquidaciones.map((l) => {
+          if (l.id !== targetLiqId) return l;
+          const nextItems = isEdit
+            ? l.items.map((existing) => (existing.id === item.id ? item : existing))
+            : [...l.items, item];
+          return recalculateLiquidationTotals({
+            ...l,
+            items: nextItems,
+            updatedAtIso: new Date().toISOString(),
+          });
+        });
+        return { ...prev, liquidaciones: nextList };
+      },
+      {
+        successMessage: isEdit
+          ? `Factura de ${item.proveedor} actualizada y sincronizada en la nube.`
+          : `Factura de ${item.proveedor} agregada y sincronizada en la nube automáticamente.`,
+        offlineMessage: isEdit
+          ? `Factura de ${item.proveedor} actualizada localmente (inicia sesión para sincronizar en la nube).`
+          : `Factura de ${item.proveedor} agregada localmente (inicia sesión para sincronizar en la nube).`,
+        errorPrefix: `Factura de ${item.proveedor} guardada localmente, pero no se pudo subir a la nube`,
+      }
     );
   };
 
   const handleDeleteItem = (itemId: string) => {
     if (!activeLiquidation || !permissions.canOperate) return;
+    const targetLiqId = activeLiquidation.id;
     const target = activeLiquidation.items.find((i) => i.id === itemId);
     if (target?.attachmentId) {
       void deleteReceiptMedia(target.attachmentId);
     }
-    onUpdateData((prev) => {
-      const nextList = prev.liquidaciones.map((l) => {
-        if (l.id !== activeLiquidation.id) return l;
-        return recalculateLiquidationTotals({
-          ...l,
-          items: l.items.filter((i) => i.id !== itemId),
-          updatedAtIso: new Date().toISOString(),
+    mutateAndAutoSync(
+      (prev) => {
+        const nextList = prev.liquidaciones.map((l) => {
+          if (l.id !== targetLiqId) return l;
+          return recalculateLiquidationTotals({
+            ...l,
+            items: l.items.filter((i) => i.id !== itemId),
+            updatedAtIso: new Date().toISOString(),
+          });
         });
-      });
-      return { ...prev, liquidaciones: nextList };
-    }, true);
+        return { ...prev, liquidaciones: nextList };
+      },
+      {
+        successMessage: target
+          ? `Factura de ${target.proveedor} eliminada y sincronizada en la nube.`
+          : 'Factura eliminada y sincronizada en la nube.',
+        offlineMessage: 'Factura eliminada localmente.',
+      }
+    );
   };
 
   const handleDeleteLiquidation = (liqId: string) => {
@@ -345,18 +543,23 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       if (it.attachmentId) void deleteReceiptMedia(it.attachmentId);
     });
 
-    onUpdateData((prev) => {
-      const remaining = prev.liquidaciones.filter((l) => l.id !== liqId);
-      return {
-        ...prev,
-        liquidaciones: remaining,
-        activeLiquidationId:
-          prev.activeLiquidationId === liqId
-            ? remaining[0]?.id || ''
-            : prev.activeLiquidationId,
-      };
-    }, true);
-    showToast('info', 'Liquidación eliminada.');
+    mutateAndAutoSync(
+      (prev) => {
+        const remaining = prev.liquidaciones.filter((l) => l.id !== liqId);
+        return {
+          ...prev,
+          liquidaciones: remaining,
+          activeLiquidationId:
+            prev.activeLiquidationId === liqId
+              ? remaining[0]?.id || ''
+              : prev.activeLiquidationId,
+        };
+      },
+      {
+        successMessage: 'Liquidación eliminada y sincronizada en la nube.',
+        offlineMessage: 'Liquidación eliminada localmente.',
+      }
+    );
   };
 
   const handleSaveCloudClick = async () => {
@@ -368,7 +571,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     }
     setIsSavingCloud(true);
     try {
-      await onSaveToCloud();
+      await onSaveToCloud(latestDataRef.current);
       showToast('success', 'Liquidación de viáticos guardada y sincronizada en la nube.');
     } catch (err: any) {
       showToast('error', err?.message || 'No se pudo guardar en Firestore.');
@@ -381,14 +584,16 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     targetLiqId: string,
     updater: (liq: ViaticoLiquidation) => ViaticoLiquidation
   ) => {
-    const nextLiquidaciones = data.liquidaciones.map((l) =>
+    const base = latestDataRef.current;
+    const nextLiquidaciones = base.liquidaciones.map((l) =>
       l.id === targetLiqId ? updater(l) : l
     );
     const nextWorkspace: ViaticosWorkspaceData = {
-      ...data,
+      ...base,
       liquidaciones: nextLiquidaciones,
       hasUnsavedChanges: true,
     };
+    latestDataRef.current = nextWorkspace;
     onUpdateData(() => nextWorkspace, true);
 
     if (currentUser) {
@@ -447,39 +652,40 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
 
   const handleUpsertConsultor = (consultor: ViaticoConsultor) => {
     if (!permissions.isAdmin) return;
-    onUpdateData((prev) => {
-      const prevMatch = prev.consultores.find((c) => c.id === consultor.id);
-      const nextConsultores = prevMatch
-        ? prev.consultores.map((c) => (c.id === consultor.id ? consultor : c))
-        : [...prev.consultores, consultor];
+    mutateAndAutoSync(
+      (prev) => {
+        const prevMatch = prev.consultores.find((c) => c.id === consultor.id);
+        const nextConsultores = prevMatch
+          ? prev.consultores.map((c) => (c.id === consultor.id ? consultor : c))
+          : [...prev.consultores, consultor];
 
-      // Propagate updated Cost Center to this consultant's liquidations seamlessly
-      const prevCC = (prevMatch?.centroCosto || '').trim();
-      const nextCC = (consultor.centroCosto || '').trim();
-      const cleanEmail = normalizeEmail(consultor.email);
-      const nextLiquidaciones = prev.liquidaciones.map((l) => {
-        const belongsToConsultor =
-          l.consultorId === consultor.id ||
-          (cleanEmail && normalizeEmail(l.consultorEmail) === cleanEmail);
-        if (!belongsToConsultor) return l;
-        const currentLiqCC = (l.centroCosto || '').trim();
-        if (!currentLiqCC || currentLiqCC === prevCC) {
-          return { ...l, centroCosto: nextCC };
-        }
-        return l;
-      });
+        const prevCC = (prevMatch?.centroCosto || '').trim();
+        const nextCC = (consultor.centroCosto || '').trim();
+        const cleanEmail = normalizeEmail(consultor.email);
+        const nextLiquidaciones = prev.liquidaciones.map((l) => {
+          const belongsToConsultor =
+            l.consultorId === consultor.id ||
+            (cleanEmail && normalizeEmail(l.consultorEmail) === cleanEmail);
+          if (!belongsToConsultor) return l;
+          const currentLiqCC = (l.centroCosto || '').trim();
+          if (!currentLiqCC || currentLiqCC === prevCC) {
+            return { ...l, centroCosto: nextCC };
+          }
+          return l;
+        });
 
-      return {
-        ...prev,
-        consultores: nextConsultores,
-        liquidaciones: nextLiquidaciones,
-      };
-    }, true);
-    showToast(
-      'success',
-      `Consultor ${consultor.nombreCompleto} guardado${
-        consultor.centroCosto ? ` (C.C.: ${consultor.centroCosto})` : ''
-      }.`
+        return {
+          ...prev,
+          consultores: nextConsultores,
+          liquidaciones: nextLiquidaciones,
+        };
+      },
+      {
+        successMessage: `Consultor ${consultor.nombreCompleto} guardado y sincronizado en la nube${
+          consultor.centroCosto ? ` (C.C.: ${consultor.centroCosto})` : ''
+        }.`,
+        offlineMessage: `Consultor ${consultor.nombreCompleto} guardado localmente.`,
+      }
     );
   };
 
@@ -494,65 +700,68 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     const cleanEmail = normalizeEmail(params.consultorEmail);
     const cleanCC = params.centroCosto.trim();
 
-    onUpdateData((prev) => {
-      const existingIdx = prev.consultores.findIndex(
-        (c) =>
-          c.id === params.consultorId ||
-          (cleanEmail && normalizeEmail(c.email) === cleanEmail)
-      );
-
-      let nextConsultores: ViaticoConsultor[];
-      if (existingIdx >= 0) {
-        nextConsultores = prev.consultores.map((c, idx) =>
-          idx === existingIdx ? { ...c, centroCosto: cleanCC } : c
+    mutateAndAutoSync(
+      (prev) => {
+        const existingIdx = prev.consultores.findIndex(
+          (c) =>
+            c.id === params.consultorId ||
+            (cleanEmail && normalizeEmail(c.email) === cleanEmail)
         );
-      } else {
-        nextConsultores = [
-          ...prev.consultores,
-          {
-            id: params.consultorId || `cons-${Date.now()}`,
-            nombreCompleto: params.consultorNombre,
-            email: cleanEmail,
-            empresa: params.empresa || 'Premex Corp',
-            cargo: 'Consultor / Liquidador',
-            centroCosto: cleanCC,
-            monedaBase: 'Quetzales',
-            activo: true,
-          },
-        ];
+
+        let nextConsultores: ViaticoConsultor[];
+        if (existingIdx >= 0) {
+          nextConsultores = prev.consultores.map((c, idx) =>
+            idx === existingIdx ? { ...c, centroCosto: cleanCC } : c
+          );
+        } else {
+          nextConsultores = [
+            ...prev.consultores,
+            {
+              id: params.consultorId || `cons-${Date.now()}`,
+              nombreCompleto: params.consultorNombre,
+              email: cleanEmail,
+              empresa: params.empresa || 'Premex Corp',
+              cargo: 'Consultor / Liquidador',
+              centroCosto: cleanCC,
+              monedaBase: 'Quetzales',
+              activo: true,
+            },
+          ];
+        }
+
+        const nextLiquidaciones = prev.liquidaciones.map((l) => {
+          const matches =
+            l.consultorId === params.consultorId ||
+            (cleanEmail && normalizeEmail(l.consultorEmail) === cleanEmail) ||
+            l.consultorNombre === params.consultorNombre;
+          return matches ? { ...l, centroCosto: cleanCC } : l;
+        });
+
+        return {
+          ...prev,
+          consultores: nextConsultores,
+          liquidaciones: nextLiquidaciones,
+        };
+      },
+      {
+        successMessage: `Centro de Costo "${cleanCC}" asignado a ${params.consultorNombre} y sincronizado en la nube.`,
+        offlineMessage: `Centro de Costo "${cleanCC}" asignado localmente a ${params.consultorNombre}.`,
       }
-
-      const nextLiquidaciones = prev.liquidaciones.map((l) => {
-        const matches =
-          l.consultorId === params.consultorId ||
-          (cleanEmail && normalizeEmail(l.consultorEmail) === cleanEmail) ||
-          l.consultorNombre === params.consultorNombre;
-        return matches ? { ...l, centroCosto: cleanCC } : l;
-      });
-
-      return {
-        ...prev,
-        consultores: nextConsultores,
-        liquidaciones: nextLiquidaciones,
-      };
-    }, true);
-
-    showToast(
-      'success',
-      `Centro de Costo "${cleanCC}" asignado a ${params.consultorNombre} y actualizado en la reportería contable.`
     );
   };
 
   const handleDeleteConsultor = (consultorId: string) => {
     if (!permissions.isAdmin) return;
-    onUpdateData(
+    mutateAndAutoSync(
       (prev) => ({
         ...prev,
         consultores: prev.consultores.filter((c) => c.id !== consultorId),
       }),
-      true
+      {
+        successMessage: 'Consultor retirado del listado y sincronizado en la nube.',
+        offlineMessage: 'Consultor retirado del listado localmente.',
+      }
     );
-    showToast('info', 'Consultor retirado del listado.');
   };
 
   const handleQuickDownloadExcel = async (target?: ViaticoLiquidation | null) => {
@@ -708,6 +917,8 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               isLockedToOwnConsultor={scope.isLockedToOwnConsultor}
               detectedFromEmailLabel={scope.detectedFromEmailLabel}
               mediaMap={mediaMap}
+              loadingMediaIds={loadingMediaIds}
+              onLoadReceiptMedia={loadSingleReceiptMedia}
               onMediaSaved={(media) =>
                 setMediaMap((prev) => ({ ...prev, [media.id]: media }))
               }
@@ -746,9 +957,16 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               liquidaciones={accountingLiquidaciones}
               consultores={data.consultores}
               permissions={permissions}
+              mediaMap={mediaMap}
+              loadingMediaIds={loadingMediaIds}
+              onEnsureMediaLoaded={ensureReceiptMediaIdsLoaded}
+              onLoadReceiptMedia={loadSingleReceiptMedia}
               onPreviewPlanillaPdf={(liq) => setPlanillaPreviewLiqId(liq.id)}
               onDownloadLiquidationExcel={(liq) => {
                 void handleQuickDownloadExcel(liq);
+              }}
+              onDownloadLiquidationPdf={(liq) => {
+                void handleQuickDownloadPdf(liq);
               }}
               onAssignConsultorCostCenter={handleAssignConsultorCostCenter}
               onNotify={showToast}

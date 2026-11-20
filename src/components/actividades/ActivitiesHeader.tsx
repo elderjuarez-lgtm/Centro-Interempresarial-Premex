@@ -9,6 +9,7 @@ import {
   LogOut,
   CheckCircle2,
   Loader2,
+  RotateCcw,
 } from 'lucide-react';
 import { ActiveModuleId, ActivitiesTab, EffectivePermissions } from '../../types';
 import { buildRecentPeriodOptions, formatPeriodLabel } from '../../utils/activities';
@@ -29,6 +30,7 @@ interface ActivitiesHeaderProps {
   onSaveToCloud: () => void;
   isSyncingGoogleTasks: boolean;
   onPullFromGoogleTasks: () => void;
+  onRequestResetPeriod?: () => void;
 }
 
 const TAB_TITLES: Record<ActivitiesTab, string> = {
@@ -53,6 +55,7 @@ export const ActivitiesHeader: React.FC<ActivitiesHeaderProps> = ({
   onSaveToCloud,
   isSyncingGoogleTasks,
   onPullFromGoogleTasks,
+  onRequestResetPeriod,
 }) => {
   const periodOptions = buildRecentPeriodOptions(selectedPeriod);
   const title =
@@ -109,6 +112,18 @@ export const ActivitiesHeader: React.FC<ActivitiesHeaderProps> = ({
               )}
             </select>
           </div>
+
+          {permissions.isAdmin && permissions.canOperate && onRequestResetPeriod && (
+            <button
+              type="button"
+              onClick={onRequestResetPeriod}
+              title="Reiniciar el periodo de actividades para iniciar en Noviembre 2026"
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-xl border border-amber-200 bg-amber-50/80 text-amber-900 hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden xl:inline">Reiniciar Nov 2026</span>
+            </button>
+          )}
 
           {!permissions.isReadOnly && (
             <button

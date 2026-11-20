@@ -48,6 +48,8 @@ import {
   BankExportMode,
   exportBankBatchPdf,
   exportSapDeliverableWorkbook,
+  generateBankBatchPdfBytes,
+  generateSapDeliverableWorkbookBytes,
 } from '../../utils/bankOfficialExport';
 import { BankSidebar } from './BankSidebar';
 import { BankHeader } from './BankHeader';
@@ -63,6 +65,7 @@ import {
   BankExportFormat,
   BankExportModal,
 } from './BankExportModal';
+import { BankEmailModal } from './BankEmailModal';
 import {
   BlockedOpenNoticeModal,
   CloseReconciliationModal,
@@ -96,7 +99,10 @@ interface BankModuleWorkspaceProps {
   ) => void;
   onSaveToCloud: (overrideData?: BankWorkspaceData) => Promise<void>;
   currentUser: User | null;
+  accessToken?: string | null;
   onSignInWithGoogle: () => void;
+  onReconnectWorkspace?: () => Promise<string | null>;
+  onInvalidateWorkspaceToken?: () => void;
   onSignOut: () => void;
   onSwitchModule: (moduleId: ActiveModuleId) => void;
   permissions: EffectivePermissions;
@@ -123,7 +129,10 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   onUpdateData,
   onSaveToCloud,
   currentUser,
+  accessToken,
   onSignInWithGoogle,
+  onReconnectWorkspace,
+  onInvalidateWorkspaceToken,
   onSignOut,
   onSwitchModule,
   permissions,
@@ -135,6 +144,10 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
   const [exportModalConfig, setExportModalConfig] = useState<{
     format: BankExportFormat;
     mode: BankExportMode;
+    societyKey?: string;
+    accountId?: string;
+  } | null>(null);
+  const [emailModalConfig, setEmailModalConfig] = useState<{
     societyKey?: string;
     accountId?: string;
   } | null>(null);
@@ -1274,6 +1287,62 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
     setExportModalConfig(opts);
   };
 
+  const handleOpenEmailModal = (opts?: { societyKey?: string; accountId?: string }) => {
+    if (data.accounts.length === 0) {
+      showFeedback('info', 'No hay cuentas bancarias disponibles para enviar por correo.');
+      return;
+    }
+    setEmailModalConfig(opts || {});
+  };
+
+  const buildActivePeriodExcelBytes = async (
+    selectedItems: BankExportAccountItem[],
+    mode: BankExportMode,
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return null;
+    const targetMonthKey = normalizePeriodKey(effectiveMonth);
+    const selectedAccountIds = new Set(selectedItems.map((i) => i.account.id));
+    const scopedSapItems = data.sapOpenItems.filter(
+      (i) =>
+        selectedAccountIds.has(i.cuentaId) &&
+        (!i.mes || normalizePeriodKey(i.mes) === targetMonthKey)
+    );
+    const scopedBalanceRows = data.sapBalanceRows.filter(
+      (r) => !r.mes || normalizePeriodKey(r.mes) === targetMonthKey
+    );
+    const scopedMatches = data.matches.filter(
+      (m) =>
+        selectedAccountIds.has(m.cuentaId) &&
+        normalizePeriodKey(m.mes) === targetMonthKey
+    );
+
+    return generateSapDeliverableWorkbookBytes({
+      activeSummary: selectedItems[0].summary,
+      centerSummaries: selectedItems.map((i) => i.summary),
+      batchEntries: selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+      mode,
+      sapOpenItems: scopedSapItems,
+      sapBalanceRows: scopedBalanceRows,
+      statementItems: data.statementItems,
+      ledgerItems: data.ledgerItems,
+      matches: scopedMatches,
+      selectedMonth: effectiveMonth,
+      scopeLabel,
+    });
+  };
+
+  const buildActivePeriodPdfBytes = async (
+    selectedItems: BankExportAccountItem[],
+    scopeLabel: string
+  ) => {
+    if (selectedItems.length === 0) return null;
+    return generateBankBatchPdfBytes(
+      selectedItems.map((i) => ({ summary: i.summary, period: i.period })),
+      scopeLabel
+    );
+  };
+
   const handleExecuteExportExcel = async (
     selectedItems: BankExportAccountItem[],
     mode: BankExportMode,
@@ -1434,6 +1503,11 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
             handleOpenExportModal({
               format: 'excel',
               mode: 'individual',
+              accountId: selectedAccount?.id,
+            })
+          }
+          onOpenEmailModal={() =>
+            handleOpenEmailModal({
               accountId: selectedAccount?.id,
             })
           }
@@ -1688,6 +1762,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               onAddReconcilingItem={handleAddReconcilingItem}
               onDeleteLineItem={handleDeleteLineItem}
               onOpenExportModal={handleOpenExportModal}
+              onOpenEmailModal={handleOpenEmailModal}
               isReadOnly={isOperationalReadOnly}
             />
           )}
@@ -1798,6 +1873,9 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
               closedReconciliations={data.closedReconciliations}
               openPeriod={data.openPeriod}
               isReadOnly={permissions.isReadOnly}
+              accessToken={accessToken}
+              onReconnectWorkspace={onReconnectWorkspace}
+              onInvalidateWorkspaceToken={onInvalidateWorkspaceToken}
               onRequestOpenReconciliation={handleRequestOpenReconciliation}
               onRequestCloseCurrent={() => setIsCloseModalOpen(true)}
               onGoToCentroCuadre={() => setActiveTab('resumen')}
@@ -1822,6 +1900,25 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
           onExecuteExcel={handleExecuteExportExcel}
           onExecutePdf={handleExecuteExportPdf}
           onOpenPdfPreview={handleOpenBatchPrintPreview}
+        />
+      )}
+
+      {/* Direct Gmail Sending Modal (PDF / Excel / Both · Individual / Company / All / Selection) */}
+      {emailModalConfig && (
+        <BankEmailModal
+          isOpen={true}
+          onClose={() => setEmailModalConfig(null)}
+          title="Enviar Conciliaciones por Correo (Gmail)"
+          subtitle={`${effectiveMonth} · ${activePeriodExportItems.length} cuenta(s) bancaria(s) disponibles`}
+          items={activePeriodExportItems}
+          initialAccountId={emailModalConfig.accountId || selectedAccount?.id}
+          initialSocietyKey={emailModalConfig.societyKey || 'ALL'}
+          buildExcelBytes={buildActivePeriodExcelBytes}
+          buildPdfBytes={buildActivePeriodPdfBytes}
+          accessToken={accessToken}
+          onReconnectWorkspace={onReconnectWorkspace}
+          onInvalidateWorkspaceToken={onInvalidateWorkspaceToken}
+          onSentSuccess={(msg) => showFeedback('success', msg)}
         />
       )}
 

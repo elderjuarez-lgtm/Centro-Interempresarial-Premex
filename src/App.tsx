@@ -74,6 +74,7 @@ import {
   resolveViaticosConsultantScope,
 } from './utils/viaticos';
 import {
+  DEFAULT_START_PERIOD,
   INITIAL_ACTIVITY_SOCIETIES,
   INITIAL_ACTIVITY_RESPONSIBLES,
   INITIAL_ACTIVITY_TEMPLATES,
@@ -546,11 +547,11 @@ function loadInitialActivitiesWorkspace(): ActivitiesWorkspaceData {
   const savedPeriod = (() => {
     try {
       const raw = localStorage.getItem(ACTIVITIES_STORAGE_KEYS.PERIOD);
-      if (raw && /^\d{4}-\d{2}$/.test(raw)) return raw;
+      if (raw && /^\d{4}-\d{2}$/.test(raw) && raw >= DEFAULT_START_PERIOD) return raw;
     } catch {
       // ignore
     }
-    return getCurrentPeriodKey();
+    return DEFAULT_START_PERIOD;
   })();
 
   const rawSocieties = readJsonStorage<ActivitySociety[]>(
@@ -594,11 +595,10 @@ function loadInitialActivitiesWorkspace(): ActivitiesWorkspaceData {
     responsibles: responsibles.length > 0 ? responsibles : INITIAL_ACTIVITY_RESPONSIBLES,
     activities,
     executions: executions && typeof executions === 'object' ? executions : {},
-    notificationRecipients:
-      notificationRecipients.length > 0
-        ? notificationRecipients
-        : INITIAL_ACTIVITY_NOTIFICATION_RECIPIENTS,
-    notifyAdminsAutomatically: settings.notifyAdminsAutomatically !== false,
+    notificationRecipients: Array.isArray(notificationRecipients)
+      ? notificationRecipients
+      : INITIAL_ACTIVITY_NOTIFICATION_RECIPIENTS,
+    notifyAdminsAutomatically: false,
     subtleReminderDaysBefore:
       typeof settings.subtleReminderDaysBefore === 'number'
         ? settings.subtleReminderDaysBefore
@@ -739,8 +739,12 @@ export default function App() {
   const [viaticosWorkspace, setViaticosWorkspace] = useState<ViaticosWorkspaceData>(() =>
     loadInitialViaticosWorkspace()
   );
+  const viaticosWorkspaceRef = useRef<ViaticosWorkspaceData>(viaticosWorkspace);
+  viaticosWorkspaceRef.current = viaticosWorkspace;
   const viaticosUnsavedRef = useRef<boolean>(false);
   viaticosUnsavedRef.current = viaticosWorkspace.hasUnsavedChanges;
+  const viaticosMutationSeqRef = useRef<number>(0);
+  const viaticosSyncInFlightRef = useRef<boolean>(false);
 
   // Panel de Actividades module workspace state
   const [activitiesWorkspace, setActivitiesWorkspace] = useState<ActivitiesWorkspaceData>(() =>
@@ -1072,12 +1076,17 @@ export default function App() {
     markUnsaved = false
   ) => {
     if (markUnsaved && !effectivePermissions.canOperate) return;
+    if (markUnsaved) {
+      viaticosMutationSeqRef.current += 1;
+    }
     setViaticosWorkspace((prev) => {
       const next = updater(prev);
-      return {
+      const nextState: ViaticosWorkspaceData = {
         ...next,
         hasUnsavedChanges: markUnsaved ? true : next.hasUnsavedChanges,
       };
+      viaticosWorkspaceRef.current = nextState;
+      return nextState;
     });
   };
 
@@ -1356,7 +1365,7 @@ export default function App() {
       viaticosWorkspace.docId,
       (savedDoc) => {
         if (!savedDoc) return;
-        if (viaticosUnsavedRef.current) return;
+        if (viaticosUnsavedRef.current || viaticosSyncInFlightRef.current) return;
         setViaticosWorkspace((prev) => ({
           ...prev,
           consultores:
@@ -1431,23 +1440,30 @@ export default function App() {
       (savedDoc) => {
         if (!savedDoc) return;
         if (activitiesUnsavedRef.current) return;
-        setActivitiesWorkspace((prev) => ({
-          ...prev,
-          selectedPeriod: savedDoc.selectedPeriod || prev.selectedPeriod,
-          societies: savedDoc.societies.length > 0 ? savedDoc.societies : prev.societies,
-          responsibles:
-            savedDoc.responsibles.length > 0 ? savedDoc.responsibles : prev.responsibles,
-          activities: savedDoc.activities.length > 0 ? savedDoc.activities : prev.activities,
-          executions: savedDoc.executions || prev.executions,
-          notificationRecipients:
-            savedDoc.notificationRecipients.length > 0
+        setActivitiesWorkspace((prev) => {
+          const normalizedPeriod =
+            savedDoc.selectedPeriod && savedDoc.selectedPeriod >= DEFAULT_START_PERIOD
+              ? savedDoc.selectedPeriod
+              : prev.selectedPeriod >= DEFAULT_START_PERIOD
+              ? prev.selectedPeriod
+              : DEFAULT_START_PERIOD;
+          return {
+            ...prev,
+            selectedPeriod: normalizedPeriod,
+            societies: savedDoc.societies.length > 0 ? savedDoc.societies : prev.societies,
+            responsibles:
+              savedDoc.responsibles.length > 0 ? savedDoc.responsibles : prev.responsibles,
+            activities: savedDoc.activities.length > 0 ? savedDoc.activities : prev.activities,
+            executions: savedDoc.executions || prev.executions,
+            notificationRecipients: Array.isArray(savedDoc.notificationRecipients)
               ? savedDoc.notificationRecipients
               : prev.notificationRecipients,
-          notifyAdminsAutomatically: savedDoc.notifyAdminsAutomatically,
-          subtleReminderDaysBefore: savedDoc.subtleReminderDaysBefore,
-          lastSavedAtIso: savedDoc.updatedAtIso || new Date().toISOString(),
-          hasUnsavedChanges: false,
-        }));
+            notifyAdminsAutomatically: false,
+            subtleReminderDaysBefore: savedDoc.subtleReminderDaysBefore,
+            lastSavedAtIso: savedDoc.updatedAtIso || new Date().toISOString(),
+            hasUnsavedChanges: false,
+          };
+        });
       },
       (err) => {
         console.warn('Error loading cloud Panel de Actividades:', err);
@@ -1653,32 +1669,44 @@ export default function App() {
         'Tu perfil tiene permisos de Solo Consulta y no puede guardar cambios en la nube.'
       );
     }
-    const source = overrideData || viaticosWorkspace;
-    const result = await saveViaticosWorkspaceToCloud({
-      targetId: source.docId,
-      title: 'Liquidación de Viáticos Premex',
-      activeLiquidationId: source.activeLiquidationId,
-      consultores: source.consultores,
-      liquidaciones: source.liquidaciones,
-    });
-    setViaticosWorkspace((prev) => ({
-      ...prev,
-      docId: result.id,
-      lastSavedAtIso: result.updatedAtIso,
-      hasUnsavedChanges: false,
-    }));
+    const seqAtStart = viaticosMutationSeqRef.current;
+    const source = overrideData || viaticosWorkspaceRef.current;
+    viaticosSyncInFlightRef.current = true;
+    try {
+      const result = await saveViaticosWorkspaceToCloud({
+        targetId: source.docId,
+        title: 'Liquidación de Viáticos Premex',
+        activeLiquidationId: source.activeLiquidationId,
+        consultores: source.consultores,
+        liquidaciones: source.liquidaciones,
+      });
+      setViaticosWorkspace((prev) => {
+        const hasNewerMutations = viaticosMutationSeqRef.current !== seqAtStart;
+        const nextState: ViaticosWorkspaceData = {
+          ...prev,
+          docId: result.id,
+          lastSavedAtIso: result.updatedAtIso,
+          hasUnsavedChanges: hasNewerMutations ? prev.hasUnsavedChanges : false,
+        };
+        viaticosWorkspaceRef.current = nextState;
+        return nextState;
+      });
+    } finally {
+      viaticosSyncInFlightRef.current = false;
+    }
   };
 
   const handleSaveActivitiesToCloud = async (patch?: {
     executionPatches?: Record<string, ActivityExecutionRecord>;
     lastGoogleTasksSyncIso?: string;
+    overrideWorkspace?: ActivitiesWorkspaceData;
   }) => {
     if (!effectivePermissions.canOperate) {
       throw new Error(
         'Tu perfil tiene permisos de Solo Consulta y no puede guardar cambios en la nube.'
       );
     }
-    const base = activitiesWorkspaceRef.current;
+    const base = patch?.overrideWorkspace || activitiesWorkspaceRef.current;
     const mergedExecutions = patch?.executionPatches
       ? { ...base.executions, ...patch.executionPatches }
       : base.executions;
@@ -1694,19 +1722,24 @@ export default function App() {
         activities: base.activities,
         executions: mergedExecutions,
         notificationRecipients: base.notificationRecipients,
-        notifyAdminsAutomatically: base.notifyAdminsAutomatically,
+        notifyAdminsAutomatically: false,
         subtleReminderDaysBefore: base.subtleReminderDaysBefore,
       });
-      setActivitiesWorkspace((prev) => ({
-        ...prev,
-        docId: result.id,
-        executions: patch?.executionPatches
-          ? { ...prev.executions, ...patch.executionPatches }
-          : prev.executions,
-        lastGoogleTasksSyncIso: patch?.lastGoogleTasksSyncIso ?? prev.lastGoogleTasksSyncIso,
-        lastSavedAtIso: result.updatedAtIso,
-        hasUnsavedChanges: false,
-      }));
+      setActivitiesWorkspace((prev) => {
+        const nextBase = patch?.overrideWorkspace ? patch.overrideWorkspace : prev;
+        const nextState: ActivitiesWorkspaceData = {
+          ...nextBase,
+          docId: result.id,
+          executions: patch?.executionPatches
+            ? { ...nextBase.executions, ...patch.executionPatches }
+            : nextBase.executions,
+          lastGoogleTasksSyncIso: patch?.lastGoogleTasksSyncIso ?? nextBase.lastGoogleTasksSyncIso,
+          lastSavedAtIso: result.updatedAtIso,
+          hasUnsavedChanges: false,
+        };
+        activitiesWorkspaceRef.current = nextState;
+        return nextState;
+      });
     } finally {
       setIsSavingActivitiesCloud(false);
     }
@@ -2886,11 +2919,14 @@ export default function App() {
             onUpdateData={handleUpdateBankWorkspace}
             onSaveToCloud={handleSaveBankToCloud}
             currentUser={currentUser}
+            accessToken={accessToken}
             onSignInWithGoogle={() => {
               handleSignInWithGoogle().catch((err) => {
                 console.error('Google sign in failed:', err);
               });
             }}
+            onReconnectWorkspace={handleReconnectGoogleWorkspace}
+            onInvalidateWorkspaceToken={() => setAccessToken(null)}
             onSignOut={handleSignOut}
             onSwitchModule={handleSwitchModule}
             permissions={effectivePermissions}

@@ -11,7 +11,12 @@ import {
   EffectivePermissions,
   UserPermissionRecord,
 } from '../types';
-import { SUPER_ADMIN_EMAIL, normalizeEmail } from './permissions';
+import { normalizeEmail } from './permissions';
+
+export const DEFAULT_START_PERIOD = '2026-11';
+export const AUTO_ACTIVATION_DAY = 15;
+export const CLOSURE_ACTIVITY_ID = '__CLOSURE_CONFIRMATION__';
+export const CLOSURE_SOCIETY_CODE = 'CIERRE';
 
 export const ACTIVITY_PERIODICITY_OPTIONS: { value: ActivityPeriodicity; label: string }[] = [
   { value: 'MENSUAL', label: 'Mensual' },
@@ -58,6 +63,7 @@ export const normalizeActivityTemplate = (template: ActivityTemplate): ActivityT
   return {
     ...template,
     responsablesPorSociedad: cleanMap,
+    ...(template.aplicarATodosResponsables ? { aplicarATodosResponsables: true } : {}),
   };
 };
 
@@ -296,15 +302,7 @@ export const INITIAL_ACTIVITY_TEMPLATES: ActivityTemplate[] = [
   },
 ];
 
-export const INITIAL_ACTIVITY_NOTIFICATION_RECIPIENTS: ActivityNotificationRecipient[] = [
-  {
-    id: 'notif-admin-principal',
-    nombre: 'Elder Juárez',
-    email: SUPER_ADMIN_EMAIL,
-    tipo: 'administrador',
-    activo: true,
-  },
-];
+export const INITIAL_ACTIVITY_NOTIFICATION_RECIPIENTS: ActivityNotificationRecipient[] = [];
 
 const MONTHS_ES = [
   'Enero',
@@ -325,7 +323,8 @@ export const getCurrentPeriodKey = (): string => {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  const current = `${y}-${m}`;
+  return current < DEFAULT_START_PERIOD ? DEFAULT_START_PERIOD : current;
 };
 
 export const formatPeriodLabel = (periodKey: string): string => {
@@ -338,18 +337,68 @@ export const formatPeriodLabel = (periodKey: string): string => {
 };
 
 export const buildRecentPeriodOptions = (
-  centerPeriodKey?: string
+  selectedPeriodKey?: string
 ): { key: string; label: string }[] => {
-  const base = /^(\d{4})-(\d{2})$/.exec(centerPeriodKey || getCurrentPeriodKey());
-  const baseYear = base ? Number(base[1]) : new Date().getFullYear();
-  const baseMonth = base ? Number(base[2]) - 1 : new Date().getMonth();
+  const startMatch = /^(\d{4})-(\d{2})$/.exec(DEFAULT_START_PERIOD);
+  const startYear = startMatch ? Number(startMatch[1]) : 2026;
+  const startMonth = startMatch ? Number(startMatch[2]) - 1 : 10; // Nov 2026
+
   const options: { key: string; label: string }[] = [];
-  for (let offset = -5; offset <= 6; offset++) {
-    const d = new Date(baseYear, baseMonth + offset, 1);
+  const seen = new Set<string>();
+
+  // Always start from Noviembre 2026 forward (14 months: Nov 2026 -> Dic 2027)
+  for (let offset = 0; offset < 14; offset++) {
+    const d = new Date(startYear, startMonth + offset, 1);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    seen.add(key);
     options.push({ key, label: formatPeriodLabel(key) });
   }
+
+  // Ensure the currently selected period is always present even if beyond Dec 2027
+  if (selectedPeriodKey && /^\d{4}-\d{2}$/.test(selectedPeriodKey) && !seen.has(selectedPeriodKey)) {
+    options.push({ key: selectedPeriodKey, label: formatPeriodLabel(selectedPeriodKey) });
+    options.sort((a, b) => a.key.localeCompare(b.key));
+  }
+
   return options;
+};
+
+export interface PeriodActivationStatus {
+  isActive: boolean;
+  activationDateIso: string;
+  daysUntilActivation: number;
+  statusLabel: string;
+}
+
+/**
+ * Evaluates the automatic monthly day-15 activation rule for a given YYYY-MM period.
+ */
+export const getPeriodActivationStatus = (
+  periodKey: string,
+  referenceDate: Date = new Date()
+): PeriodActivationStatus => {
+  const activationDateIso = computeSuggestedDateForPeriod(periodKey, AUTO_ACTIVATION_DAY);
+  const todayYmd = `${referenceDate.getFullYear()}-${String(referenceDate.getMonth() + 1).padStart(
+    2,
+    '0'
+  )}-${String(referenceDate.getDate()).padStart(2, '0')}`;
+  const todayDt = new Date(`${todayYmd}T00:00:00`);
+  const actDt = new Date(`${activationDateIso}T00:00:00`);
+  const diffDays = Number.isNaN(actDt.getTime())
+    ? 0
+    : Math.round((actDt.getTime() - todayDt.getTime()) / (1000 * 60 * 60 * 24));
+  const isActive = diffDays <= 0;
+
+  return {
+    isActive,
+    activationDateIso,
+    daysUntilActivation: Math.max(0, diffDays),
+    statusLabel: isActive
+      ? `Activación día 15 activa (desde ${formatShortDateEs(activationDateIso)})`
+      : `Se activa automáticamente el ${formatShortDateEs(activationDateIso)} (en ${diffDays} ${
+          diffDays === 1 ? 'día' : 'días'
+        })`,
+  };
 };
 
 export const makeExecutionId = (
@@ -357,6 +406,27 @@ export const makeExecutionId = (
   activityId: string,
   societyCode: string
 ): string => `${periodKey}__${activityId}__${societyCode}`;
+
+export const makeClosureExecutionId = (periodKey: string, userEmail: string): string =>
+  `closure__${periodKey}__${emailToTaskMapKey(userEmail) || 'general'}`;
+
+export const isClosureExecutionId = (executionId?: string | null): boolean =>
+  String(executionId || '').startsWith('closure__');
+
+/**
+ * Resets the Activities workspace to start fresh at Noviembre 2026 while preserving
+ * all configured societies, responsibles, activities, and notification recipients.
+ */
+export const buildResetToNov2026Workspace = (
+  prev: ActivitiesWorkspaceData
+): ActivitiesWorkspaceData => ({
+  ...prev,
+  selectedPeriod: DEFAULT_START_PERIOD,
+  executions: {},
+  notifyAdminsAutomatically: false,
+  lastGoogleTasksSyncIso: null,
+  hasUnsavedChanges: true,
+});
 
 export const computeSuggestedDateForPeriod = (
   periodKey: string,
@@ -441,6 +511,10 @@ export interface MaterializedActivityAssignment {
   execution: ActivityExecutionRecord;
   trafficLight: ActivityTrafficLight;
   daysLeft: number;
+  /** True when auto-activated for all responsibles without manual cell assignment */
+  isAutoAssignedAll?: boolean;
+  /** True when the period has reached or passed the automatic day-15 activation date */
+  isPeriodActivated?: boolean;
 }
 
 export const assignmentIncludesEmail = (
@@ -513,8 +587,37 @@ export const withUpdatedGoogleTaskLink = (
 };
 
 /**
+ * Resolves effective responsible IDs for a given activity × society cell.
+ * - If `aplicarATodosResponsables` is enabled OR the activity has no manual society assignments,
+ *   tasks automatically activate for all active responsibles of the society (or all active
+ *   responsibles in the catalog if the society has none) without requiring manual per-cell assignment.
+ * - Otherwise uses the explicit multi-user assignment configured for that society.
+ */
+export const getEffectiveResponsibleIdsForCell = (
+  activity: ActivityTemplate,
+  society: ActivitySociety,
+  allActiveResponsibleIds: string[]
+): { ids: string[]; isAutoAssignedAll: boolean } => {
+  const explicitIds = normalizeResponsibleIds(activity.responsablesPorSociedad?.[society.codigo]);
+  const hasAnyManualAssignment = Object.values(activity.responsablesPorSociedad || {}).some(
+    (val) => normalizeResponsibleIds(val).length > 0
+  );
+
+  if (activity.aplicarATodosResponsables || !hasAnyManualAssignment) {
+    const societyDefaultIds = normalizeResponsibleIds(society.responsablesIds).filter((id) =>
+      allActiveResponsibleIds.includes(id)
+    );
+    const baseIds = societyDefaultIds.length > 0 ? societyDefaultIds : allActiveResponsibleIds;
+    const merged = normalizeResponsibleIds([...explicitIds, ...baseIds]);
+    return { ids: merged, isAutoAssignedAll: true };
+  }
+
+  return { ids: explicitIds, isAutoAssignedAll: false };
+};
+
+/**
  * Resolves all active activity × society assignments for a given period,
- * supporting one or multiple responsibles per society cell.
+ * supporting one or multiple responsibles per society cell and automatic day-15 activation.
  */
 export const materializePeriodAssignments = (
   data: Pick<
@@ -524,7 +627,11 @@ export const materializePeriodAssignments = (
   periodOverride?: string
 ): MaterializedActivityAssignment[] => {
   const periodKey = periodOverride || data.selectedPeriod || getCurrentPeriodKey();
+  const activationStatus = getPeriodActivationStatus(periodKey);
   const respById = new Map(data.responsibles.map((r) => [r.id, r]));
+  const allActiveResponsibleIds = data.responsibles
+    .filter((r) => r.activo)
+    .map((r) => r.id);
   const activeSocieties = data.societies.filter((s) => s.activa);
   const results: MaterializedActivityAssignment[] = [];
 
@@ -532,7 +639,11 @@ export const materializePeriodAssignments = (
     .filter((a) => a.activa)
     .forEach((activity) => {
       activeSocieties.forEach((society) => {
-        const respIds = normalizeResponsibleIds(activity.responsablesPorSociedad[society.codigo]);
+        const { ids: respIds, isAutoAssignedAll } = getEffectiveResponsibleIdsForCell(
+          activity,
+          society,
+          allActiveResponsibleIds
+        );
         if (respIds.length === 0) return;
 
         const resolvedResponsibles = respIds
@@ -586,6 +697,8 @@ export const materializePeriodAssignments = (
           execution,
           trafficLight,
           daysLeft,
+          isAutoAssignedAll,
+          isPeriodActivated: activationStatus.isActive,
         });
       });
     });
@@ -597,7 +710,7 @@ export const materializePeriodAssignments = (
  * Enforces catalog-email-based visibility for non-administrators:
  * - Administrators see the complete workspace (all societies, activities, responsibles).
  * - Non-admin users see ONLY the societies and activities assigned to their email in the catalog
- *   (intersected with any explicit RBAC company restriction if configured).
+ *   (including auto-activated activities on their societies, intersected with RBAC company scope if configured).
  */
 export const filterActivitiesWorkspaceForUser = (
   data: ActivitiesWorkspaceData,
@@ -625,6 +738,11 @@ export const filterActivitiesWorkspaceForUser = (
     };
   }
 
+  const allActiveResponsibleIds = data.responsibles
+    .filter((r) => r.activo)
+    .map((r) => r.id);
+  const activeSocieties = data.societies.filter((s) => s.activa);
+
   const hasExplicitCompanyRestriction =
     permissions.getModuleCompanyScope('actividades') === 'selected';
 
@@ -632,16 +750,15 @@ export const filterActivitiesWorkspaceForUser = (
   data.activities
     .filter((a) => a.activa)
     .forEach((act) => {
-      Object.entries(act.responsablesPorSociedad || {}).forEach(([socCode, val]) => {
-        const ids = normalizeResponsibleIds(val);
+      activeSocieties.forEach((soc) => {
+        const { ids } = getEffectiveResponsibleIdsForCell(act, soc, allActiveResponsibleIds);
         if (ids.some((id) => matchedRespIds.has(id))) {
-          societyCodesFromActivities.add(socCode.trim().toUpperCase());
+          societyCodesFromActivities.add(soc.codigo.trim().toUpperCase());
         }
       });
     });
 
-  const visibleSocieties = data.societies.filter((soc) => {
-    if (!soc.activa) return false;
+  const visibleSocieties = activeSocieties.filter((soc) => {
     const assignedOnSociety = normalizeResponsibleIds(soc.responsablesIds).some((id) =>
       matchedRespIds.has(id)
     );
@@ -657,23 +774,21 @@ export const filterActivitiesWorkspaceForUser = (
     return true;
   });
 
-  const visibleSocietyCodeSet = new Set(visibleSocieties.map((s) => s.codigo));
-
   const visibleActivities: ActivityTemplate[] = [];
   data.activities
     .filter((a) => a.activa)
     .forEach((act) => {
       const prunedMap: Record<string, string[]> = {};
-      Object.entries(act.responsablesPorSociedad || {}).forEach(([socCode, val]) => {
-        if (!visibleSocietyCodeSet.has(socCode)) return;
-        const ids = normalizeResponsibleIds(val);
+      visibleSocieties.forEach((soc) => {
+        const { ids } = getEffectiveResponsibleIdsForCell(act, soc, allActiveResponsibleIds);
         if (ids.some((id) => matchedRespIds.has(id))) {
-          prunedMap[socCode] = ids;
+          prunedMap[soc.codigo] = ids;
         }
       });
       if (Object.keys(prunedMap).length > 0) {
         visibleActivities.push({
           ...act,
+          aplicarATodosResponsables: false,
           responsablesPorSociedad: prunedMap,
         });
       }
@@ -686,14 +801,68 @@ export const filterActivitiesWorkspaceForUser = (
   };
 };
 
+/**
+ * Collects all deduplicated notification emails configured on one or more responsibles (`notificarA`).
+ */
+export const collectResponsibleNotifyEmails = (
+  responsibles: ActivityResponsible[]
+): string[] => {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  responsibles.forEach((resp) => {
+    (resp.notificarA || []).forEach((raw) => {
+      const em = normalizeEmail(raw);
+      if (em && em.includes('@') && !seen.has(em)) {
+        seen.add(em);
+        out.push(em);
+      }
+    });
+  });
+  return out;
+};
+
+/**
+ * Resolves completion/closure notification recipients strictly from explicitly configured lists:
+ * 1. Custom per-responsible recipients (`responsible.notificarA`),
+ * 2. Explicitly added recipients in the Panel de Actividades recipients list (`notificationRecipients`),
+ * 3. Optional activity-level extra recipients (`activity.notificarAdicionales`).
+ * Never depends on whether a user holds Administrator permissions.
+ */
 export const resolveCompletionNotificationRecipients = (params: {
   notificationRecipients: ActivityNotificationRecipient[];
-  notifyAdminsAutomatically: boolean;
-  suitePermissionRecords: UserPermissionRecord[];
+  responsibleNotifyEmails?: string[];
+  allResponsibles?: ActivityResponsible[];
   activityExtraEmails?: string[];
+  /** Deprecated — ignored; notifications no longer depend on admin permissions */
+  notifyAdminsAutomatically?: boolean;
+  /** Deprecated — ignored; notifications no longer depend on admin permissions */
+  suitePermissionRecords?: UserPermissionRecord[];
 }): { email: string; nombre: string; origen: string }[] => {
   const byEmail = new Map<string, { email: string; nombre: string; origen: string }>();
 
+  const nameByEmail = new Map<string, string>();
+  (params.allResponsibles || []).forEach((r) => {
+    const em = normalizeEmail(r.email);
+    if (em && r.nombre) nameByEmail.set(em, r.nombre);
+  });
+  params.notificationRecipients.forEach((r) => {
+    const em = normalizeEmail(r.email);
+    if (em && r.nombre) nameByEmail.set(em, r.nombre);
+  });
+
+  // 1. Per-responsible configured recipients ("Notificar a" on the user)
+  (params.responsibleNotifyEmails || []).forEach((raw) => {
+    const em = normalizeEmail(raw);
+    if (em && em.includes('@') && !byEmail.has(em)) {
+      byEmail.set(em, {
+        email: em,
+        nombre: nameByEmail.get(em) || em,
+        origen: 'Destinatario del responsable',
+      });
+    }
+  });
+
+  // 2. Explicitly added general recipients (independent of admin permissions)
   params.notificationRecipients
     .filter((r) => r.activo && r.email && r.email.includes('@'))
     .forEach((r) => {
@@ -702,40 +871,18 @@ export const resolveCompletionNotificationRecipients = (params: {
         byEmail.set(em, {
           email: em,
           nombre: r.nombre || em,
-          origen: r.tipo === 'administrador' ? 'Administrador' : 'Lista designada',
+          origen: 'Destinatario agregado',
         });
       }
     });
 
-  if (params.notifyAdminsAutomatically) {
-    params.suitePermissionRecords
-      .filter((u) => u.active && u.role === 'admin' && u.email && u.email.includes('@'))
-      .forEach((u) => {
-        const em = normalizeEmail(u.email);
-        if (!byEmail.has(em)) {
-          byEmail.set(em, {
-            email: em,
-            nombre: u.displayName || em,
-            origen: 'Admin Suite Premex',
-          });
-        }
-      });
-
-    if (!byEmail.has(SUPER_ADMIN_EMAIL)) {
-      byEmail.set(SUPER_ADMIN_EMAIL, {
-        email: SUPER_ADMIN_EMAIL,
-        nombre: 'Administrador Principal Premex',
-        origen: 'Admin Suite Premex',
-      });
-    }
-  }
-
+  // 3. Optional activity-specific recipients
   (params.activityExtraEmails || []).forEach((raw) => {
     const em = normalizeEmail(raw);
     if (em && em.includes('@') && !byEmail.has(em)) {
       byEmail.set(em, {
         email: em,
-        nombre: em,
+        nombre: nameByEmail.get(em) || em,
         origen: 'Destinatario de actividad',
       });
     }
@@ -750,6 +897,9 @@ export const exportActivitiesMatrixToExcel = (
 ): void => {
   const activeSocieties = data.societies.filter((s) => s.activa);
   const respById = new Map(data.responsibles.map((r) => [r.id, r]));
+  const allActiveResponsibleIds = data.responsibles
+    .filter((r) => r.activo)
+    .map((r) => r.id);
   const assignMap = new Map(assignments.map((a) => [a.executionId, a]));
   const periodLabel = formatPeriodLabel(data.selectedPeriod);
 
@@ -777,7 +927,11 @@ export const exportActivitiesMatrixToExcel = (
         formatShortDateEs(defaultDate),
       ];
       activeSocieties.forEach((soc) => {
-        const respIds = normalizeResponsibleIds(act.responsablesPorSociedad[soc.codigo]);
+        const { ids: respIds } = getEffectiveResponsibleIdsForCell(
+          act,
+          soc,
+          allActiveResponsibleIds
+        );
         if (respIds.length === 0) {
           row.push('');
           return;

@@ -10,6 +10,7 @@ import {
   Loader2,
   ChevronRight,
   Printer,
+  Send,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { ActiveModuleId, BankAccount, BankTab, EffectivePermissions } from '../../types';
@@ -27,6 +28,7 @@ interface BankHeaderProps {
   closedPeriodKeys: Set<string>;
   onOpenPrintPreview: () => void;
   onExportExcel: () => void;
+  onOpenEmailModal: () => void;
   onSaveCloud: () => void;
   isSavingCloud: boolean;
   hasUnsavedChanges: boolean;
@@ -57,6 +59,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
   closedPeriodKeys,
   onOpenPrintPreview,
   onExportExcel,
+  onOpenEmailModal,
   onSaveCloud,
   isSavingCloud,
   hasUnsavedChanges,
@@ -191,6 +194,19 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
             <Download className="w-3.5 h-3.5 text-teal-700" />
             <span className="hidden xl:inline">Excel Entregable</span>
             <span className="xl:hidden">Excel</span>
+          </button>
+
+          {/* Send Reconciliation by Email (Gmail) */}
+          <button
+            type="button"
+            onClick={onOpenEmailModal}
+            disabled={accounts.length === 0}
+            className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 disabled:opacity-40 border border-sky-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            title="Enviar conciliación por correo Gmail (PDF o Excel · Individual, por empresa, todas o selección)"
+          >
+            <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
+            <span className="hidden xl:inline">Enviar Correo</span>
+            <span className="hidden sm:inline xl:hidden">Correo</span>
           </button>
 
           {/* Save Cloud (hidden for Solo Consulta) */}

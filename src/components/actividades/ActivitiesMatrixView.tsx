@@ -20,15 +20,18 @@ import {
   exportActivitiesMatrixToExcel,
   formatPeriodLabel,
   formatShortDateEs,
+  getEffectiveResponsibleIdsForCell,
   getGoogleTaskLinkForEmail,
+  getPeriodActivationStatus,
   hasAnyGoogleTaskLink,
   makeExecutionId,
-  normalizeResponsibleIds,
 } from '../../utils/activities';
+import { PeriodClosureStatus } from './ActivitiesExecutionListView';
 
 interface ActivitiesMatrixViewProps {
   data: ActivitiesWorkspaceData;
   assignments: MaterializedActivityAssignment[];
+  closureStatus: PeriodClosureStatus;
   currentUserEmail?: string | null;
   hasWorkspaceToken: boolean;
   isConnectingWorkspace: boolean;
@@ -38,12 +41,18 @@ interface ActivitiesMatrixViewProps {
   onSelectAssignment: (assignment: MaterializedActivityAssignment) => void;
   onOpenNewActivity: () => void;
   onConnectWorkspace: () => void;
-  onRequestEnableGoogleTasks: (items: MaterializedActivityAssignment[], scopeLabel: string) => void;
+  onRequestEnableGoogleTasks: (
+    items: MaterializedActivityAssignment[],
+    scopeLabel: string,
+    includeClosureTask?: boolean
+  ) => void;
+  onRequestSyncClosureTask: () => void;
 }
 
 export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
   data,
   assignments,
+  closureStatus,
   currentUserEmail,
   hasWorkspaceToken,
   isConnectingWorkspace,
@@ -54,6 +63,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
   onOpenNewActivity,
   onConnectWorkspace,
   onRequestEnableGoogleTasks,
+  onRequestSyncClosureTask,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [periodicityFilter, setPeriodicityFilter] = useState<'ALL' | ActivityPeriodicity>('ALL');
@@ -62,6 +72,16 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
   const activeSocieties = useMemo(
     () => data.societies.filter((s) => s.activa),
     [data.societies]
+  );
+
+  const allActiveResponsibleIds = useMemo(
+    () => data.responsibles.filter((r) => r.activo).map((r) => r.id),
+    [data.responsibles]
+  );
+
+  const periodActivation = useMemo(
+    () => getPeriodActivationStatus(data.selectedPeriod),
+    [data.selectedPeriod]
   );
 
   const assignmentByExecId = useMemo(
@@ -75,9 +95,10 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
       if (!act.activa) return false;
       if (periodicityFilter !== 'ALL' && act.periodicidad !== periodicityFilter) return false;
       if (isAdmin && responsibleFilter !== 'ALL') {
-        const hasResp = Object.values(act.responsablesPorSociedad).some((val) =>
-          normalizeResponsibleIds(val).includes(responsibleFilter)
-        );
+        const hasResp = activeSocieties.some((soc) => {
+          const { ids } = getEffectiveResponsibleIdsForCell(act, soc, allActiveResponsibleIds);
+          return ids.includes(responsibleFilter);
+        });
         if (!hasResp) return false;
       }
       if (q) {
@@ -87,7 +108,15 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
       }
       return true;
     });
-  }, [data.activities, searchQuery, periodicityFilter, responsibleFilter, isAdmin]);
+  }, [
+    data.activities,
+    searchQuery,
+    periodicityFilter,
+    responsibleFilter,
+    isAdmin,
+    activeSocieties,
+    allActiveResponsibleIds,
+  ]);
 
   const kpis = useMemo(() => {
     const total = assignments.length;
@@ -123,8 +152,18 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
       <section className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-[#0F766E]">
-              {formatPeriodLabel(data.selectedPeriod)}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#0F766E]">
+                {formatPeriodLabel(data.selectedPeriod)}
+              </span>
+              <span className="text-slate-300">·</span>
+              <span
+                className={`text-[11px] font-semibold ${
+                  periodActivation.isActive ? 'text-emerald-700' : 'text-slate-500'
+                }`}
+              >
+                {periodActivation.statusLabel}
+              </span>
             </div>
             <h3 className="text-lg font-extrabold text-slate-900 tracking-tight mt-0.5">
               {isAdmin
@@ -207,60 +246,90 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
         </div>
       </section>
 
-      {/* Google Session or Unlinked Google Tasks Quick Action Strip */}
-      {canOperate && (!hasWorkspaceToken || pendingForTasksEnable.items.length > 0) && (
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white px-4 py-3">
-          {!hasWorkspaceToken ? (
-            <>
-              <div className="flex items-center gap-2.5 text-xs text-amber-900">
-                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                <span className="font-semibold">
-                  Activa tu sesión de Google para notificar por Gmail y sincronizar Google Tasks.
-                </span>
-              </div>
-              <button
-                type="button"
-                disabled={isConnectingWorkspace}
-                onClick={onConnectWorkspace}
-                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isConnectingWorkspace ? 'animate-spin' : ''}`} />
-                <span>Activar Gmail y Google Tasks</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-2.5 text-xs text-slate-700">
-                <ListTodo className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>
-                  <strong className="text-slate-900 tabular-nums">
-                    {pendingForTasksEnable.items.length} actividad(es)
-                  </strong>{' '}
-                  {pendingForTasksEnable.isPersonal
-                    ? 'asignada(s) pendientes por habilitar en tu Google Tasks (Gmail).'
-                    : 'pendientes por habilitar en Google Tasks (Gmail).'}
-                </span>
-              </div>
-              <button
-                type="button"
-                disabled={isSyncingGoogleTasks}
-                onClick={() =>
-                  onRequestEnableGoogleTasks(
-                    pendingForTasksEnable.items,
-                    pendingForTasksEnable.isPersonal
-                      ? 'tus actividades asignadas'
-                      : `las pendientes de ${formatPeriodLabel(data.selectedPeriod)}`
-                  )
-                }
-                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
-              >
-                <ListTodo className="w-3.5 h-3.5" />
-                <span>Habilitar en Google Tasks ({pendingForTasksEnable.items.length})</span>
-              </button>
-            </>
-          )}
-        </div>
-      )}
+      {/* Google Session or Day-15 Auto-Activation / Unlinked Google Tasks Quick Action Strip */}
+      {canOperate &&
+        (!hasWorkspaceToken ||
+          pendingForTasksEnable.items.length > 0 ||
+          (!closureStatus.isLinkedInGoogleTasks && closureStatus.totalTasks > 0)) && (
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white px-4 py-3">
+            {!hasWorkspaceToken ? (
+              <>
+                <div className="flex items-center gap-2.5 text-xs text-amber-900">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                  <span className="font-semibold">
+                    Activa tu sesión de Google para notificar por Gmail y sincronizar Google Tasks.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isConnectingWorkspace}
+                  onClick={onConnectWorkspace}
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${isConnectingWorkspace ? 'animate-spin' : ''}`}
+                  />
+                  <span>Activar Gmail y Google Tasks</span>
+                </button>
+              </>
+            ) : pendingForTasksEnable.items.length > 0 ? (
+              <>
+                <div className="flex items-center gap-2.5 text-xs text-slate-700">
+                  <ListTodo className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    {periodActivation.isActive && (
+                      <strong className="text-emerald-700">Activación día 15 · </strong>
+                    )}
+                    <strong className="text-slate-900 tabular-nums">
+                      {pendingForTasksEnable.items.length} actividad(es)
+                    </strong>{' '}
+                    {pendingForTasksEnable.isPersonal
+                      ? 'asignada(s) y tu tarea independiente de cierre listas para habilitar en Google Tasks (Gmail).'
+                      : 'pendientes y tarea independiente de cierre listas para habilitar en Google Tasks (Gmail).'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isSyncingGoogleTasks}
+                  onClick={() =>
+                    onRequestEnableGoogleTasks(
+                      pendingForTasksEnable.items,
+                      pendingForTasksEnable.isPersonal
+                        ? 'tus actividades asignadas'
+                        : `las pendientes de ${formatPeriodLabel(data.selectedPeriod)}`,
+                      true
+                    )
+                  }
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+                >
+                  <ListTodo className="w-3.5 h-3.5" />
+                  <span>
+                    Habilitar en Google Tasks ({pendingForTasksEnable.items.length} + Cierre)
+                  </span>
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2.5 text-xs text-slate-700">
+                  <ListTodo className="w-4 h-4 text-[#1E60A8] shrink-0" />
+                  <span>
+                    Habilita tu <strong className="text-slate-900">tarea independiente de cierre</strong>{' '}
+                    en Google Tasks para enviar la notificación por Gmail al concluir todas las actividades.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isSyncingGoogleTasks}
+                  onClick={onRequestSyncClosureTask}
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+                >
+                  <ListTodo className="w-3.5 h-3.5" />
+                  <span>Habilitar tarea de cierre en Tasks</span>
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
       <div className="bg-white rounded-2xl border border-slate-200/90 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
@@ -454,7 +523,11 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => onSelectAssignment(item)}
-                                title={`${item.responsibleNamesLabel} · ${displayDate}`}
+                                title={
+                                  isDone && item.execution.completadaPorNombre
+                                    ? `${item.responsibleNamesLabel} · Cumplida por ${item.execution.completadaPorNombre} (${displayDate})`
+                                    : `${item.responsibleNamesLabel} · ${displayDate}`
+                                }
                                 className={`w-full min-h-[54px] px-2.5 py-2 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${cellStyle}`}
                               >
                                 <span className="font-bold text-[12px] leading-tight line-clamp-2">

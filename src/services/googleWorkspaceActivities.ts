@@ -611,10 +611,17 @@ export interface GoogleTaskList {
 }
 
 const PREMEX_TASK_TAG_REGEX = /\[PREMEX-ACT:([^\]]+)\]/;
+const PREMEX_CLOSURE_TAG_REGEX = /\[PREMEX-CLOSURE:([^\]]+)\]/;
 
 export const extractExecutionIdFromTaskNotes = (notes?: string): string | null => {
   if (!notes) return null;
   const match = PREMEX_TASK_TAG_REGEX.exec(notes);
+  return match ? match[1].trim() : null;
+};
+
+export const extractClosureExecutionIdFromTaskNotes = (notes?: string): string | null => {
+  if (!notes) return null;
+  const match = PREMEX_CLOSURE_TAG_REGEX.exec(notes);
   return match ? match[1].trim() : null;
 };
 
@@ -720,11 +727,18 @@ const formatGoogleTaskPayload = (item: MaterializedActivityAssignment) => {
   const respSummary = item.responsibles
     .map((r) => (r.email ? `${r.nombre} (${r.email})` : r.nombre))
     .join(', ');
+  const isDone = item.execution.estado === 'realizada';
+  const doneLine = isDone
+    ? `Estado: CUMPLIDA por ${
+        item.execution.completadaPorNombre || item.execution.completadaPorEmail || 'Responsable'
+      } (${formatDateTimeEs(item.execution.completadaAtIso)})`
+    : '';
   const notes = [
     `Sociedad: ${item.society.codigo}`,
     `Periodo: ${periodLabel} (${item.activity.periodicidad})`,
     `Responsable(s): ${respSummary}`,
     `Fecha sugerida: ${formatShortDateEs(item.execution.fechaSugerida)}`,
+    doneLine,
     item.activity.descripcion ? `Detalle: ${item.activity.descripcion}` : '',
     appUrl ? `Panel Premex: ${appUrl}` : '',
     `[PREMEX-ACT:${item.executionId}]`,
@@ -732,7 +746,6 @@ const formatGoogleTaskPayload = (item: MaterializedActivityAssignment) => {
     .filter(Boolean)
     .join('\n');
 
-  const isDone = item.execution.estado === 'realizada';
   return {
     title,
     notes,
@@ -953,4 +966,336 @@ export const syncSingleActivityToGoogleTasks = async (params: {
   }
   const created = (await createRes.json()) as GoogleTaskItem;
   return { taskId: created.id, taskListId: defaultList.id };
+};
+
+/**
+ * Creates or updates the independent monthly closure confirmation task in Google Tasks
+ * (`[CIERRE] Confirmar cumplimiento total de actividades · {periodLabel}`).
+ * When checked off in Gmail Tasks (or in the Panel), the app triggers the Gmail closure notification.
+ * Caller MUST obtain explicit user confirmation before invoking this function.
+ */
+export const syncClosureConfirmationTaskToGoogleTasks = async (params: {
+  closureExecutionId: string;
+  periodKey: string;
+  userName: string;
+  userEmail: string;
+  totalTasks: number;
+  completedTasks: number;
+  pendingTasks: number;
+  dueDateYmd: string;
+  recipientLabels: string[];
+  status: 'needsAction' | 'completed';
+  completedAtIso?: string;
+  existingLink?: ActivityGoogleTaskLink | null;
+  accessTokenOverride?: string | null;
+}): Promise<{ taskId: string; taskListId: string; created: boolean }> => {
+  const token = await requireToken(params.accessTokenOverride);
+  const periodLabel = formatPeriodLabel(params.periodKey);
+  const appUrl = getActivitiesAppUrl();
+  const title = `[CIERRE] Confirmar cumplimiento total de actividades · ${periodLabel}`;
+  const due = `${params.dueDateYmd}T00:00:00.000Z`;
+  const recipientsSummary =
+    params.recipientLabels.length > 0
+      ? params.recipientLabels.join(', ')
+      : 'Destinatarios configurados en el panel';
+
+  const notes = [
+    `Tarea independiente de cierre de periodo · Premex`,
+    `Periodo: ${periodLabel}`,
+    `Responsable: ${params.userName}${params.userEmail ? ` (${params.userEmail})` : ''}`,
+    `Avance actual: ${params.completedTasks} de ${params.totalTasks} actividad(es) cumplida(s) (${params.pendingTasks} pendiente(s))`,
+    `Al marcar esta tarea como completada en Google Tasks se enviará la notificación de cumplimiento total por Gmail a: ${recipientsSummary}`,
+    appUrl ? `Panel Premex: ${appUrl}` : '',
+    `[PREMEX-CLOSURE:${params.closureExecutionId}]`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const payload: Record<string, unknown> =
+    params.status === 'completed'
+      ? {
+          title,
+          notes,
+          due,
+          status: 'completed',
+          completed: params.completedAtIso || new Date().toISOString(),
+        }
+      : {
+          title,
+          notes,
+          due,
+          status: 'needsAction',
+          completed: null,
+        };
+
+  // 1. Update via saved link if present
+  if (params.existingLink?.taskId && params.existingLink?.taskListId) {
+    try {
+      const res = await fetch(
+        `${TASKS_API_BASE}/lists/${encodeURIComponent(
+          params.existingLink.taskListId
+        )}/tasks/${encodeURIComponent(params.existingLink.taskId)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+      if (res.ok) {
+        const updated = (await res.json()) as GoogleTaskItem;
+        return {
+          taskId: updated.id,
+          taskListId: params.existingLink.taskListId,
+          created: false,
+        };
+      }
+      if (res.status === 401 || res.status === 403) {
+        throw await parseWorkspaceError(res, 'Google Tasks');
+      }
+    } catch (err) {
+      if (err instanceof GoogleWorkspaceAuthError) throw err;
+    }
+  }
+
+  // 2. Scan existing Gmail Tasks for matching [PREMEX-CLOSURE:{closureExecutionId}]
+  const { defaultList, tasks } = await listPremexGoogleTasks(token);
+  const matched = tasks.find(
+    (t) => extractClosureExecutionIdFromTaskNotes(t.notes) === params.closureExecutionId
+  );
+
+  if (matched && matched.taskListId) {
+    const patchRes = await fetch(
+      `${TASKS_API_BASE}/lists/${encodeURIComponent(
+        matched.taskListId
+      )}/tasks/${encodeURIComponent(matched.id)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!patchRes.ok) {
+      throw await parseWorkspaceError(patchRes, 'Google Tasks');
+    }
+    const updated = (await patchRes.json()) as GoogleTaskItem;
+    return {
+      taskId: updated.id,
+      taskListId: matched.taskListId,
+      created: false,
+    };
+  }
+
+  // 3. Create new independent closure task in default Gmail Tasks list
+  const createPayload =
+    params.status === 'completed'
+      ? { title, notes, due, status: 'completed', completed: params.completedAtIso || new Date().toISOString() }
+      : { title, notes, due, status: 'needsAction' };
+
+  const createRes = await fetch(
+    `${TASKS_API_BASE}/lists/${encodeURIComponent(defaultList.id)}/tasks`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(createPayload),
+    }
+  );
+  if (!createRes.ok) {
+    throw await parseWorkspaceError(createRes, 'Google Tasks');
+  }
+  const created = (await createRes.json()) as GoogleTaskItem;
+  return {
+    taskId: created.id,
+    taskListId: defaultList.id,
+    created: true,
+  };
+};
+
+/**
+ * Batch-completes shared multi-user Google Tasks in the current user's account
+ * when a co-responsible already marked them completed in the App or Google Tasks.
+ * Caller MUST obtain explicit user confirmation before invoking this function.
+ */
+export const completeMultipleGoogleTasksForUser = async (params: {
+  items: {
+    taskListId: string;
+    taskId: string;
+    completedAtIso?: string;
+    notes?: string;
+  }[];
+  accessTokenOverride?: string | null;
+}): Promise<number> => {
+  const token = await requireToken(params.accessTokenOverride);
+  let updatedCount = 0;
+
+  for (const entry of params.items) {
+    const body: Record<string, unknown> = {
+      status: 'completed',
+      completed: entry.completedAtIso || new Date().toISOString(),
+      ...(entry.notes ? { notes: entry.notes } : {}),
+    };
+    const res = await fetch(
+      `${TASKS_API_BASE}/lists/${encodeURIComponent(
+        entry.taskListId
+      )}/tasks/${encodeURIComponent(entry.taskId)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }
+    );
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        throw await parseWorkspaceError(res, 'Google Tasks');
+      }
+      continue;
+    }
+    updatedCount++;
+  }
+
+  return updatedCount;
+};
+
+/**
+ * Builds the consolidated corporate Gmail notification sent when the independent
+ * monthly Closure Confirmation task (`[CIERRE]`) is completed.
+ */
+export const buildPeriodClosureNotificationEmail = (params: {
+  periodKey: string;
+  confirmedByName: string;
+  confirmedByEmail: string;
+  completedAtIso: string;
+  origin: 'panel' | 'google_tasks';
+  assignments: MaterializedActivityAssignment[];
+  comment?: string;
+}): { subject: string; htmlBody: string } => {
+  const periodLabel = formatPeriodLabel(params.periodKey);
+  const appUrl = getActivitiesAppUrl();
+  const totalCount = params.assignments.length;
+  const completedCount = params.assignments.filter(
+    (a) => a.execution.estado === 'realizada'
+  ).length;
+  const pendingCount = Math.max(0, totalCount - completedCount);
+
+  const subject = `Cierre de actividades confirmado · ${params.confirmedByName} · ${periodLabel}`;
+
+  const rowsHtml = params.assignments
+    .map((item) => {
+      const done = item.execution.estado === 'realizada';
+      const statusBadge = done
+        ? `<span style="color:#059669;font-weight:700;">CUMPLIDA</span>`
+        : `<span style="color:#D97706;font-weight:700;">PENDIENTE</span>`;
+      const doneMeta = done
+        ? `<div style="font-size:11px;color:#64748B;">${escapeHtml(
+            item.execution.completadaPorNombre || params.confirmedByName
+          )} · ${escapeHtml(formatDateTimeEs(item.execution.completadaAtIso))}</div>`
+        : '';
+      return `
+        <tr>
+          <td style="padding:9px 11px;border-bottom:1px solid #E2E8F0;font-size:12px;color:#0F172A;font-weight:600;">
+            ${escapeHtml(item.activity.nombre)}
+          </td>
+          <td style="padding:9px 11px;border-bottom:1px solid #E2E8F0;font-size:12px;color:#334155;">
+            ${escapeHtml(item.society.codigo)}
+          </td>
+          <td style="padding:9px 11px;border-bottom:1px solid #E2E8F0;font-size:12px;color:#475569;">
+            ${escapeHtml(item.responsibleNamesLabel)}
+          </td>
+          <td style="padding:9px 11px;border-bottom:1px solid #E2E8F0;font-size:12px;color:#475569;white-space:nowrap;">
+            ${escapeHtml(formatShortDateEs(item.execution.fechaSugerida))}
+          </td>
+          <td style="padding:9px 11px;border-bottom:1px solid #E2E8F0;font-size:12px;white-space:nowrap;">
+            ${statusBadge}
+            ${doneMeta}
+          </td>
+        </tr>`;
+    })
+    .join('');
+
+  const commentBlock = params.comment?.trim()
+    ? `<p style="margin:0 0 16px 0;padding:12px 14px;background:#F8FAFC;border-left:3px solid #059669;font-size:13px;color:#334155;">
+         <strong>Observación de cierre:</strong> ${escapeHtml(params.comment.trim())}
+       </p>`
+    : '';
+
+  const htmlBody = `
+    <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:740px;margin:0 auto;background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;">
+      <div style="background:#059669;padding:18px 24px;color:#FFFFFF;">
+        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#D1FAE5;font-weight:600;">
+          Confirmación de Cierre Total · ${escapeHtml(periodLabel)}
+        </div>
+        <div style="font-size:18px;font-weight:700;margin-top:4px;">
+          Cumplimiento de actividades confirmado
+        </div>
+        <div style="font-size:12px;color:#ECFDF5;margin-top:3px;">
+          ${escapeHtml(params.confirmedByName)} (${escapeHtml(params.confirmedByEmail)}) · ${
+            params.origin === 'google_tasks' ? 'Confirmado vía Google Tasks (Gmail)' : 'Confirmado vía Panel Premex'
+          }
+        </div>
+      </div>
+
+      <div style="padding:22px 24px;color:#1E293B;font-size:13px;line-height:1.6;">
+        <p style="margin:0 0 14px 0;color:#334155;">
+          Se ha completado la tarea independiente de cierre de actividades correspondiente a <strong>${escapeHtml(
+            periodLabel
+          )}</strong> el <strong>${escapeHtml(formatDateTimeEs(params.completedAtIso))}</strong>.
+        </p>
+
+        <div style="display:flex;gap:12px;margin:0 0 16px 0;padding:12px 14px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;font-size:12px;color:#065F46;">
+          <span><strong>Actividades cumplidas:</strong> ${completedCount} de ${totalCount}</span>
+          ${
+            pendingCount > 0
+              ? `<span style="margin-left:16px;color:#B45309;"><strong>Pendientes:</strong> ${pendingCount}</span>`
+              : `<span style="margin-left:16px;color:#047857;"><strong>100% completado</strong></span>`
+          }
+        </div>
+
+        ${commentBlock}
+
+        ${
+          totalCount > 0
+            ? `<table style="width:100%;border-collapse:collapse;border:1px solid #E2E8F0;border-radius:8px;overflow:hidden;margin-bottom:18px;">
+                 <thead>
+                   <tr style="background:#F8FAFC;">
+                     <th style="text-align:left;padding:9px 11px;font-size:11px;text-transform:uppercase;color:#64748B;border-bottom:1px solid #E2E8F0;">Actividad</th>
+                     <th style="text-align:left;padding:9px 11px;font-size:11px;text-transform:uppercase;color:#64748B;border-bottom:1px solid #E2E8F0;">Sociedad</th>
+                     <th style="text-align:left;padding:9px 11px;font-size:11px;text-transform:uppercase;color:#64748B;border-bottom:1px solid #E2E8F0;">Responsables</th>
+                     <th style="text-align:left;padding:9px 11px;font-size:11px;text-transform:uppercase;color:#64748B;border-bottom:1px solid #E2E8F0;">Fecha sug.</th>
+                     <th style="text-align:left;padding:9px 11px;font-size:11px;text-transform:uppercase;color:#64748B;border-bottom:1px solid #E2E8F0;">Estado</th>
+                   </tr>
+                 </thead>
+                 <tbody>${rowsHtml}</tbody>
+               </table>`
+            : ''
+        }
+
+        ${
+          appUrl
+            ? `<a href="${escapeHtml(
+                appUrl
+              )}" style="display:inline-block;background:#132B63;color:#FFFFFF;text-decoration:none;font-size:13px;font-weight:600;padding:10px 18px;border-radius:8px;">
+                 Abrir Panel de Actividades
+               </a>`
+            : ''
+        }
+
+        <p style="margin:18px 0 0 0;font-size:11px;color:#94A3B8;">
+          Notificación de cierre enviada desde la Suite Financiera Premex vía Gmail.
+        </p>
+      </div>
+    </div>
+  `;
+
+  return { subject, htmlBody };
 };

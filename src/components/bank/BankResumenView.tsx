@@ -12,6 +12,7 @@ import {
   Layers,
   Landmark,
   FileText,
+  Send,
 } from 'lucide-react';
 import {
   BankAccount,
@@ -64,6 +65,10 @@ interface BankResumenViewProps {
     societyKey?: string;
     accountId?: string;
   }) => void;
+  onOpenEmailModal: (opts?: {
+    societyKey?: string;
+    accountId?: string;
+  }) => void;
   isReadOnly?: boolean;
 }
 
@@ -91,6 +96,7 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
   onAddReconcilingItem,
   onDeleteLineItem,
   onOpenExportModal,
+  onOpenEmailModal,
   isReadOnly = false,
 }) => {
   const [selectedSocietyKey, setSelectedSocietyKey] = useState<string>('ALL');
@@ -333,6 +339,20 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
               <span>Descargar Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                onOpenEmailModal({
+                  societyKey: selectedSocietyKey,
+                  accountId: activeAccount?.id,
+                })
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              title="Enviar conciliación por correo Gmail (PDF, Excel o ambos · por empresa, todas o selección)"
+            >
+              <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span>Enviar Correo</span>
             </button>
             {!isReadOnly && (
               <button

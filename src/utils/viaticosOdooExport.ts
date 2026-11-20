@@ -50,6 +50,9 @@ export interface OdooConsolidatedExpenseRow {
   objetivoComercial: string;
   descripcionGasto: string;
   kilometraje: string;
+  attachmentId?: string;
+  attachmentName?: string;
+  attachmentMimeType?: string;
 }
 
 export interface OdooJournalLine {
@@ -351,6 +354,9 @@ export function buildOdooAccountingDataset(
         objetivoComercial: item.objetivoComercial || '',
         descripcionGasto: item.descripcionGasto || '',
         kilometraje: item.kilometraje || '',
+        attachmentId: item.attachmentId,
+        attachmentName: item.attachmentName,
+        attachmentMimeType: item.attachmentMimeType,
       };
 
       expenseRows.push(row);

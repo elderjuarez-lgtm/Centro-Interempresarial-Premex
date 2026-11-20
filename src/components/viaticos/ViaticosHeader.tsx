@@ -219,23 +219,35 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               onClick={onSaveToCloud}
               disabled={isSavingCloud}
               className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
-                hasUnsavedChanges
+                isSavingCloud
+                  ? 'bg-sky-50 border-sky-200 text-[#132B63]'
+                  : hasUnsavedChanges
                   ? 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
-                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                  : 'bg-emerald-50/70 border-emerald-200 text-emerald-800 hover:bg-emerald-100/70'
               }`}
-              title="Guardar cambios en la nube (Firestore)"
+              title={
+                isSavingCloud
+                  ? 'Sincronizando cambios en la nube...'
+                  : hasUnsavedChanges
+                  ? 'Cambios pendientes de respaldo. Haz clic para reintentar.'
+                  : 'Sincronización automática activa en la nube (Firestore)'
+              }
             >
               {isSavingCloud ? (
                 <Loader2 className="w-4 h-4 sm:w-3.5 sm:h-3.5 animate-spin text-[#1E60A8]" />
               ) : (
-                <Cloud className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-[#1E60A8]" />
+                <Cloud
+                  className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${
+                    hasUnsavedChanges ? 'text-amber-600' : 'text-emerald-600'
+                  }`}
+                />
               )}
               <span className="hidden xl:inline">
                 {isSavingCloud
-                  ? 'Guardando...'
+                  ? 'Sincronizando...'
                   : hasUnsavedChanges
                   ? 'Guardar*'
-                  : 'Guardar'}
+                  : 'En la nube'}
               </span>
             </button>
           )}

@@ -23,6 +23,7 @@ import {
   Calendar,
   Coins,
   Printer,
+  Download,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -63,6 +64,8 @@ interface ViaticosLiquidadorViewProps {
   isLockedToOwnConsultor: boolean;
   detectedFromEmailLabel: string | null;
   mediaMap: Record<string, StoredReceiptMedia>;
+  loadingMediaIds?: Set<string>;
+  onLoadReceiptMedia?: (attachmentId: string) => Promise<StoredReceiptMedia | null>;
   onMediaSaved: (media: StoredReceiptMedia) => void;
   permissions: EffectivePermissions;
   onSelectLiquidation: (id: string) => void;
@@ -166,6 +169,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   isLockedToOwnConsultor,
   detectedFromEmailLabel,
   mediaMap,
+  loadingMediaIds,
+  onLoadReceiptMedia,
   onMediaSaved,
   permissions,
   onSelectLiquidation,
@@ -408,9 +413,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         dataUrl: prepared.dataUrl,
         createdAtIso: new Date().toISOString(),
       };
-      await saveReceiptMedia(mediaRecord);
-      onMediaSaved(mediaRecord);
-      setActiveMediaPreview(mediaRecord);
+      const saveRes = await saveReceiptMedia(mediaRecord);
+      const savedMedia = saveRes.media;
+      onMediaSaved(savedMedia);
+      setActiveMediaPreview(savedMedia);
 
       setForm((prev) => ({
         ...prev,
@@ -543,9 +549,9 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         mimeType: rotated.mimeType,
         dataUrl: rotated.dataUrl,
       };
-      await saveReceiptMedia(updatedRecord);
-      onMediaSaved(updatedRecord);
-      setActiveMediaPreview(updatedRecord);
+      const saveRes = await saveReceiptMedia(updatedRecord);
+      onMediaSaved(saveRes.media);
+      setActiveMediaPreview(saveRes.media);
       setForm((prev) =>
         prev.attachmentId === updatedRecord.id
           ? { ...prev, attachmentMimeType: updatedRecord.mimeType }
@@ -678,6 +684,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     });
     if (item.attachmentId && mediaMap[item.attachmentId]) {
       setActiveMediaPreview(mediaMap[item.attachmentId]);
+    } else if (item.attachmentId && onLoadReceiptMedia) {
+      setActiveMediaPreview(null);
+      void onLoadReceiptMedia(item.attachmentId).then((loaded) => {
+        if (loaded) setActiveMediaPreview(loaded);
+      });
     } else {
       setActiveMediaPreview(null);
     }
@@ -2177,14 +2188,43 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                             <button
                               type="button"
                               onClick={() => setLightboxItem({ item, media })}
-                              title={`Ver comprobante: ${media.fileName}`}
+                              title={`Ver factura escaneada: ${media.fileName}`}
                               className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
+                          ) : item.attachmentId ? (
+                            loadingMediaIds?.has(item.attachmentId) ? (
+                              <span
+                                title="Descargando factura escaneada desde la nube..."
+                                className="p-1.5 text-[#1E60A8] inline-flex"
+                              >
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!item.attachmentId || !onLoadReceiptMedia) return;
+                                  const loaded = await onLoadReceiptMedia(item.attachmentId);
+                                  if (loaded) {
+                                    setLightboxItem({ item, media: loaded });
+                                  } else {
+                                    setAiStatusBanner({
+                                      type: 'warning',
+                                      text: `El comprobante "${item.attachmentName || item.attachmentId}" fue escaneado antes de activar el respaldo en la nube y aún no se ha sincronizado desde el equipo origen.`,
+                                    });
+                                  }
+                                }}
+                                title={`Descargar y ver factura escaneada: ${item.attachmentName || 'Comprobante'}`}
+                                className="p-1.5 text-[#1E60A8] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                            )
                           ) : item.attachmentName ? (
                             <span
-                              title={`Adjunto registrado: ${item.attachmentName} (guardado en el equipo origen)`}
+                              title={`Adjunto registrado: ${item.attachmentName}`}
                               className="p-1.5 text-slate-400"
                             >
                               <Paperclip className="w-3.5 h-3.5" />
@@ -2279,14 +2319,25 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   · Archivo: {lightboxItem.media.fileName}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setLightboxItem(null)}
-                className="p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
-                aria-label="Cerrar vista previa"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <a
+                  href={lightboxItem.media.dataUrl}
+                  download={lightboxItem.media.fileName || 'factura.jpg'}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold bg-white/15 hover:bg-white/25 text-white rounded-lg transition-colors"
+                  title="Descargar factura escaneada"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Descargar</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setLightboxItem(null)}
+                  className="p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
+                  aria-label="Cerrar vista previa"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 bg-slate-900/5 overflow-auto flex items-center justify-center p-4 min-h-[420px]">
