@@ -1636,9 +1636,34 @@ export async function exportViaticosPlanillaPdf(
   return filename;
 }
 
+export const DEFAULT_VIATICOS_EMAIL_GREETING =
+  'Estimado equipo de Contabilidad y Tesorería,';
+
+export function formatViaticosEmailGreeting(recipientGreetingName?: string): string {
+  const clean = String(recipientGreetingName || '').trim();
+  if (!clean) return DEFAULT_VIATICOS_EMAIL_GREETING;
+  return `Estimado ${clean},`;
+}
+
+export function applyGreetingToViaticosEmailBody(
+  bodyText: string,
+  recipientGreetingName?: string
+): string {
+  const nextGreeting = formatViaticosEmailGreeting(recipientGreetingName);
+  const lines = String(bodyText || '').split('\n');
+  if (lines.length === 0) return nextGreeting;
+  if (/^\s*estimad[oa]s?\b/i.test(lines[0])) {
+    if (lines[0].trim() === nextGreeting) return bodyText;
+    lines[0] = nextGreeting;
+    return lines.join('\n');
+  }
+  return bodyText;
+}
+
 export function buildViaticosEmailDraft(
   liquidation: ViaticoLiquidation,
-  _costCenter?: string
+  _costCenter?: string,
+  recipientGreetingName?: string
 ): {
   subject: string;
   body: string;
@@ -1654,7 +1679,7 @@ export function buildViaticosEmailDraft(
   } (${liquidation.lineaLiquidacion})`;
 
   const body = [
-    'Estimado equipo de Contabilidad y Tesorería,',
+    formatViaticosEmailGreeting(recipientGreetingName),
     '',
     'Se remite el cierre formal de la siguiente Liquidación de Viáticos:',
     '',

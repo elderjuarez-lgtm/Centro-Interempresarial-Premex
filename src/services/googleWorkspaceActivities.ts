@@ -33,7 +33,8 @@ export const parseEmailAddressList = (raw: string): string[] => {
   return Array.from(
     new Set(
       String(raw || '')
-        .split(/[,;\n\r]+/)
+        .replace(/[<>]/g, ' ')
+        .split(/[,;/|\n\r\s]+/)
         .map((part) => part.trim())
         .filter((part) => part.includes('@') && part.indexOf('@') > 0 && part.indexOf('.', part.indexOf('@')) > 0)
     )

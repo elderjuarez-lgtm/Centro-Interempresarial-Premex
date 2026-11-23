@@ -31,6 +31,17 @@ interface ViaticosEmailDirectoryViewProps {
 
 type GroupFilterType = 'ALL' | ViaticoEmailGroupType;
 
+const extractEmailTokens = (raw: string): string[] =>
+  Array.from(
+    new Set(
+      String(raw || '')
+        .replace(/[<>]/g, ' ')
+        .split(/[,;/|\n\r\s]+/)
+        .map((item) => normalizeEmail(item))
+        .filter(Boolean)
+    )
+  );
+
 export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProps> = ({
   emailGroups,
   onSaveEmailGroups,
@@ -64,10 +75,12 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
   const stats = useMemo(() => {
     const dirigidoGroups = emailGroups.filter((g) => g.tipo === 'dirigido');
     const copiaGroups = emailGroups.filter((g) => g.tipo === 'copia');
-    const totalMembers = emailGroups.reduce((acc, g) => acc + g.miembros.length, 0);
+    const countGroupEmails = (g: ViaticoEmailGroup) =>
+      new Set(g.miembros.flatMap((m) => extractEmailTokens(m.email))).size;
+    const totalMembers = emailGroups.reduce((acc, g) => acc + countGroupEmails(g), 0);
     const defaultCopyCount = copiaGroups
       .filter((g) => g.activo && g.porDefecto)
-      .reduce((acc, g) => acc + g.miembros.length, 0);
+      .reduce((acc, g) => acc + countGroupEmails(g), 0);
 
     return {
       totalGroups: emailGroups.length,
@@ -199,15 +212,8 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
       return;
     }
 
-    // Support adding either one member with name+email or multiple comma/semicolon-separated emails at once
-    const parsedEmails = Array.from(
-      new Set(
-        rawEmailInput
-          .split(/[,;\n\r]+/)
-          .map((item) => normalizeEmail(item))
-          .filter(Boolean)
-      )
-    );
+    // Support commas, semicolons, slashes, pipes, spaces, or newlines between emails
+    const parsedEmails = extractEmailTokens(rawEmailInput);
 
     if (parsedEmails.length === 0) {
       updateMemberDraft(group.id, {
@@ -224,26 +230,42 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
       return;
     }
 
-    const existingEmails = new Set(group.miembros.map((m) => normalizeEmail(m.email)));
+    const existingSingleEmails = new Set(
+      group.miembros
+        .map((m) => extractEmailTokens(m.email))
+        .filter((list) => list.length === 1)
+        .map((list) => list[0])
+    );
+
     const newMembers: ViaticoEmailMember[] = [];
 
-    parsedEmails.forEach((cleanEmail, idx) => {
-      if (existingEmails.has(cleanEmail)) return;
-      existingEmails.add(cleanEmail);
-      const inferredName =
-        parsedEmails.length === 1 && rawNameInput
-          ? rawNameInput
-          : cleanEmail
-              .split('@')[0]
-              .replace(/[._-]+/g, ' ')
-              .replace(/\b\w/g, (ch) => ch.toUpperCase());
-
+    // If a custom line name is provided with multiple emails (e.g. "Equipo de Ventas" + 5 emails),
+    // save them together on that single named line so one click selects all of them.
+    if (parsedEmails.length > 1 && rawNameInput) {
       newMembers.push({
-        id: `mem-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-        nombre: inferredName,
-        email: cleanEmail,
+        id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        nombre: rawNameInput,
+        email: parsedEmails.join(', '),
       });
-    });
+    } else {
+      parsedEmails.forEach((cleanEmail, idx) => {
+        if (existingSingleEmails.has(cleanEmail)) return;
+        existingSingleEmails.add(cleanEmail);
+        const inferredName =
+          parsedEmails.length === 1 && rawNameInput
+            ? rawNameInput
+            : cleanEmail
+                .split('@')[0]
+                .replace(/[._-]+/g, ' ')
+                .replace(/\b\w/g, (ch) => ch.toUpperCase());
+
+        newMembers.push({
+          id: `mem-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+          nombre: inferredName,
+          email: cleanEmail,
+        });
+      });
+    }
 
     if (newMembers.length === 0) {
       updateMemberDraft(group.id, {
@@ -268,13 +290,22 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
 
   const handleSaveEditedMember = () => {
     if (!canEdit || !editingMember) return;
-    const cleanEmail = normalizeEmail(editingMember.email);
+    const parsedEmails = extractEmailTokens(editingMember.email);
     const cleanName = editingMember.nombre.trim();
 
-    if (!isValidEmailFormat(cleanEmail)) {
+    if (parsedEmails.length === 0) {
       setEditingMember({
         ...editingMember,
-        error: 'Ingresa un correo electrónico válido.',
+        error: 'Ingresa al menos un correo electrónico válido.',
+      });
+      return;
+    }
+
+    const invalidEmails = parsedEmails.filter((em) => !isValidEmailFormat(em));
+    if (invalidEmails.length > 0) {
+      setEditingMember({
+        ...editingMember,
+        error: `Correo inválido: ${invalidEmails[0]}`,
       });
       return;
     }
@@ -282,17 +313,19 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
     const targetGroup = emailGroups.find((g) => g.id === editingMember.groupId);
     if (!targetGroup) return;
 
-    const duplicate = targetGroup.miembros.some(
-      (m) =>
-        m.id !== editingMember.memberId &&
-        normalizeEmail(m.email) === cleanEmail
-    );
-    if (duplicate) {
-      setEditingMember({
-        ...editingMember,
-        error: 'Otro integrante en este grupo ya usa ese correo.',
+    if (parsedEmails.length === 1) {
+      const duplicate = targetGroup.miembros.some((m) => {
+        if (m.id === editingMember.memberId) return false;
+        const mTokens = extractEmailTokens(m.email);
+        return mTokens.length === 1 && mTokens[0] === parsedEmails[0];
       });
-      return;
+      if (duplicate) {
+        setEditingMember({
+          ...editingMember,
+          error: 'Otro integrante en este grupo ya usa ese correo.',
+        });
+        return;
+      }
     }
 
     onSaveEmailGroups(
@@ -305,7 +338,7 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                   ? {
                       ...m,
                       nombre: cleanName || m.nombre,
-                      email: cleanEmail,
+                      email: parsedEmails.join(', '),
                     }
                   : m
               ),
@@ -609,7 +642,11 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                 {/* Members List */}
                 <div className="p-4 sm:p-5 flex-1 space-y-3">
                   <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wider">
-                    <span>Integrantes ({group.miembros.length})</span>
+                    <span>
+                      Líneas / Integrantes ({group.miembros.length}) ·{' '}
+                      {new Set(group.miembros.flatMap((m) => extractEmailTokens(m.email))).size}{' '}
+                      correo(s)
+                    </span>
                   </div>
 
                   {group.miembros.length === 0 ? (
@@ -622,14 +659,15 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                         const isEditingThis =
                           editingMember?.groupId === group.id &&
                           editingMember?.memberId === member.id;
+                        const memberEmails = extractEmailTokens(member.email);
 
                         if (isEditingThis && editingMember) {
                           return (
                             <div
                               key={member.id}
-                              className="p-2.5 bg-sky-50/60 space-y-2"
+                              className="p-3 bg-sky-50/60 space-y-2"
                             >
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
                                 <input
                                   type="text"
                                   value={editingMember.nombre}
@@ -640,11 +678,12 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                                       error: undefined,
                                     })
                                   }
-                                  placeholder="Nombre completo"
-                                  className="min-h-[38px] px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+                                  placeholder="Nombre de persona o subgrupo"
+                                  className="sm:col-span-2 min-h-[38px] px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
                                 />
                                 <input
-                                  type="email"
+                                  type="text"
+                                  inputMode="email"
                                   value={editingMember.email}
                                   onChange={(e) =>
                                     setEditingMember({
@@ -653,10 +692,15 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                                       error: undefined,
                                     })
                                   }
-                                  placeholder="correo@empresa.com"
-                                  className="min-h-[38px] px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-lg"
+                                  placeholder="Uno o varios correos (separa con , / ; o espacio)"
+                                  className="sm:col-span-3 min-h-[38px] px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-lg"
                                 />
                               </div>
+                              <p className="text-[11px] text-slate-500">
+                                Puedes editar o agregar varios correos separados por coma{' '}
+                                <code>,</code>, barra <code>/</code> o punto y coma{' '}
+                                <code>;</code>.
+                              </p>
                               {editingMember.error && (
                                 <p className="text-[11px] text-rose-700 font-medium">
                                   {editingMember.error}
@@ -686,15 +730,35 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                         return (
                           <div
                             key={member.id}
-                            className="px-3 py-2.5 flex items-center justify-between gap-2 bg-white hover:bg-slate-50/70"
+                            className="px-3 py-2.5 flex items-start justify-between gap-2 bg-white hover:bg-slate-50/70"
                           >
-                            <div className="min-w-0">
-                              <div className="text-xs font-bold text-slate-900 truncate">
-                                {member.nombre || member.email}
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-slate-900">
+                                  {member.nombre || memberEmails[0] || member.email}
+                                </span>
+                                {memberEmails.length > 1 && (
+                                  <span className="px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-[10px] font-bold text-[#132B63]">
+                                    {memberEmails.length} correos
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-[11px] font-mono text-slate-500 truncate">
-                                {member.email}
-                              </div>
+                              {memberEmails.length <= 1 ? (
+                                <div className="text-[11px] font-mono text-slate-500 break-all">
+                                  {memberEmails[0] || member.email}
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap gap-1 pt-0.5">
+                                  {memberEmails.map((em) => (
+                                    <span
+                                      key={em}
+                                      className="inline-block px-2 py-0.5 rounded bg-slate-100 text-[11px] font-mono text-slate-700"
+                                    >
+                                      {em}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
 
                             {canEdit && (
@@ -709,7 +773,7 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                                       email: member.email,
                                     })
                                   }
-                                  aria-label={`Editar ${member.email}`}
+                                  aria-label={`Editar ${member.nombre || member.email}`}
                                   className="min-w-[34px] min-h-[34px] inline-flex items-center justify-center text-slate-400 hover:text-[#1E60A8] hover:bg-sky-50 rounded-lg cursor-pointer"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
@@ -717,7 +781,7 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveMember(group.id, member.id)}
-                                  aria-label={`Quitar ${member.email}`}
+                                  aria-label={`Quitar ${member.nombre || member.email}`}
                                   className="min-w-[34px] min-h-[34px] inline-flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -746,7 +810,7 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                               error: undefined,
                             })
                           }
-                          placeholder="Nombre (opcional)"
+                          placeholder="Nombre o subgrupo (ej. Equipo Ventas)"
                           className="sm:col-span-2 min-h-[40px] px-3 py-1.5 text-sm sm:text-xs bg-slate-50 focus:bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/25"
                         />
                         <input
@@ -759,10 +823,30 @@ export const ViaticosEmailDirectoryView: React.FC<ViaticosEmailDirectoryViewProp
                               error: undefined,
                             })
                           }
-                          placeholder="correo@premexcorp.com (uno o varios con coma)"
+                          placeholder="Uno o varios correos (con , / ; o espacio)"
                           className="sm:col-span-3 min-h-[40px] px-3 py-1.5 text-sm sm:text-xs font-mono bg-slate-50 focus:bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/25"
                         />
                       </div>
+
+                      {extractEmailTokens(draft.email).length > 1 && (
+                        <p className="text-[11px] text-[#132B63] bg-sky-50/70 border border-sky-200/80 rounded-lg px-2.5 py-1.5">
+                          {draft.nombre.trim() ? (
+                            <>
+                              Se guardará la línea{' '}
+                              <strong>&quot;{draft.nombre.trim()}&quot;</strong> con{' '}
+                              <strong>{extractEmailTokens(draft.email).length} correos</strong>{' '}
+                              para seleccionarlos juntos con un clic.
+                            </>
+                          ) : (
+                            <>
+                              Sin nombre escrito: se agregarán los{' '}
+                              <strong>{extractEmailTokens(draft.email).length} correos</strong>{' '}
+                              como contactos individuales. (Escribe un nombre a la izquierda si
+                              quieres agruparlos en una sola línea).
+                            </>
+                          )}
+                        </p>
+                      )}
 
                       {draft.error && (
                         <div className="flex items-center gap-1.5 text-[11px] text-rose-700 font-medium">

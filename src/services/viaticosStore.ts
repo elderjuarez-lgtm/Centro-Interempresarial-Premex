@@ -40,11 +40,22 @@ export interface SavedViaticosWorkspaceDoc {
   updatedAtIso?: string;
 }
 
-const sanitizeEmailMember = (m: ViaticoEmailMember, idx: number): ViaticoEmailMember => ({
-  id: String(m?.id || `member-${Date.now()}-${idx}`).slice(0, 120),
-  nombre: String(m?.nombre || '').trim().slice(0, 140),
-  email: String(m?.email || '').trim().toLowerCase().slice(0, 160),
-});
+const sanitizeEmailMember = (m: ViaticoEmailMember, idx: number): ViaticoEmailMember => {
+  const tokens = Array.from(
+    new Set(
+      String(m?.email || '')
+        .replace(/[<>]/g, ' ')
+        .split(/[,;/|\n\r\s]+/)
+        .map((part) => part.trim().toLowerCase())
+        .filter((part) => part.includes('@'))
+    )
+  );
+  return {
+    id: String(m?.id || `member-${Date.now()}-${idx}`).slice(0, 120),
+    nombre: String(m?.nombre || '').trim().slice(0, 140),
+    email: tokens.join(', ').slice(0, 2500),
+  };
+};
 
 const sanitizeEmailGroup = (g: ViaticoEmailGroup, idx: number): ViaticoEmailGroup => {
   const cleanMembers = (Array.isArray(g?.miembros) ? g.miembros : [])

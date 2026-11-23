@@ -29,6 +29,7 @@ import {
 } from '../../services/viaticosMediaStore';
 import { formatViaticoAmount } from '../../utils/viaticos';
 import {
+  applyGreetingToViaticosEmailBody,
   buildViaticosEmailDraft,
   exportViaticosExcel,
   exportViaticosReceiptsPdf,
@@ -45,22 +46,103 @@ import {
   sendGmailHtmlMessage,
 } from '../../services/googleWorkspaceActivities';
 
-const mergeUniqueEmails = (existingRaw: string, incomingEmails: string[]): string => {
+const mergeUniqueEmails = (existingRaw: string, incomingRawList: string[]): string => {
   const existing = parseEmailAddressList(existingRaw);
   const seen = new Set(existing.map((e) => e.toLowerCase()));
   const next = [...existing];
-  incomingEmails.forEach((raw) => {
-    const clean = String(raw || '').trim();
-    if (
-      clean &&
-      clean.includes('@') &&
-      !seen.has(clean.toLowerCase())
-    ) {
-      seen.add(clean.toLowerCase());
-      next.push(clean);
-    }
+  incomingRawList.forEach((rawChunk) => {
+    parseEmailAddressList(rawChunk).forEach((clean) => {
+      if (!seen.has(clean.toLowerCase())) {
+        seen.add(clean.toLowerCase());
+        next.push(clean);
+      }
+    });
   });
   return next.join(', ');
+};
+
+const inferDisplayNameFromEmail = (email: string): string => {
+  const local = String(email || '').split('@')[0] || '';
+  return local
+    .replace(/[._-]+/g, ' ')
+    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+    .trim();
+};
+
+const getGroupUniqueEmails = (group: ViaticoEmailGroup): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  group.miembros.forEach((m) => {
+    parseEmailAddressList(m.email).forEach((em) => {
+      const key = em.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(em);
+      }
+    });
+  });
+  return out;
+};
+
+const resolvePrimaryRecipientGreetingName = (
+  recipientRaw: string,
+  emailGroups: ViaticoEmailGroup[],
+  pickedLabel?: string | null
+): string | undefined => {
+  const current = parseEmailAddressList(recipientRaw).map((e) => e.toLowerCase());
+  if (current.length === 0) return undefined;
+  const currentSet = new Set(current);
+
+  const activeGroups = emailGroups.filter((g) => g.activo !== false);
+
+  // 1. Exact match against a full group (e.g. "Equipo de Ventas" with 5 emails)
+  for (const grp of activeGroups) {
+    const grpEmails = getGroupUniqueEmails(grp).map((e) => e.toLowerCase());
+    if (
+      grpEmails.length > 0 &&
+      grpEmails.length === currentSet.size &&
+      grpEmails.every((e) => currentSet.has(e))
+    ) {
+      return grp.nombre;
+    }
+  }
+
+  // 2. Exact match against a named member / multi-email line (e.g. "Emilio Gonzalez" or "Equipo Contable")
+  for (const grp of activeGroups) {
+    for (const mem of grp.miembros) {
+      const memEmails = parseEmailAddressList(mem.email).map((e) => e.toLowerCase());
+      if (
+        memEmails.length > 0 &&
+        memEmails.length === currentSet.size &&
+        memEmails.every((e) => currentSet.has(e))
+      ) {
+        return mem.nombre.trim() || inferDisplayNameFromEmail(memEmails[0]);
+      }
+    }
+  }
+
+  // 3. Explicit selection label when multiple items were combined
+  if (pickedLabel && pickedLabel.trim()) {
+    return pickedLabel.trim();
+  }
+
+  // 4. Match the primary (first) email address against directory members
+  const firstEmail = current[0];
+  for (const grp of activeGroups) {
+    for (const mem of grp.miembros) {
+      const memEmails = parseEmailAddressList(mem.email).map((e) => e.toLowerCase());
+      if (memEmails.length === 1 && memEmails[0] === firstEmail && mem.nombre.trim()) {
+        return mem.nombre.trim();
+      }
+    }
+  }
+
+  // 5. Fallback for a single manually typed email
+  if (current.length === 1) {
+    return inferDisplayNameFromEmail(firstEmail) || undefined;
+  }
+
+  return undefined;
 };
 
 interface ViaticosCloseEmailModalProps {
@@ -101,6 +183,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
   onPreviewPlanillaPdf,
 }) => {
   const [recipientEmail, setRecipientEmail] = useState('');
+  const [pickedParaLabel, setPickedParaLabel] = useState<string | null>(null);
   const [ccEmail, setCcEmail] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -137,23 +220,28 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
 
   useEffect(() => {
     if (!isOpen || !liquidation) return;
-    const draft = buildViaticosEmailDraft(liquidation, costCenter);
-    setSubject(draft.subject);
-    setBody(draft.body);
 
     const activeGroups = emailGroups.filter((g) => g.activo !== false);
     const defaultDirigidoEmails = activeGroups
       .filter((g) => g.tipo === 'dirigido' && g.porDefecto)
-      .flatMap((g) => g.miembros.map((m) => m.email));
+      .flatMap((g) => getGroupUniqueEmails(g));
     const defaultCopyEmails = activeGroups
       .filter((g) => g.tipo === 'copia' && g.porDefecto)
-      .flatMap((g) => g.miembros.map((m) => m.email));
+      .flatMap((g) => getGroupUniqueEmails(g));
 
-    setRecipientEmail(
-      liquidation.sentToEmail
-        ? liquidation.sentToEmail
-        : mergeUniqueEmails('', defaultDirigidoEmails)
+    const initialTo = liquidation.sentToEmail
+      ? liquidation.sentToEmail
+      : mergeUniqueEmails('', defaultDirigidoEmails);
+    const initialGreetingName = resolvePrimaryRecipientGreetingName(
+      initialTo,
+      emailGroups
     );
+    const draft = buildViaticosEmailDraft(liquidation, costCenter, initialGreetingName);
+
+    setSubject(draft.subject);
+    setBody(draft.body);
+    setPickedParaLabel(null);
+    setRecipientEmail(initialTo);
     setCcEmail(
       mergeUniqueEmails('', [...defaultCopyEmails, liquidation.consultorEmail || ''])
     );
@@ -181,6 +269,17 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
     }
   }, [isOpen, liquidation, costCenter, emailGroups]);
 
+  // Dynamically adapt the email body greeting ("Estimado Emilio Gonzalez,") whenever the primary recipient changes
+  useEffect(() => {
+    if (!isOpen) return;
+    const greetingTarget = resolvePrimaryRecipientGreetingName(
+      recipientEmail,
+      emailGroups,
+      pickedParaLabel
+    );
+    setBody((prev) => applyGreetingToViaticosEmailBody(prev, greetingTarget));
+  }, [isOpen, recipientEmail, emailGroups, pickedParaLabel]);
+
   if (!isOpen || !liquidation) return null;
 
   const combinedMediaMap: Record<string, StoredReceiptMedia> = {
@@ -201,27 +300,33 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
   );
   const defaultCopiaGroups = activeCopiaGroups.filter((g) => g.porDefecto);
   const totalDirigidoMembers = activeDirigidoGroups.reduce(
-    (sum, g) => sum + g.miembros.length,
+    (sum, g) => sum + getGroupUniqueEmails(g).length,
     0
+  );
+  const resolvedGreetingName = resolvePrimaryRecipientGreetingName(
+    recipientEmail,
+    emailGroups,
+    pickedParaLabel
   );
 
   const handleSelectPickerValue = (
     rawVal: string,
     groupsSource: ViaticoEmailGroup[],
     currentText: string,
-    setter: (next: string) => void
+    setter: (next: string) => void,
+    isPrimaryParaPicker = false
   ) => {
     if (!rawVal) return;
     if (rawVal.startsWith('group:')) {
       const groupId = rawVal.slice('group:'.length);
       const grp = groupsSource.find((g) => g.id === groupId);
       if (grp) {
-        setter(
-          mergeUniqueEmails(
-            currentText,
-            grp.miembros.map((m) => m.email)
-          )
-        );
+        const allGroupEmails = getGroupUniqueEmails(grp);
+        const wasEmpty = parseEmailAddressList(currentText).length === 0;
+        if (isPrimaryParaPicker && wasEmpty) {
+          setPickedParaLabel(grp.nombre);
+        }
+        setter(mergeUniqueEmails(currentText, allGroupEmails));
       }
       return;
     }
@@ -234,7 +339,14 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
       const grp = groupsSource.find((g) => g.id === groupId);
       const mem = grp?.miembros.find((m) => m.id === memberId);
       if (mem) {
-        setter(mergeUniqueEmails(currentText, [mem.email]));
+        const memEmails = parseEmailAddressList(mem.email);
+        const wasEmpty = parseEmailAddressList(currentText).length === 0;
+        if (isPrimaryParaPicker && wasEmpty) {
+          setPickedParaLabel(
+            mem.nombre.trim() || inferDisplayNameFromEmail(memEmails[0] || '')
+          );
+        }
+        setter(mergeUniqueEmails(currentText, memEmails));
       }
     }
   };
@@ -658,7 +770,10 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                     {recipientEmail.trim() && (
                       <button
                         type="button"
-                        onClick={() => setRecipientEmail('')}
+                        onClick={() => {
+                          setPickedParaLabel(null);
+                          setRecipientEmail('');
+                        }}
                         className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 cursor-pointer"
                       >
                         Limpiar
@@ -674,7 +789,8 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                         e.target.value,
                         activeDirigidoGroups,
                         recipientEmail,
-                        setRecipientEmail
+                        setRecipientEmail,
+                        true
                       )
                     }
                     className="w-full min-h-[40px] px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-white rounded-xl border border-[#1E60A8]/35 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 cursor-pointer"
@@ -682,27 +798,33 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                     <option value="">
                       + Seleccionar autorizador o grupo (Para)...
                     </option>
-                    {activeDirigidoGroups.some((g) => g.miembros.length > 0) && (
-                      <optgroup label="Grupos de Autorizadores">
+                    {activeDirigidoGroups.some((g) => getGroupUniqueEmails(g).length > 0) && (
+                      <optgroup label="Grupos de Autorizadores (agrega todos)">
                         {activeDirigidoGroups
-                          .filter((g) => g.miembros.length > 0)
-                          .map((g) => (
-                            <option key={g.id} value={`group:${g.id}`}>
-                              {g.nombre} ({g.miembros.length}{' '}
-                              {g.miembros.length === 1 ? 'correo' : 'correos'})
-                            </option>
-                          ))}
+                          .filter((g) => getGroupUniqueEmails(g).length > 0)
+                          .map((g) => {
+                            const count = getGroupUniqueEmails(g).length;
+                            return (
+                              <option key={g.id} value={`group:${g.id}`}>
+                                {g.nombre} ({count} {count === 1 ? 'correo' : 'correos'})
+                              </option>
+                            );
+                          })}
                       </optgroup>
                     )}
                     {activeDirigidoGroups.some((g) => g.miembros.length > 0) && (
-                      <optgroup label="Autorizadores Individuales">
+                      <optgroup label="Autorizadores o Líneas Individuales">
                         {activeDirigidoGroups.flatMap((g) =>
-                          g.miembros.map((m) => (
-                            <option key={`${g.id}-${m.id}`} value={`member:${g.id}:${m.id}`}>
-                              {m.nombre ? `${m.nombre} · ` : ''}
-                              {m.email} ({g.nombre})
-                            </option>
-                          ))
+                          g.miembros.map((m) => {
+                            const memEmails = parseEmailAddressList(m.email);
+                            return (
+                              <option key={`${g.id}-${m.id}`} value={`member:${g.id}:${m.id}`}>
+                                {memEmails.length > 1
+                                  ? `${m.nombre || 'Línea'} (${memEmails.length} correos) · ${g.nombre}`
+                                  : `${m.nombre ? `${m.nombre} · ` : ''}${memEmails[0] || m.email} (${g.nombre})`}
+                              </option>
+                            );
+                          })
                         )}
                       </optgroup>
                     )}
@@ -712,17 +834,25 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                     type="text"
                     inputMode="email"
                     value={recipientEmail}
-                    onChange={(e) => setRecipientEmail(e.target.value)}
+                    onChange={(e) => {
+                      setPickedParaLabel(null);
+                      setRecipientEmail(e.target.value);
+                    }}
                     placeholder="Selecciona arriba o escribe correos con coma"
                     className="w-full min-h-[44px] px-3 py-2 text-base sm:text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                   />
 
-                  {totalDirigidoMembers === 0 && (
+                  {resolvedGreetingName ? (
+                    <p className="text-[11px] text-[#132B63] leading-snug">
+                      Saludo automático:{' '}
+                      <strong>&quot;Estimado {resolvedGreetingName},&quot;</strong>
+                    </p>
+                  ) : totalDirigidoMembers === 0 ? (
                     <p className="text-[11px] text-slate-500 leading-snug">
                       Agrega autorizadores en <strong>Listas de Correos</strong> o escribe el
                       correo manualmente arriba.
                     </p>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* CC (Equipo Contable & Copia) */}
@@ -750,7 +880,8 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                         e.target.value,
                         activeCopiaGroups,
                         ccEmail,
-                        setCcEmail
+                        setCcEmail,
+                        false
                       )
                     }
                     className="w-full min-h-[40px] px-2.5 py-1.5 text-xs font-semibold text-emerald-900 bg-white rounded-xl border border-emerald-300 focus:outline-hidden focus:ring-2 focus:ring-emerald-600/25 cursor-pointer"
@@ -758,27 +889,34 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                     <option value="">
                       + Agregar equipo o correo en copia (CC)...
                     </option>
-                    {activeCopiaGroups.some((g) => g.miembros.length > 0) && (
-                      <optgroup label="Equipos en Copia (CC)">
+                    {activeCopiaGroups.some((g) => getGroupUniqueEmails(g).length > 0) && (
+                      <optgroup label="Equipos en Copia (CC · agrega todos)">
                         {activeCopiaGroups
-                          .filter((g) => g.miembros.length > 0)
-                          .map((g) => (
-                            <option key={g.id} value={`group:${g.id}`}>
-                              {g.nombre}
-                              {g.porDefecto ? ' [Automático]' : ''} ({g.miembros.length})
-                            </option>
-                          ))}
+                          .filter((g) => getGroupUniqueEmails(g).length > 0)
+                          .map((g) => {
+                            const count = getGroupUniqueEmails(g).length;
+                            return (
+                              <option key={g.id} value={`group:${g.id}`}>
+                                {g.nombre}
+                                {g.porDefecto ? ' [Automático]' : ''} ({count})
+                              </option>
+                            );
+                          })}
                       </optgroup>
                     )}
                     {activeCopiaGroups.some((g) => g.miembros.length > 0) && (
-                      <optgroup label="Integrantes en Copia">
+                      <optgroup label="Integrantes o Líneas en Copia">
                         {activeCopiaGroups.flatMap((g) =>
-                          g.miembros.map((m) => (
-                            <option key={`${g.id}-${m.id}`} value={`member:${g.id}:${m.id}`}>
-                              {m.nombre ? `${m.nombre} · ` : ''}
-                              {m.email} ({g.nombre})
-                            </option>
-                          ))
+                          g.miembros.map((m) => {
+                            const memEmails = parseEmailAddressList(m.email);
+                            return (
+                              <option key={`${g.id}-${m.id}`} value={`member:${g.id}:${m.id}`}>
+                                {memEmails.length > 1
+                                  ? `${m.nombre || 'Línea'} (${memEmails.length} correos) · ${g.nombre}`
+                                  : `${m.nombre ? `${m.nombre} · ` : ''}${memEmails[0] || m.email} (${g.nombre})`}
+                              </option>
+                            );
+                          })
                         )}
                       </optgroup>
                     )}
@@ -795,10 +933,10 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
 
                   {defaultCopiaGroups.length > 0 && (
                     <p className="text-[11px] text-emerald-800 leading-snug">
-                      {defaultCopiaGroups.some((g) => g.miembros.length > 0)
+                      {defaultCopiaGroups.some((g) => getGroupUniqueEmails(g).length > 0)
                         ? `Copia automática incluida: ${defaultCopiaGroups
-                            .filter((g) => g.miembros.length > 0)
-                            .map((g) => `${g.nombre} (${g.miembros.length})`)
+                            .filter((g) => getGroupUniqueEmails(g).length > 0)
+                            .map((g) => `${g.nombre} (${getGroupUniqueEmails(g).length})`)
                             .join(', ')}.`
                         : `Grupo por defecto "${defaultCopiaGroups
                             .map((g) => g.nombre)
