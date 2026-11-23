@@ -23,13 +23,18 @@ import {
   SuiteModuleId,
   UserPermissionRecord,
   UserRole,
+  UserTypeId,
+  ViaticosTab,
 } from '../types';
 import {
   ALL_SUITE_MODULES,
+  ALL_VIATICOS_PANELS,
   deriveLegacyCompanyFields,
   emailToPermissionDocId,
   normalizeEmail,
   sanitizeModuleCompanyAccess,
+  sanitizeUserType,
+  sanitizeViaticosPanels,
   SUPER_ADMIN_EMAIL,
 } from '../utils/permissions';
 
@@ -82,6 +87,22 @@ const sanitizeRecord = (rec: UserPermissionRecord): UserPermissionRecord => {
 
   const legacy = deriveLegacyCompanyFields(moduleCompanyAccess, allowedModules, role);
 
+  const hasExplicitUserType =
+    role === 'admin' || typeof rec.userType === 'string';
+  const resolvedUserType: UserTypeId | undefined = hasExplicitUserType
+    ? sanitizeUserType(rec.userType, role)
+    : undefined;
+  const resolvedViaticosPanels: ViaticosTab[] =
+    role === 'admin'
+      ? [...ALL_VIATICOS_PANELS]
+      : !allowedModules.includes('viaticos')
+      ? []
+      : Array.isArray(rec.viaticosPanels)
+      ? sanitizeViaticosPanels(rec.viaticosPanels, role, allowedModules, resolvedUserType)
+      : resolvedUserType
+      ? sanitizeViaticosPanels(undefined, role, allowedModules, resolvedUserType)
+      : [...ALL_VIATICOS_PANELS];
+
   const clean: UserPermissionRecord = {
     id: emailToPermissionDocId(email),
     email,
@@ -91,12 +112,16 @@ const sanitizeRecord = (rec: UserPermissionRecord): UserPermissionRecord => {
     ),
     role,
     allowedModules,
+    viaticosPanels: resolvedViaticosPanels,
     companyScope: legacy.companyScope,
     allowedCompanies: legacy.allowedCompanies,
     moduleCompanyAccess,
     active: isSuper ? true : Boolean(rec.active),
   };
 
+  if (resolvedUserType) {
+    clean.userType = resolvedUserType;
+  }
   if (rec.notes && String(rec.notes).trim()) {
     clean.notes = String(rec.notes).trim().slice(0, 300);
   }
@@ -202,7 +227,11 @@ const parsePermissionDocData = (
     email,
     displayName: String(data.displayName || email),
     role: data.role as UserRole,
+    userType: typeof data.userType === 'string' ? (data.userType as UserTypeId) : undefined,
     allowedModules: Array.isArray(data.allowedModules) ? data.allowedModules : [],
+    viaticosPanels: Array.isArray(data.viaticosPanels)
+      ? (data.viaticosPanels as ViaticosTab[])
+      : undefined,
     companyScope: data.companyScope === 'selected' ? 'selected' : 'all',
     allowedCompanies: Array.isArray(data.allowedCompanies) ? data.allowedCompanies : [],
     moduleCompanyAccess:
@@ -498,11 +527,18 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
     const cleanRec = sanitizeRecord(params.changedRecord);
     const docId = cleanRec.id;
     const path = `user_permissions/${docId}`;
+    const resolvedUserType: UserTypeId =
+      cleanRec.userType || sanitizeUserType(undefined, cleanRec.role);
+    const resolvedViaticosPanels: ViaticosTab[] =
+      cleanRec.viaticosPanels || [...ALL_VIATICOS_PANELS];
+
     const payloadBase: Record<string, unknown> = {
       email: cleanRec.email,
       displayName: cleanRec.displayName,
       role: cleanRec.role,
+      userType: resolvedUserType,
       allowedModules: cleanRec.allowedModules,
+      viaticosPanels: resolvedViaticosPanels,
       companyScope: cleanRec.companyScope,
       allowedCompanies: cleanRec.allowedCompanies,
       moduleCompanyAccess: cleanRec.moduleCompanyAccess || {},
@@ -518,7 +554,9 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
         const updatePayload: Record<string, unknown> = {
           displayName: cleanRec.displayName,
           role: cleanRec.role,
+          userType: resolvedUserType,
           allowedModules: cleanRec.allowedModules,
+          viaticosPanels: resolvedViaticosPanels,
           companyScope: cleanRec.companyScope,
           allowedCompanies: cleanRec.allowedCompanies,
           moduleCompanyAccess: cleanRec.moduleCompanyAccess || {},
@@ -547,7 +585,9 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
           ? {
               displayName: cleanRec.displayName,
               role: cleanRec.role,
+              userType: resolvedUserType,
               allowedModules: cleanRec.allowedModules,
+              viaticosPanels: resolvedViaticosPanels,
               companyScope: cleanRec.companyScope,
               allowedCompanies: cleanRec.allowedCompanies,
               moduleCompanyAccess: cleanRec.moduleCompanyAccess || {},
@@ -559,7 +599,9 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
         await commitRestWrite('user_permissions', docId, restFields, isUpdate, [
           'displayName',
           'role',
+          'userType',
           'allowedModules',
+          'viaticosPanels',
           'companyScope',
           'allowedCompanies',
           'moduleCompanyAccess',
@@ -612,11 +654,17 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
     for (const rec of cleanAll) {
       const docId = rec.id;
       const path = `user_permissions/${docId}`;
+      const resolvedUserType: UserTypeId =
+        rec.userType || (rec.role === 'admin' ? 'administrador' : 'personalizado');
+      const resolvedPanels: ViaticosTab[] =
+        rec.viaticosPanels || [...ALL_VIATICOS_PANELS];
       const payload: Record<string, unknown> = {
         email: rec.email,
         displayName: rec.displayName,
         role: rec.role,
+        userType: resolvedUserType,
         allowedModules: rec.allowedModules,
+        viaticosPanels: resolvedPanels,
         companyScope: rec.companyScope,
         allowedCompanies: rec.allowedCompanies,
         moduleCompanyAccess: rec.moduleCompanyAccess || {},
@@ -661,7 +709,9 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
             [
               'displayName',
               'role',
+              'userType',
               'allowedModules',
+              'viaticosPanels',
               'companyScope',
               'allowedCompanies',
               'moduleCompanyAccess',

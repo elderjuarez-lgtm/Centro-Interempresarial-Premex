@@ -176,6 +176,14 @@ export type SuiteModuleId = FunctionalModuleId | 'ajustes';
 
 export type UserRole = 'admin' | 'operador' | 'consulta';
 
+export type UserTypeId =
+  | 'administrador'
+  | 'liquidador'
+  | 'contabilidad'
+  | 'autorizador'
+  | 'auditor'
+  | 'personalizado';
+
 export type CompanyAccessScope = 'all' | 'selected';
 
 export interface ModuleCompanyEntry {
@@ -202,7 +210,11 @@ export interface UserPermissionRecord {
   email: string;
   displayName: string;
   role: UserRole;
+  /** Perfil o tipo de usuario corporativo (ej. liquidador, contabilidad, autorizador, auditor) */
+  userType?: UserTypeId;
   allowedModules: SuiteModuleId[];
+  /** Opciones/paneles laterales permitidos dentro de Liquidación de Viáticos */
+  viaticosPanels?: ViaticosTab[];
   /** Legacy/fallback global company scope (derived automatically from moduleCompanyAccess) */
   companyScope: CompanyAccessScope;
   /** Legacy/fallback flattened company names */
@@ -225,6 +237,7 @@ export interface EffectivePermissions {
   email: string | null;
   displayName: string;
   role: UserRole;
+  userType: UserTypeId;
   isAuthorized: boolean;
   isSuperAdmin: boolean;
   isAdmin: boolean;
@@ -233,10 +246,12 @@ export interface EffectivePermissions {
   canCloseMonth: boolean;
   canManageMasterData: boolean;
   allowedModules: SuiteModuleId[];
+  viaticosPanels: ViaticosTab[];
   companyScope: CompanyAccessScope;
   allowedCompanies: string[];
   moduleCompanyAccess: ModuleCompanyScopeMap;
   canAccessModule: (moduleId: SuiteModuleId) => boolean;
+  canAccessViaticosPanel: (panelId: ViaticosTab) => boolean;
   isCompanyAllowed: (companyName: string, moduleId?: FunctionalModuleId) => boolean;
   getModuleCompanyScope: (moduleId: FunctionalModuleId) => CompanyAccessScope;
   getAllowedCompaniesForModule: (moduleId: FunctionalModuleId) => string[];
@@ -513,7 +528,25 @@ export interface BankClosedReconciliation {
 // Liquidación de Viáticos Types
 // ============================================================================
 
-export type ViaticosTab = 'liquidador' | 'cerradas' | 'contabilidad' | 'historial';
+export type ViaticosTab = 'liquidador' | 'cerradas' | 'contabilidad' | 'historial' | 'correos';
+
+export type ViaticoEmailGroupType = 'dirigido' | 'copia';
+
+export interface ViaticoEmailMember {
+  id: string;
+  nombre: string;
+  email: string;
+}
+
+export interface ViaticoEmailGroup {
+  id: string;
+  nombre: string;
+  tipo: ViaticoEmailGroupType;
+  descripcion?: string;
+  miembros: ViaticoEmailMember[];
+  porDefecto?: boolean;
+  activo: boolean;
+}
 
 export type ViaticoCurrency =
   | 'Quetzales'
@@ -625,6 +658,7 @@ export interface ViaticosWorkspaceData {
   docId: string;
   consultores: ViaticoConsultor[];
   liquidaciones: ViaticoLiquidation[];
+  emailGroups?: ViaticoEmailGroup[];
   activeLiquidationId: string;
   lastSavedAtIso: string | null;
   hasUnsavedChanges: boolean;

@@ -19,6 +19,8 @@ import {
 import { handleFirestoreError, OperationType } from './reconciliationStore';
 import {
   ViaticoConsultor,
+  ViaticoEmailGroup,
+  ViaticoEmailMember,
   ViaticoExpenseItem,
   ViaticoLiquidation,
 } from '../types';
@@ -34,8 +36,35 @@ export interface SavedViaticosWorkspaceDoc {
   activeLiquidationId?: string;
   consultores: ViaticoConsultor[];
   liquidaciones: ViaticoLiquidation[];
+  emailGroups?: ViaticoEmailGroup[];
   updatedAtIso?: string;
 }
+
+const sanitizeEmailMember = (m: ViaticoEmailMember, idx: number): ViaticoEmailMember => ({
+  id: String(m?.id || `member-${Date.now()}-${idx}`).slice(0, 120),
+  nombre: String(m?.nombre || '').trim().slice(0, 140),
+  email: String(m?.email || '').trim().toLowerCase().slice(0, 160),
+});
+
+const sanitizeEmailGroup = (g: ViaticoEmailGroup, idx: number): ViaticoEmailGroup => {
+  const cleanMembers = (Array.isArray(g?.miembros) ? g.miembros : [])
+    .slice(0, 80)
+    .map((m, mIdx) => sanitizeEmailMember(m, mIdx))
+    .filter((m) => m.email.includes('@'));
+
+  const clean: ViaticoEmailGroup = {
+    id: String(g?.id || `mailgrp-${Date.now()}-${idx}`).slice(0, 120),
+    nombre: String(g?.nombre || 'Lista de Correos').trim().slice(0, 140),
+    tipo: g?.tipo === 'copia' ? 'copia' : 'dirigido',
+    porDefecto: Boolean(g?.porDefecto),
+    activo: g?.activo !== false,
+    miembros: cleanMembers,
+  };
+  if (g?.descripcion && String(g.descripcion).trim()) {
+    clean.descripcion = String(g.descripcion).trim().slice(0, 240);
+  }
+  return clean;
+};
 
 const sanitizeConsultor = (c: ViaticoConsultor): ViaticoConsultor => ({
   id: String(c.id || `cons-${Date.now()}`).slice(0, 120),
@@ -200,6 +229,11 @@ const fetchAuthViaticosViaRest = async (
     liquidaciones: Array.isArray(fields.liquidaciones)
       ? fields.liquidaciones.map(sanitizeLiquidation)
       : [],
+    emailGroups: Array.isArray(fields.emailGroups)
+      ? fields.emailGroups.map((g: ViaticoEmailGroup, idx: number) =>
+          sanitizeEmailGroup(g, idx)
+        )
+      : undefined,
     updatedAtIso: fields.updatedAt ? String(fields.updatedAt) : undefined,
   };
 };
@@ -243,6 +277,11 @@ export const subscribeToViaticosWorkspace = (
         liquidaciones: Array.isArray(data.liquidaciones)
           ? data.liquidaciones.map(sanitizeLiquidation)
           : [],
+        emailGroups: Array.isArray(data.emailGroups)
+          ? data.emailGroups.map((g: ViaticoEmailGroup, idx: number) =>
+              sanitizeEmailGroup(g, idx)
+            )
+          : undefined,
         updatedAtIso:
           data.updatedAt instanceof Timestamp
             ? data.updatedAt.toDate().toISOString()
@@ -271,6 +310,7 @@ export const saveViaticosWorkspaceToCloud = async (params: {
   activeLiquidationId?: string;
   consultores: ViaticoConsultor[];
   liquidaciones: ViaticoLiquidation[];
+  emailGroups?: ViaticoEmailGroup[];
 }): Promise<{ id: string; updatedAtIso: string }> => {
   const user = auth.currentUser;
   if (!user) {
@@ -286,6 +326,9 @@ export const saveViaticosWorkspaceToCloud = async (params: {
   const path = `viaticos_workspaces/${docId}`;
   const cleanConsultores = params.consultores.slice(0, 200).map(sanitizeConsultor);
   const cleanLiquidaciones = params.liquidaciones.slice(0, 500).map(sanitizeLiquidation);
+  const cleanEmailGroups = (params.emailGroups || [])
+    .slice(0, 100)
+    .map((g, idx) => sanitizeEmailGroup(g, idx));
   const safeTitle = String(params.title || 'Liquidación de Viáticos Premex')
     .trim()
     .slice(0, 150);
@@ -298,6 +341,7 @@ export const saveViaticosWorkspaceToCloud = async (params: {
     activeLiquidationId: activeLiqId,
     consultores: cleanConsultores,
     liquidaciones: cleanLiquidaciones,
+    emailGroups: cleanEmailGroups,
     consultoresCount: cleanConsultores.length,
     liquidacionesCount: cleanLiquidaciones.length,
   };
@@ -360,6 +404,7 @@ export const saveViaticosWorkspaceToCloud = async (params: {
             'activeLiquidationId',
             'consultores',
             'liquidaciones',
+            'emailGroups',
             'consultoresCount',
             'liquidacionesCount',
           ],

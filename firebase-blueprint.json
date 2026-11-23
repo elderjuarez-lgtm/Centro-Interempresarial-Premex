@@ -347,9 +347,18 @@
           "enum": ["admin", "operador", "consulta"],
           "description": "RBAC privilege tier"
         },
+        "userType": {
+          "type": "string",
+          "enum": ["administrador", "liquidador", "contabilidad", "autorizador", "auditor", "personalizado"],
+          "description": "Functional corporate profile / user type governing default panel visibility and liquidation scope"
+        },
         "allowedModules": {
           "type": "array",
           "description": "List of suite module identifiers accessible to this user"
+        },
+        "viaticosPanels": {
+          "type": "array",
+          "description": "Granular list of visible Viáticos lateral panel IDs (liquidador, cerradas, contabilidad, historial, correos)"
         },
         "companyScope": {
           "type": "string",
@@ -512,6 +521,10 @@
         "liquidaciones": {
           "type": "array",
           "description": "Bounded list of weekly travel expense settlements, cost center snapshots, and line items"
+        },
+        "emailGroups": {
+          "type": "array",
+          "description": "Bounded catalog of grouped email mailing lists (Authorizers 'Para' and Accounting CC groups) with member names and emails"
         },
         "consultoresCount": {
           "type": "integer",

@@ -12,6 +12,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  Mail,
 } from 'lucide-react';
 import {
   ActiveModuleId,
@@ -19,6 +20,7 @@ import {
   ModuleCompanyEntry,
   ViaticoConsultor,
   ViaticoCurrency,
+  ViaticoEmailGroup,
   ViaticoExpenseItem,
   ViaticoLiquidation,
   ViaticosTab,
@@ -40,7 +42,7 @@ import {
   resolveViaticosConsultantScope,
   roundMoney,
 } from '../../utils/viaticos';
-import { normalizeEmail } from '../../utils/permissions';
+import { ALL_VIATICOS_PANELS, normalizeEmail } from '../../utils/permissions';
 import {
   exportViaticosExcel,
   exportViaticosReceiptsPdf,
@@ -50,6 +52,7 @@ import { ViaticosHeader } from './ViaticosHeader';
 import { ViaticosLiquidadorView } from './ViaticosLiquidadorView';
 import { ViaticosHistorialView } from './ViaticosHistorialView';
 import { ViaticosContabilidadView } from './ViaticosContabilidadView';
+import { ViaticosEmailDirectoryView } from './ViaticosEmailDirectoryView';
 import { ViaticosCloseEmailModal } from './ViaticosCloseEmailModal';
 import { ViaticosPlanillaPdfModal } from './ViaticosPlanillaPdfModal';
 import {
@@ -90,8 +93,27 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   permissions,
   moduleCompanies = [],
 }) => {
-  const [activeTab, setActiveTab] = useState<ViaticosTab>('liquidador');
+  const allowedPanels = useMemo(
+    () =>
+      ALL_VIATICOS_PANELS.filter((panel) =>
+        permissions.canAccessViaticosPanel(panel)
+      ),
+    [permissions]
+  );
+  const [activeTab, setActiveTab] = useState<ViaticosTab>(
+    () =>
+      ALL_VIATICOS_PANELS.find((panel) =>
+        permissions.canAccessViaticosPanel(panel)
+      ) || 'liquidador'
+  );
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!permissions.canAccessViaticosPanel(activeTab)) {
+      const fallback = allowedPanels[0] || 'cerradas';
+      setActiveTab(fallback);
+    }
+  }, [activeTab, allowedPanels, permissions]);
   const [isSavingCloud, setIsSavingCloud] = useState(false);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -426,7 +448,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       updatedAtIso: nowIso,
     };
 
-    setActiveTab('liquidador');
+    if (permissions.canAccessViaticosPanel('liquidador')) {
+      setActiveTab('liquidador');
+    }
     mutateAndAutoSync(
       (prev) => ({
         ...prev,
@@ -800,6 +824,22 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     );
   };
 
+  const handleSaveEmailGroups = (nextGroups: ViaticoEmailGroup[]) => {
+    if (!permissions.canOperate) return;
+    mutateAndAutoSync(
+      (prev) => ({
+        ...prev,
+        emailGroups: nextGroups,
+      }),
+      {
+        successMessage:
+          'Listas de correos y autorizadores guardadas y sincronizadas en la nube.',
+        offlineMessage:
+          'Listas de correos guardadas localmente (inicia sesión para sincronizar en la nube).',
+      }
+    );
+  };
+
   const handleQuickDownloadExcel = async (target?: ViaticoLiquidation | null) => {
     const liq = target || activeLiquidation;
     if (!liq || liq.items.length === 0) return;
@@ -859,6 +899,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         closedLiquidacionesCount={closedLiquidacionesCount}
         accountingLiquidacionesCount={accountingLiquidaciones.length}
         liquidacionesCount={visibleLiquidaciones.length}
+        emailGroupsCount={(data.emailGroups || []).filter((g) => g.activo !== false).length}
         consultorScopeLabel={sidebarScopeLabel}
       />
 
@@ -1037,7 +1078,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               }}
               isDownloadingExcel={isDownloadingExcel}
               isDownloadingPdf={isDownloadingPdf}
-              onOpenClosedArchive={() => setActiveTab('cerradas')}
+              onOpenClosedArchive={() => {
+                if (permissions.canAccessViaticosPanel('cerradas')) {
+                  setActiveTab('cerradas');
+                }
+              }}
               zoomPercent={zoomPercent}
             />
           ) : activeTab === 'contabilidad' ? (
@@ -1059,6 +1104,12 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               onAssignConsultorCostCenter={handleAssignConsultorCostCenter}
               onNotify={showToast}
             />
+          ) : activeTab === 'correos' ? (
+            <ViaticosEmailDirectoryView
+              emailGroups={data.emailGroups || []}
+              onSaveEmailGroups={handleSaveEmailGroups}
+              permissions={permissions}
+            />
           ) : (
             <ViaticosHistorialView
               viewMode={activeTab === 'cerradas' ? 'cerradas' : 'historial'}
@@ -1070,7 +1121,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               isLockedToOwnConsultor={scope.isLockedToOwnConsultor}
               onOpenLiquidation={(id) => {
                 handleSelectLiquidation(id);
-                setActiveTab('liquidador');
+                if (permissions.canAccessViaticosPanel('liquidador')) {
+                  setActiveTab('liquidador');
+                }
               }}
               onCreateNewLiquidation={handleOpenNewLiquidationModal}
               onDeleteLiquidation={handleDeleteLiquidation}
@@ -1133,7 +1186,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         onDownloadExcel={(liq) => handleQuickDownloadExcel(liq)}
         onDownloadPdf={(liq) => handleQuickDownloadPdf(liq)}
         onOpenEmailModal={(liqId) => setCloseModalLiqId(liqId)}
-        onGoToClosedArchive={() => setActiveTab('cerradas')}
+        onGoToClosedArchive={() => {
+          if (permissions.canAccessViaticosPanel('cerradas')) {
+            setActiveTab('cerradas');
+          }
+        }}
         onStartNewLiquidation={() => setIsNewModalOpen(true)}
       />
 
@@ -1149,6 +1206,14 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         }
         mediaMap={mediaMap}
         permissions={permissions}
+        emailGroups={data.emailGroups || []}
+        canManageEmailGroups={
+          permissions.canOperate && permissions.canAccessViaticosPanel('correos')
+        }
+        onOpenEmailDirectory={() => {
+          setCloseModalLiqId(null);
+          setActiveTab('correos');
+        }}
         accessToken={accessToken}
         onReconnectWorkspace={onReconnectWorkspace}
         onInvalidateWorkspaceToken={onInvalidateWorkspaceToken}
@@ -1169,41 +1234,64 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       />
 
       {/* Mobile Bottom Navigation Bar */}
-      <nav
-        aria-label="Navegación móvil de viáticos"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe print:hidden shadow-[0_-4px_16px_rgba(15,23,42,0.06)]"
-      >
-        <div className="grid grid-cols-4 h-[60px]">
-          {(
-            [
-              { id: 'liquidador' as ViaticosTab, label: 'Activas', icon: FileText },
-              { id: 'cerradas' as ViaticosTab, label: 'Cerradas', icon: Archive },
-              { id: 'contabilidad' as ViaticosTab, label: 'Contab.', icon: Calculator },
-              { id: 'historial' as ViaticosTab, label: 'Historial', icon: FolderClock },
-            ] as const
-          ).map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                aria-current={isActive ? 'page' : undefined}
-                onClick={() => setActiveTab(item.id)}
-                className={`relative flex flex-col items-center justify-center gap-[3px] text-[12px] font-bold transition-colors cursor-pointer ${
-                  isActive ? 'text-[#132B63]' : 'text-slate-500'
-                }`}
-              >
-                {isActive && (
-                  <span className="absolute top-0 left-4 right-4 h-[2px] rounded-b-full bg-[#1E60A8]" />
-                )}
-                <Icon className={`w-[20px] h-[20px] ${isActive ? 'text-[#1E60A8]' : 'text-slate-400'}`} />
-                <span className="truncate max-w-[82px]">{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      {(() => {
+        const mobileNavItems = (
+          [
+            { id: 'liquidador' as ViaticosTab, label: 'Activas', icon: FileText },
+            { id: 'cerradas' as ViaticosTab, label: 'Cerradas', icon: Archive },
+            { id: 'contabilidad' as ViaticosTab, label: 'Contab.', icon: Calculator },
+            { id: 'historial' as ViaticosTab, label: 'Historial', icon: FolderClock },
+            { id: 'correos' as ViaticosTab, label: 'Correos', icon: Mail },
+          ] as const
+        ).filter((item) => permissions.canAccessViaticosPanel(item.id));
+
+        if (mobileNavItems.length === 0) return null;
+        const gridColsClass =
+          (
+            {
+              1: 'grid-cols-1',
+              2: 'grid-cols-2',
+              3: 'grid-cols-3',
+              4: 'grid-cols-4',
+              5: 'grid-cols-5',
+            } as Record<number, string>
+          )[mobileNavItems.length] || 'grid-cols-4';
+
+        return (
+          <nav
+            aria-label="Navegación móvil de viáticos"
+            className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe print:hidden shadow-[0_-4px_16px_rgba(15,23,42,0.06)]"
+          >
+            <div className={`grid ${gridColsClass} h-[60px]`}>
+              {mobileNavItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => setActiveTab(item.id)}
+                    className={`relative flex flex-col items-center justify-center gap-[3px] text-[11px] font-bold transition-colors cursor-pointer ${
+                      isActive ? 'text-[#132B63]' : 'text-slate-500'
+                    }`}
+                  >
+                    {isActive && (
+                      <span className="absolute top-0 left-3 right-3 h-[2px] rounded-b-full bg-[#1E60A8]" />
+                    )}
+                    <Icon
+                      className={`w-[20px] h-[20px] ${
+                        isActive ? 'text-[#1E60A8]' : 'text-slate-400'
+                      }`}
+                    />
+                    <span className="truncate max-w-[74px]">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+        );
+      })()}
     </div>
   );
 };

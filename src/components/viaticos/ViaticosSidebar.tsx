@@ -8,12 +8,13 @@ import {
   X,
   ArrowLeft,
   UserCheck,
+  Mail,
 } from 'lucide-react';
 import { ActiveModuleId, EffectivePermissions, ViaticosTab } from '../../types';
 import { PremexBrandLogo, ViaticosModuleLogo } from '../ModuleIcons';
 import { AppSwitcherMenu } from '../AppSwitcherMenu';
 import { PWAInstallButton } from '../PWAInstallPrompt';
-import { ROLE_METADATA } from '../../utils/permissions';
+import { ROLE_METADATA, USER_TYPE_METADATA } from '../../utils/permissions';
 
 interface ViaticosSidebarProps {
   activeTab: ViaticosTab;
@@ -26,6 +27,7 @@ interface ViaticosSidebarProps {
   closedLiquidacionesCount: number;
   accountingLiquidacionesCount: number;
   liquidacionesCount: number;
+  emailGroupsCount?: number;
   consultorScopeLabel: string;
 }
 
@@ -40,9 +42,10 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
   closedLiquidacionesCount,
   accountingLiquidacionesCount,
   liquidacionesCount,
+  emailGroupsCount,
   consultorScopeLabel,
 }) => {
-  const navItems: {
+  const allNavItems: {
     id: ViaticosTab;
     label: string;
     description: string;
@@ -77,9 +80,18 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
       icon: FolderClock,
       counter: String(liquidacionesCount),
     },
+    {
+      id: 'correos',
+      label: 'Listas de Correos',
+      description: 'Autorizadores y copia contable',
+      icon: Mail,
+      counter: typeof emailGroupsCount === 'number' ? String(emailGroupsCount) : undefined,
+    },
   ];
 
+  const navItems = allNavItems.filter((item) => permissions.canAccessViaticosPanel(item.id));
   const roleLabel = ROLE_METADATA[permissions.role].label;
+  const userTypeLabel = USER_TYPE_METADATA[permissions.userType]?.shortLabel || 'Usuario';
 
   return (
     <>
@@ -200,7 +212,9 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
         <div className="px-4 py-3 border-t border-white/10 bg-[#0A1838]/40 space-y-1.5">
           <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-200/70">
             <UserCheck className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-            <span>Perfil Liquidador · {roleLabel}</span>
+            <span>
+              {userTypeLabel} · {roleLabel}
+            </span>
           </div>
           <p className="text-xs text-white/90 font-medium leading-snug truncate" title={consultorScopeLabel}>
             {consultorScopeLabel}

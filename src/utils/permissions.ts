@@ -15,6 +15,8 @@ import {
   SuiteModuleId,
   UserPermissionRecord,
   UserRole,
+  UserTypeId,
+  ViaticosTab,
 } from '../types';
 
 export const SUPER_ADMIN_EMAIL = 'elder.juarez@premexcorp.com';
@@ -41,6 +43,148 @@ export const ALL_SUITE_MODULES: SuiteModuleId[] = [
 ];
 
 const FUNCTIONAL_MODULE_SET = new Set<FunctionalModuleId>(ALL_FUNCTIONAL_MODULES);
+
+export const ALL_VIATICOS_PANELS: ViaticosTab[] = [
+  'liquidador',
+  'cerradas',
+  'contabilidad',
+  'historial',
+  'correos',
+];
+
+const VALID_VIATICOS_PANEL_SET = new Set<ViaticosTab>(ALL_VIATICOS_PANELS);
+
+export const VIATICOS_PANEL_METADATA: Record<
+  ViaticosTab,
+  {
+    label: string;
+    shortLabel: string;
+    description: string;
+  }
+> = {
+  liquidador: {
+    label: 'Liquidadores (Activas)',
+    shortLabel: 'Activas',
+    description: 'Captura de facturas, escaneo IA y edición de planilla activa',
+  },
+  cerradas: {
+    label: 'Liquidaciones Cerradas',
+    shortLabel: 'Cerradas',
+    description: 'Consulta, exportación Excel y PDF de liquidaciones cerradas',
+  },
+  contabilidad: {
+    label: 'Contabilidad (Odoo)',
+    shortLabel: 'Contabilidad',
+    description: 'Consolidado contable por centro de costo y exportación Odoo',
+  },
+  historial: {
+    label: 'Historial y Consultores',
+    shortLabel: 'Historial',
+    description: 'Histórico completo por semanas y directorio de consultores',
+  },
+  correos: {
+    label: 'Listas de Correos',
+    shortLabel: 'Correos',
+    description: 'Grupos de autorizadores (Para) y equipo contable en copia (CC)',
+  },
+};
+
+export const ALL_USER_TYPES: UserTypeId[] = [
+  'administrador',
+  'liquidador',
+  'contabilidad',
+  'autorizador',
+  'auditor',
+  'personalizado',
+];
+
+const VALID_USER_TYPE_SET = new Set<UserTypeId>(ALL_USER_TYPES);
+
+export const USER_TYPE_METADATA: Record<
+  UserTypeId,
+  {
+    label: string;
+    shortLabel: string;
+    description: string;
+    recommendedRole: UserRole;
+    defaultViaticosPanels: ViaticosTab[];
+  }
+> = {
+  administrador: {
+    label: 'Administrador General',
+    shortLabel: 'Admin',
+    description: 'Acceso completo a todos los módulos, empresas y paneles de Viáticos.',
+    recommendedRole: 'admin',
+    defaultViaticosPanels: [...ALL_VIATICOS_PANELS],
+  },
+  liquidador: {
+    label: 'Liquidador / Consultor',
+    shortLabel: 'Liquidador',
+    description: 'Registra sus facturas, gestiona sus liquidaciones activas y consulta cierres.',
+    recommendedRole: 'operador',
+    defaultViaticosPanels: ['liquidador', 'cerradas'],
+  },
+  contabilidad: {
+    label: 'Contabilidad / Tesorería',
+    shortLabel: 'Contabilidad',
+    description: 'Revisa consolidado contable, históricos, cierres, Odoo y listas de correos.',
+    recommendedRole: 'operador',
+    defaultViaticosPanels: ['cerradas', 'contabilidad', 'historial', 'correos'],
+  },
+  autorizador: {
+    label: 'Autorizador / Jefatura',
+    shortLabel: 'Autorizador',
+    description: 'Revisa y valida liquidaciones cerradas e históricos de su equipo o sociedades.',
+    recommendedRole: 'consulta',
+    defaultViaticosPanels: ['cerradas', 'historial'],
+  },
+  auditor: {
+    label: 'Auditor / Consulta',
+    shortLabel: 'Auditor',
+    description: 'Acceso de solo lectura para auditoría de cierres, contabilidad e históricos.',
+    recommendedRole: 'consulta',
+    defaultViaticosPanels: ['cerradas', 'contabilidad', 'historial'],
+  },
+  personalizado: {
+    label: 'Personalizado',
+    shortLabel: 'Personalizado',
+    description: 'Combinación manual de rol, módulos y paneles laterales visibles.',
+    recommendedRole: 'operador',
+    defaultViaticosPanels: [...ALL_VIATICOS_PANELS],
+  },
+};
+
+export const sanitizeUserType = (
+  raw: unknown,
+  role: UserRole
+): UserTypeId => {
+  if (role === 'admin') return 'administrador';
+  if (typeof raw === 'string' && VALID_USER_TYPE_SET.has(raw as UserTypeId)) {
+    const typed = raw as UserTypeId;
+    return typed === 'administrador' ? 'personalizado' : typed;
+  }
+  return role === 'operador' ? 'liquidador' : 'auditor';
+};
+
+export const sanitizeViaticosPanels = (
+  rawPanels: unknown,
+  role: UserRole,
+  allowedModules: SuiteModuleId[],
+  userType?: UserTypeId
+): ViaticosTab[] => {
+  if (role === 'admin') return [...ALL_VIATICOS_PANELS];
+  if (!allowedModules.includes('viaticos')) return [];
+  if (Array.isArray(rawPanels)) {
+    const picked = new Set(
+      rawPanels.filter((p): p is ViaticosTab => VALID_VIATICOS_PANEL_SET.has(p as ViaticosTab))
+    );
+    return ALL_VIATICOS_PANELS.filter((p) => picked.has(p));
+  }
+  if (userType && USER_TYPE_METADATA[userType]) {
+    return [...USER_TYPE_METADATA[userType].defaultViaticosPanels];
+  }
+  return [...ALL_VIATICOS_PANELS];
+};
 
 export const ROLE_METADATA: Record<
   UserRole,
@@ -318,7 +462,9 @@ export const ensureSuperAdminRecord = (
             id: superId,
             email: SUPER_ADMIN_EMAIL,
             role: 'admin',
+            userType: 'administrador',
             allowedModules: [...ALL_SUITE_MODULES],
+            viaticosPanels: [...ALL_VIATICOS_PANELS],
             companyScope: 'all',
             allowedCompanies: [],
             moduleCompanyAccess: {},
@@ -337,12 +483,28 @@ const buildPermissionsFromRecord = (
   previewEmail: string | null
 ): EffectivePermissions => {
   const role: UserRole = isSuperAdmin ? 'admin' : record.role;
+  const userType: UserTypeId = isSuperAdmin
+    ? 'administrador'
+    : sanitizeUserType(record.userType, role);
   const isAdmin = role === 'admin';
   const canOperate = role === 'admin' || role === 'operador';
   const isReadOnly = role === 'consulta';
   const allowedModules: SuiteModuleId[] = isAdmin
     ? [...ALL_SUITE_MODULES]
     : Array.from(new Set(record.allowedModules.filter((m) => m !== 'ajustes')));
+
+  // Backwards compatibility: if an older user doc was saved before `viaticosPanels` existed
+  // (`record.viaticosPanels === undefined` and `record.userType === undefined`), preserve all panels
+  // until an administrator explicitly picks specific lateral panels.
+  const viaticosPanels: ViaticosTab[] = isAdmin
+    ? [...ALL_VIATICOS_PANELS]
+    : !allowedModules.includes('viaticos')
+    ? []
+    : Array.isArray(record.viaticosPanels)
+    ? sanitizeViaticosPanels(record.viaticosPanels, role, allowedModules, userType)
+    : record.userType
+    ? sanitizeViaticosPanels(undefined, role, allowedModules, userType)
+    : [...ALL_VIATICOS_PANELS];
 
   const moduleCompanyAccess: ModuleCompanyScopeMap = isAdmin
     ? {}
@@ -384,6 +546,7 @@ const buildPermissionsFromRecord = (
     email: normalizeEmail(record.email),
     displayName: record.displayName || record.email,
     role,
+    userType,
     isAuthorized: isSuperAdmin || record.active,
     isSuperAdmin,
     isAdmin,
@@ -392,6 +555,7 @@ const buildPermissionsFromRecord = (
     canCloseMonth: isAdmin,
     canManageMasterData: isAdmin,
     allowedModules,
+    viaticosPanels,
     companyScope,
     allowedCompanies,
     moduleCompanyAccess,
@@ -400,6 +564,12 @@ const buildPermissionsFromRecord = (
       if (!record.active) return false;
       if (moduleId === 'ajustes') return false;
       return allowedModules.includes(moduleId);
+    },
+    canAccessViaticosPanel: (panelId: ViaticosTab) => {
+      if (isAdmin) return true;
+      if (!record.active) return false;
+      if (!allowedModules.includes('viaticos')) return false;
+      return viaticosPanels.includes(panelId);
     },
     getModuleCompanyScope,
     getAllowedCompaniesForModule,
@@ -452,6 +622,7 @@ export const resolveEffectivePermissions = (params: {
       email: currentUser?.email ? normalizeEmail(currentUser.email) : null,
       displayName: currentUser?.displayName || 'Sin iniciar sesión',
       role: 'consulta',
+      userType: 'auditor',
       isAuthorized: false,
       isSuperAdmin: false,
       isAdmin: false,
@@ -460,10 +631,12 @@ export const resolveEffectivePermissions = (params: {
       canCloseMonth: false,
       canManageMasterData: false,
       allowedModules: [],
+      viaticosPanels: [],
       companyScope: 'selected',
       allowedCompanies: [],
       moduleCompanyAccess: {},
       canAccessModule: () => false,
+      canAccessViaticosPanel: () => false,
       isCompanyAllowed: () => false,
       getModuleCompanyScope: () => 'selected',
       getAllowedCompaniesForModule: () => [],
@@ -519,6 +692,7 @@ export const resolveEffectivePermissions = (params: {
       email: userEmail,
       displayName: currentUser?.displayName || userEmail,
       role: 'consulta',
+      userType: 'auditor',
       isAuthorized: false,
       isSuperAdmin: false,
       isAdmin: false,
@@ -527,10 +701,12 @@ export const resolveEffectivePermissions = (params: {
       canCloseMonth: false,
       canManageMasterData: false,
       allowedModules: [],
+      viaticosPanels: [],
       companyScope: 'selected',
       allowedCompanies: [],
       moduleCompanyAccess: {},
       canAccessModule: () => false,
+      canAccessViaticosPanel: () => false,
       isCompanyAllowed: () => false,
       getModuleCompanyScope: () => 'selected',
       getAllowedCompaniesForModule: () => [],
@@ -544,6 +720,7 @@ export const resolveEffectivePermissions = (params: {
     email: userEmail,
     displayName: currentUser?.displayName || userEmail,
     role: 'consulta',
+    userType: 'auditor',
     isAuthorized: true,
     isSuperAdmin: false,
     isAdmin: false,
@@ -552,6 +729,7 @@ export const resolveEffectivePermissions = (params: {
     canCloseMonth: false,
     canManageMasterData: false,
     allowedModules: ['intercompany', 'bancos', 'viaticos', 'actividades'],
+    viaticosPanels: [...ALL_VIATICOS_PANELS],
     companyScope: 'all',
     allowedCompanies: [],
     moduleCompanyAccess: {
@@ -562,6 +740,7 @@ export const resolveEffectivePermissions = (params: {
     },
     canAccessModule: (m) =>
       m === 'intercompany' || m === 'bancos' || m === 'viaticos' || m === 'actividades',
+    canAccessViaticosPanel: () => true,
     isCompanyAllowed: () => true,
     getModuleCompanyScope: () => 'all',
     getAllowedCompaniesForModule: () => [],

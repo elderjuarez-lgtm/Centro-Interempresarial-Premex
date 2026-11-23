@@ -150,6 +150,8 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
                 ? 'Liquidaciones Cerradas'
                 : activeTab === 'contabilidad'
                 ? 'Contabilidad y Odoo'
+                : activeTab === 'correos'
+                ? 'Listas de Correos y Autorizadores'
                 : 'Historial y Consultores'}
             </h2>
           </div>
@@ -157,7 +159,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
 
         {/* Right: Mobile Essential Actions + Desktop Full Toolbar */}
         <div className="flex items-center gap-1.5 lg:gap-2 shrink-0">
-          {permissions.canOperate && (
+          {permissions.canOperate && permissions.canAccessViaticosPanel('liquidador') && (
             <button
               type="button"
               onClick={onCreateNewLiquidation}

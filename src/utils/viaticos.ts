@@ -3,6 +3,7 @@ import {
   ViaticoCategory,
   ViaticoConsultor,
   ViaticoCurrency,
+  ViaticoEmailGroup,
   ViaticoExpenseItem,
   ViaticoLiquidation,
   ViaticoOdooConfig,
@@ -229,8 +230,15 @@ export const resolveViaticosConsultantScope = (
 
   const matched = matchConsultorFromEmail(permissions.email, consultores);
 
+  const isBroadReviewerProfile =
+    permissions.isAdmin ||
+    permissions.userType === 'contabilidad' ||
+    permissions.userType === 'autorizador' ||
+    permissions.userType === 'auditor' ||
+    permissions.canAccessViaticosPanel('contabilidad');
+
   // Operador (Liquidador): scoped automatically to their own consultant profile detected via email
-  if (permissions.role === 'operador' && permissions.email) {
+  if (permissions.role === 'operador' && permissions.email && !isBroadReviewerProfile) {
     if (matched) {
       return {
         matchedConsultor: matched,
@@ -266,7 +274,7 @@ export const resolveViaticosConsultantScope = (
     };
   }
 
-  // Solo Consulta: can inspect liquidaciones of their own matched consultant or permitted Viáticos companies
+  // Contabilidad / Autorizador / Auditor / Solo Consulta: can inspect all permitted-company liquidaciones
   return {
     matchedConsultor: matched,
     availableConsultores:
@@ -284,13 +292,18 @@ export const filterLiquidacionesByPermissions = (
   if (permissions.isAdmin) return liquidaciones;
 
   const viaticosScope = permissions.getModuleCompanyScope('viaticos');
+  const isBroadReviewerProfile =
+    permissions.userType === 'contabilidad' ||
+    permissions.userType === 'autorizador' ||
+    permissions.userType === 'auditor' ||
+    permissions.canAccessViaticosPanel('contabilidad');
 
   return liquidaciones.filter((liq) => {
     const companyOk =
       viaticosScope === 'all' || permissions.isCompanyAllowed(liq.empresa, 'viaticos');
     if (!companyOk) return false;
 
-    if (permissions.role === 'operador' && permissions.email) {
+    if (permissions.role === 'operador' && permissions.email && !isBroadReviewerProfile) {
       const userEmail = normalizeEmail(permissions.email);
       if (normalizeEmail(liq.consultorEmail) === userEmail) return true;
       if (matchedConsultor && liq.consultorId === matchedConsultor.id) return true;
@@ -709,4 +722,25 @@ export const INITIAL_VIATICO_LIQUIDACIONES: ViaticoLiquidation[] = [
     createdAtIso: '2026-07-31T16:00:00.000Z',
     updatedAtIso: '2026-07-31T18:30:00.000Z',
   }),
+];
+
+export const INITIAL_VIATICO_EMAIL_GROUPS: ViaticoEmailGroup[] = [
+  {
+    id: 'mailgrp-equipo-contable',
+    nombre: 'Equipo Contable',
+    tipo: 'copia',
+    descripcion: 'Copia automática de respaldo contable en cada envío de liquidación.',
+    porDefecto: true,
+    activo: true,
+    miembros: [],
+  },
+  {
+    id: 'mailgrp-jefe-ventas',
+    nombre: 'Jefe de Ventas',
+    tipo: 'dirigido',
+    descripcion: 'Grupo de autorizadores comerciales para aprobación de viáticos.',
+    porDefecto: false,
+    activo: true,
+    miembros: [],
+  },
 ];

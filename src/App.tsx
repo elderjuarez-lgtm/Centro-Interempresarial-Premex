@@ -34,6 +34,7 @@ import {
   AccessControlPolicy,
   UserPermissionRecord,
   ViaticoConsultor,
+  ViaticoEmailGroup,
   ViaticoLiquidation,
   ViaticosWorkspaceData,
   ActivitiesWorkspaceData,
@@ -69,6 +70,7 @@ import { computeBankReconciliationSummary } from './utils/bankReconciliation';
 import {
   INITIAL_VIATICO_CONSULTORES,
   INITIAL_VIATICO_LIQUIDACIONES,
+  INITIAL_VIATICO_EMAIL_GROUPS,
   filterLiquidacionesByPermissions,
   formatViaticoAmount,
   resolveViaticosConsultantScope,
@@ -200,6 +202,7 @@ const BANK_STORAGE_KEYS = {
 const VIATICOS_STORAGE_KEYS = {
   CONSULTORES: 'premex_viaticos_consultores_v1',
   LIQUIDACIONES: 'premex_viaticos_liquidaciones_v1',
+  EMAIL_GROUPS: 'premex_viaticos_email_groups_v1',
   ACTIVE_ID: 'premex_viaticos_active_id_v1',
   DOC_ID: 'premex_viaticos_doc_id_v1',
 };
@@ -504,6 +507,10 @@ function loadInitialViaticosWorkspace(): ViaticosWorkspaceData {
     VIATICOS_STORAGE_KEYS.LIQUIDACIONES,
     INITIAL_VIATICO_LIQUIDACIONES
   );
+  const emailGroups = readJsonStorage<ViaticoEmailGroup[]>(
+    VIATICOS_STORAGE_KEYS.EMAIL_GROUPS,
+    INITIAL_VIATICO_EMAIL_GROUPS
+  );
   const savedActiveId = (() => {
     try {
       const id = localStorage.getItem(VIATICOS_STORAGE_KEYS.ACTIVE_ID);
@@ -527,6 +534,10 @@ function loadInitialViaticosWorkspace(): ViaticosWorkspaceData {
     docId: savedDocId,
     consultores: consultores.length > 0 ? consultores : INITIAL_VIATICO_CONSULTORES,
     liquidaciones,
+    emailGroups:
+      Array.isArray(emailGroups) && emailGroups.length > 0
+        ? emailGroups
+        : INITIAL_VIATICO_EMAIL_GROUPS,
     activeLiquidationId: savedActiveId,
     lastSavedAtIso: null,
     hasUnsavedChanges: false,
@@ -1347,6 +1358,10 @@ export default function App() {
         JSON.stringify(viaticosWorkspace.liquidaciones)
       );
       localStorage.setItem(
+        VIATICOS_STORAGE_KEYS.EMAIL_GROUPS,
+        JSON.stringify(viaticosWorkspace.emailGroups || INITIAL_VIATICO_EMAIL_GROUPS)
+      );
+      localStorage.setItem(
         VIATICOS_STORAGE_KEYS.ACTIVE_ID,
         viaticosWorkspace.activeLiquidationId
       );
@@ -1374,6 +1389,10 @@ export default function App() {
             savedDoc.liquidaciones.length > 0
               ? savedDoc.liquidaciones
               : prev.liquidaciones,
+          emailGroups:
+            savedDoc.emailGroups && savedDoc.emailGroups.length > 0
+              ? savedDoc.emailGroups
+              : prev.emailGroups || INITIAL_VIATICO_EMAIL_GROUPS,
           activeLiquidationId:
             savedDoc.activeLiquidationId &&
             savedDoc.liquidaciones.some((l) => l.id === savedDoc.activeLiquidationId)
@@ -1679,6 +1698,7 @@ export default function App() {
         activeLiquidationId: source.activeLiquidationId,
         consultores: source.consultores,
         liquidaciones: source.liquidaciones,
+        emailGroups: source.emailGroups || INITIAL_VIATICO_EMAIL_GROUPS,
       });
       setViaticosWorkspace((prev) => {
         const hasNewerMutations = viaticosMutationSeqRef.current !== seqAtStart;

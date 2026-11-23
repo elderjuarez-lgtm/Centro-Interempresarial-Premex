@@ -15,8 +15,14 @@ import {
   Printer,
   Paperclip,
   RefreshCw,
+  Users,
+  Settings2,
 } from 'lucide-react';
-import { EffectivePermissions, ViaticoLiquidation } from '../../types';
+import {
+  EffectivePermissions,
+  ViaticoEmailGroup,
+  ViaticoLiquidation,
+} from '../../types';
 import {
   StoredReceiptMedia,
   getReceiptMediaBatch,
@@ -39,6 +45,24 @@ import {
   sendGmailHtmlMessage,
 } from '../../services/googleWorkspaceActivities';
 
+const mergeUniqueEmails = (existingRaw: string, incomingEmails: string[]): string => {
+  const existing = parseEmailAddressList(existingRaw);
+  const seen = new Set(existing.map((e) => e.toLowerCase()));
+  const next = [...existing];
+  incomingEmails.forEach((raw) => {
+    const clean = String(raw || '').trim();
+    if (
+      clean &&
+      clean.includes('@') &&
+      !seen.has(clean.toLowerCase())
+    ) {
+      seen.add(clean.toLowerCase());
+      next.push(clean);
+    }
+  });
+  return next.join(', ');
+};
+
 interface ViaticosCloseEmailModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -46,6 +70,9 @@ interface ViaticosCloseEmailModalProps {
   costCenter?: string;
   mediaMap: Record<string, StoredReceiptMedia>;
   permissions: EffectivePermissions;
+  emailGroups?: ViaticoEmailGroup[];
+  canManageEmailGroups?: boolean;
+  onOpenEmailDirectory?: () => void;
   accessToken?: string | null;
   onReconnectWorkspace?: () => Promise<string | null>;
   onInvalidateWorkspaceToken?: () => void;
@@ -62,6 +89,9 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
   costCenter,
   mediaMap,
   permissions,
+  emailGroups = [],
+  canManageEmailGroups = false,
+  onOpenEmailDirectory,
   accessToken,
   onReconnectWorkspace,
   onInvalidateWorkspaceToken,
@@ -70,7 +100,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
   onReopenLiquidation,
   onPreviewPlanillaPdf,
 }) => {
-  const [recipientEmail, setRecipientEmail] = useState('contabilidad@premexcorp.com');
+  const [recipientEmail, setRecipientEmail] = useState('');
   const [ccEmail, setCcEmail] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -110,10 +140,24 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
     const draft = buildViaticosEmailDraft(liquidation, costCenter);
     setSubject(draft.subject);
     setBody(draft.body);
-    setCcEmail(liquidation.consultorEmail || '');
-    if (liquidation.sentToEmail) {
-      setRecipientEmail(liquidation.sentToEmail);
-    }
+
+    const activeGroups = emailGroups.filter((g) => g.activo !== false);
+    const defaultDirigidoEmails = activeGroups
+      .filter((g) => g.tipo === 'dirigido' && g.porDefecto)
+      .flatMap((g) => g.miembros.map((m) => m.email));
+    const defaultCopyEmails = activeGroups
+      .filter((g) => g.tipo === 'copia' && g.porDefecto)
+      .flatMap((g) => g.miembros.map((m) => m.email));
+
+    setRecipientEmail(
+      liquidation.sentToEmail
+        ? liquidation.sentToEmail
+        : mergeUniqueEmails('', defaultDirigidoEmails)
+    );
+    setCcEmail(
+      mergeUniqueEmails('', [...defaultCopyEmails, liquidation.consultorEmail || ''])
+    );
+
     setAttachExcel(true);
     setAttachReceiptsPdf(true);
     setAttachPlanillaPdf(false);
@@ -135,7 +179,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
     } else {
       setHydratedMedia({});
     }
-  }, [isOpen, liquidation, costCenter]);
+  }, [isOpen, liquidation, costCenter, emailGroups]);
 
   if (!isOpen || !liquidation) return null;
 
@@ -148,6 +192,52 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
     Boolean(item.attachmentId && combinedMediaMap[item.attachmentId])
   ).length;
   const isDraft = liquidation.estado === 'borrador';
+
+  const activeDirigidoGroups = emailGroups.filter(
+    (g) => g.activo !== false && g.tipo === 'dirigido'
+  );
+  const activeCopiaGroups = emailGroups.filter(
+    (g) => g.activo !== false && g.tipo === 'copia'
+  );
+  const defaultCopiaGroups = activeCopiaGroups.filter((g) => g.porDefecto);
+  const totalDirigidoMembers = activeDirigidoGroups.reduce(
+    (sum, g) => sum + g.miembros.length,
+    0
+  );
+
+  const handleSelectPickerValue = (
+    rawVal: string,
+    groupsSource: ViaticoEmailGroup[],
+    currentText: string,
+    setter: (next: string) => void
+  ) => {
+    if (!rawVal) return;
+    if (rawVal.startsWith('group:')) {
+      const groupId = rawVal.slice('group:'.length);
+      const grp = groupsSource.find((g) => g.id === groupId);
+      if (grp) {
+        setter(
+          mergeUniqueEmails(
+            currentText,
+            grp.miembros.map((m) => m.email)
+          )
+        );
+      }
+      return;
+    }
+    if (rawVal.startsWith('member:')) {
+      const rest = rawVal.slice('member:'.length);
+      const sepIdx = rest.indexOf(':');
+      if (sepIdx <= 0) return;
+      const groupId = rest.slice(0, sepIdx);
+      const memberId = rest.slice(sepIdx + 1);
+      const grp = groupsSource.find((g) => g.id === groupId);
+      const mem = grp?.miembros.find((m) => m.id === memberId);
+      if (mem) {
+        setter(mergeUniqueEmails(currentText, [mem.email]));
+      }
+    }
+  };
 
   const ensureReceiptMediaLoaded = async (): Promise<Record<string, StoredReceiptMedia>> => {
     const ids = liquidation.items.map((it) => it.attachmentId || '').filter(Boolean);
@@ -536,34 +626,186 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
               )}
             </div>
 
-            {/* Recipients */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-700 mb-1">
-                  Para (separa varios correos con coma)
-                </label>
-                <input
-                  type="text"
-                  inputMode="email"
-                  value={recipientEmail}
-                  onChange={(e) => setRecipientEmail(e.target.value)}
-                  placeholder="contabilidad@premexcorp.com"
-                  className="w-full min-h-[44px] px-3 py-2 text-base sm:text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
-                />
+            {/* Recipients with Authorizers & CC Groups Dropdowns + Manual Entry */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#132B63]">
+                  <Users className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Selección desde Listas de Correos o ingreso manual</span>
+                </div>
+                {canManageEmailGroups && onOpenEmailDirectory && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenEmailDirectory();
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[#1E60A8] bg-white hover:bg-sky-50 border border-sky-200 rounded-lg cursor-pointer"
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    <span>Gestionar listas de correos</span>
+                  </button>
+                )}
               </div>
 
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-700 mb-1">
-                  CC (Copia al Consultor / Jefatura)
-                </label>
-                <input
-                  type="text"
-                  inputMode="email"
-                  value={ccEmail}
-                  onChange={(e) => setCcEmail(e.target.value)}
-                  placeholder="consultor@premexcorp.com"
-                  className="w-full min-h-[44px] px-3 py-2 text-base sm:text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Para (Autorizadores) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs sm:text-[11px] font-semibold text-slate-700">
+                      Para · Autorizadores (o manual)
+                    </label>
+                    {recipientEmail.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setRecipientEmail('')}
+                        className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 cursor-pointer"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
+
+                  <select
+                    value=""
+                    aria-label="Seleccionar autorizador o grupo para Para"
+                    onChange={(e) =>
+                      handleSelectPickerValue(
+                        e.target.value,
+                        activeDirigidoGroups,
+                        recipientEmail,
+                        setRecipientEmail
+                      )
+                    }
+                    className="w-full min-h-[40px] px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-white rounded-xl border border-[#1E60A8]/35 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 cursor-pointer"
+                  >
+                    <option value="">
+                      + Seleccionar autorizador o grupo (Para)...
+                    </option>
+                    {activeDirigidoGroups.some((g) => g.miembros.length > 0) && (
+                      <optgroup label="Grupos de Autorizadores">
+                        {activeDirigidoGroups
+                          .filter((g) => g.miembros.length > 0)
+                          .map((g) => (
+                            <option key={g.id} value={`group:${g.id}`}>
+                              {g.nombre} ({g.miembros.length}{' '}
+                              {g.miembros.length === 1 ? 'correo' : 'correos'})
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                    {activeDirigidoGroups.some((g) => g.miembros.length > 0) && (
+                      <optgroup label="Autorizadores Individuales">
+                        {activeDirigidoGroups.flatMap((g) =>
+                          g.miembros.map((m) => (
+                            <option key={`${g.id}-${m.id}`} value={`member:${g.id}:${m.id}`}>
+                              {m.nombre ? `${m.nombre} · ` : ''}
+                              {m.email} ({g.nombre})
+                            </option>
+                          ))
+                        )}
+                      </optgroup>
+                    )}
+                  </select>
+
+                  <input
+                    type="text"
+                    inputMode="email"
+                    value={recipientEmail}
+                    onChange={(e) => setRecipientEmail(e.target.value)}
+                    placeholder="Selecciona arriba o escribe correos con coma"
+                    className="w-full min-h-[44px] px-3 py-2 text-base sm:text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                  />
+
+                  {totalDirigidoMembers === 0 && (
+                    <p className="text-[11px] text-slate-500 leading-snug">
+                      Agrega autorizadores en <strong>Listas de Correos</strong> o escribe el
+                      correo manualmente arriba.
+                    </p>
+                  )}
+                </div>
+
+                {/* CC (Equipo Contable & Copia) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs sm:text-[11px] font-semibold text-slate-700">
+                      CC · Equipo Contable / Copia
+                    </label>
+                    {ccEmail.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setCcEmail('')}
+                        className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 cursor-pointer"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
+
+                  <select
+                    value=""
+                    aria-label="Seleccionar grupo o correo en copia (CC)"
+                    onChange={(e) =>
+                      handleSelectPickerValue(
+                        e.target.value,
+                        activeCopiaGroups,
+                        ccEmail,
+                        setCcEmail
+                      )
+                    }
+                    className="w-full min-h-[40px] px-2.5 py-1.5 text-xs font-semibold text-emerald-900 bg-white rounded-xl border border-emerald-300 focus:outline-hidden focus:ring-2 focus:ring-emerald-600/25 cursor-pointer"
+                  >
+                    <option value="">
+                      + Agregar equipo o correo en copia (CC)...
+                    </option>
+                    {activeCopiaGroups.some((g) => g.miembros.length > 0) && (
+                      <optgroup label="Equipos en Copia (CC)">
+                        {activeCopiaGroups
+                          .filter((g) => g.miembros.length > 0)
+                          .map((g) => (
+                            <option key={g.id} value={`group:${g.id}`}>
+                              {g.nombre}
+                              {g.porDefecto ? ' [Automático]' : ''} ({g.miembros.length})
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                    {activeCopiaGroups.some((g) => g.miembros.length > 0) && (
+                      <optgroup label="Integrantes en Copia">
+                        {activeCopiaGroups.flatMap((g) =>
+                          g.miembros.map((m) => (
+                            <option key={`${g.id}-${m.id}`} value={`member:${g.id}:${m.id}`}>
+                              {m.nombre ? `${m.nombre} · ` : ''}
+                              {m.email} ({g.nombre})
+                            </option>
+                          ))
+                        )}
+                      </optgroup>
+                    )}
+                  </select>
+
+                  <input
+                    type="text"
+                    inputMode="email"
+                    value={ccEmail}
+                    onChange={(e) => setCcEmail(e.target.value)}
+                    placeholder="Correos en copia separados por coma"
+                    className="w-full min-h-[44px] px-3 py-2 text-base sm:text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                  />
+
+                  {defaultCopiaGroups.length > 0 && (
+                    <p className="text-[11px] text-emerald-800 leading-snug">
+                      {defaultCopiaGroups.some((g) => g.miembros.length > 0)
+                        ? `Copia automática incluida: ${defaultCopiaGroups
+                            .filter((g) => g.miembros.length > 0)
+                            .map((g) => `${g.nombre} (${g.miembros.length})`)
+                            .join(', ')}.`
+                        : `Grupo por defecto "${defaultCopiaGroups
+                            .map((g) => g.nombre)
+                            .join(', ')}" sin correos aún; agrégalos en Listas de Correos.`}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
 

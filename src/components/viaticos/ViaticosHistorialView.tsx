@@ -78,6 +78,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   onDeleteConsultor,
 }) => {
   const isClosedMode = viewMode === 'cerradas';
+  const canOpenInLiquidador = permissions.canAccessViaticosPanel('liquidador');
   const [subTab, setSubTab] = useState<'liquidaciones' | 'consultores'>('liquidaciones');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | ViaticoLiquidationStatus>('ALL');
@@ -502,7 +503,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               </button>
             )}
 
-            {permissions.canOperate && (
+            {permissions.canOperate && canOpenInLiquidador && (
               <button
                 type="button"
                 onClick={onCreateNewLiquidation}
@@ -602,11 +603,22 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
                         type="button"
-                        onClick={() => onOpenLiquidation(liq.id)}
-                        className="inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 py-2 text-xs font-bold text-[#132B63] bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                        onClick={() =>
+                          canOpenInLiquidador
+                            ? onOpenLiquidation(liq.id)
+                            : onPreviewPlanillaPdf(liq)
+                        }
+                        disabled={!canOpenInLiquidador && liq.items.length === 0}
+                        className="inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 py-2 text-xs font-bold text-[#132B63] bg-sky-50 border border-sky-200 disabled:opacity-45 rounded-xl cursor-pointer"
                       >
                         <FolderOpen className="w-4 h-4 text-[#1E60A8]" />
-                        <span>{isDraft ? 'Abrir' : 'Consultar'}</span>
+                        <span>
+                          {canOpenInLiquidador
+                            ? isDraft
+                              ? 'Abrir'
+                              : 'Consultar'
+                            : 'Ver Planilla'}
+                        </span>
                       </button>
 
                       <button
@@ -844,11 +856,22 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                           <div className="inline-flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => onOpenLiquidation(liq.id)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[#1E60A8] hover:bg-[#1E60A8]/10 rounded-lg cursor-pointer"
+                              onClick={() =>
+                                canOpenInLiquidador
+                                  ? onOpenLiquidation(liq.id)
+                                  : onPreviewPlanillaPdf(liq)
+                              }
+                              disabled={!canOpenInLiquidador && liq.items.length === 0}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[#1E60A8] hover:bg-[#1E60A8]/10 disabled:opacity-40 rounded-lg cursor-pointer"
                             >
                               <FolderOpen className="w-3.5 h-3.5" />
-                              <span>{isDraft ? 'Abrir' : 'Consultar'}</span>
+                              <span>
+                                {canOpenInLiquidador
+                                  ? isDraft
+                                    ? 'Abrir'
+                                    : 'Consultar'
+                                  : 'Ver Planilla'}
+                              </span>
                             </button>
 
                             {isDraft && permissions.canOperate && (

@@ -42,6 +42,8 @@ import {
   SuiteModuleId,
   UserPermissionRecord,
   UserRole,
+  UserTypeId,
+  ViaticosTab,
 } from '../../types';
 import {
   INTERCOMPANY_SCOPES,
@@ -51,6 +53,8 @@ import {
 import {
   ALL_FUNCTIONAL_MODULES,
   ALL_SUITE_MODULES,
+  ALL_USER_TYPES,
+  ALL_VIATICOS_PANELS,
   deriveLegacyCompanyFields,
   emailToPermissionDocId,
   getRecordModuleCompanyRule,
@@ -59,7 +63,11 @@ import {
   normalizeEmail,
   ROLE_METADATA,
   sanitizeModuleCompanyAccess,
+  sanitizeUserType,
+  sanitizeViaticosPanels,
   SUPER_ADMIN_EMAIL,
+  USER_TYPE_METADATA,
+  VIATICOS_PANEL_METADATA,
 } from '../../utils/permissions';
 import {
   MODULE_COMPANY_DB_META,
@@ -261,11 +269,16 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
   const [formEmail, setFormEmail] = useState('');
   const [formName, setFormName] = useState('');
   const [formRole, setFormRole] = useState<UserRole>('operador');
+  const [formUserType, setFormUserType] = useState<UserTypeId>('liquidador');
   const [formModules, setFormModules] = useState<SuiteModuleId[]>([
     'intercompany',
     'bancos',
     'viaticos',
     'actividades',
+  ]);
+  const [formViaticosPanels, setFormViaticosPanels] = useState<ViaticosTab[]>([
+    'liquidador',
+    'cerradas',
   ]);
   const [formModuleCompanyAccess, setFormModuleCompanyAccess] =
     useState<ModuleCompanyScopeMap>({
@@ -469,7 +482,9 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setFormEmail('');
     setFormName('');
     setFormRole('operador');
+    setFormUserType('liquidador');
     setFormModules(['intercompany', 'bancos', 'viaticos', 'actividades']);
+    setFormViaticosPanels([...USER_TYPE_METADATA.liquidador.defaultViaticosPanels]);
     setFormModuleCompanyAccess({
       intercompany: { scope: 'all', companies: [] },
       bancos: { scope: 'all', companies: [] },
@@ -490,9 +505,24 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setFormEmail(rec.email);
     setFormName(rec.displayName);
     setFormRole(rec.role);
+    const resolvedUserType: UserTypeId =
+      rec.role === 'admin' ? 'administrador' : sanitizeUserType(rec.userType, rec.role);
+    setFormUserType(resolvedUserType);
     const nextModules: SuiteModuleId[] =
       rec.role === 'admin' ? [...ALL_SUITE_MODULES] : [...rec.allowedModules];
     setFormModules(nextModules);
+
+    const resolvedPanels: ViaticosTab[] =
+      rec.role === 'admin'
+        ? [...ALL_VIATICOS_PANELS]
+        : !nextModules.includes('viaticos')
+        ? []
+        : Array.isArray(rec.viaticosPanels)
+        ? sanitizeViaticosPanels(rec.viaticosPanels, rec.role, nextModules, resolvedUserType)
+        : rec.userType
+        ? sanitizeViaticosPanels(undefined, rec.role, nextModules, resolvedUserType)
+        : [...ALL_VIATICOS_PANELS];
+    setFormViaticosPanels(resolvedPanels);
 
     const sanitizedPerMod =
       rec.role === 'admin'
@@ -515,6 +545,44 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setIsEditorOpen(true);
   };
 
+  const handleSelectUserType = (nextType: UserTypeId) => {
+    if (isEditingSuperAdmin && nextType !== 'administrador') return;
+    const meta = USER_TYPE_METADATA[nextType];
+    setFormUserType(nextType);
+    setFormRole(meta.recommendedRole);
+    if (nextType === 'administrador') {
+      setFormModules([...ALL_SUITE_MODULES]);
+      setFormViaticosPanels([...ALL_VIATICOS_PANELS]);
+      return;
+    }
+
+    setFormModules((prev) => {
+      const cleaned = prev.filter((m) => m !== 'ajustes');
+      const base =
+        cleaned.length > 0 ? cleaned : (['intercompany', 'bancos', 'viaticos'] as SuiteModuleId[]);
+      const needsViaticos =
+        nextType === 'liquidador' || nextType === 'contabilidad' || nextType === 'autorizador';
+      const nextMods =
+        needsViaticos && !base.includes('viaticos')
+          ? ([...base, 'viaticos'] as SuiteModuleId[])
+          : base;
+      setFormModuleCompanyAccess((prevMap) =>
+        sanitizeModuleCompanyAccess(prevMap, nextMods, 'all', [])
+      );
+      return nextMods;
+    });
+    setFormViaticosPanels([...meta.defaultViaticosPanels]);
+  };
+
+  const handleToggleViaticosPanel = (panelId: ViaticosTab) => {
+    if (formRole === 'admin') return;
+    setFormViaticosPanels((prev) => {
+      const exists = prev.includes(panelId);
+      const next = exists ? prev.filter((p) => p !== panelId) : [...prev, panelId];
+      return ALL_VIATICOS_PANELS.filter((p) => next.includes(p));
+    });
+  };
+
   const handleToggleModule = (modId: FunctionalModuleId) => {
     if (formRole === 'admin') return;
     setFormModules((prev) => {
@@ -526,6 +594,13 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
         ...prevMap,
         [modId]: prevMap[modId] || { scope: 'all', companies: [] },
       }));
+      if (modId === 'viaticos') {
+        setFormViaticosPanels((currPanels) =>
+          currPanels.length > 0
+            ? currPanels
+            : [...USER_TYPE_METADATA[formUserType].defaultViaticosPanels]
+        );
+      }
       setActiveConfigModule(modId);
       return [...prev, modId];
     });
@@ -692,6 +767,36 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       }
     }
 
+    const effectiveUserType: UserTypeId =
+      effectiveRole === 'admin'
+        ? 'administrador'
+        : formUserType === 'administrador'
+        ? 'personalizado'
+        : formUserType;
+
+    const cleanedViaticosPanels: ViaticosTab[] =
+      effectiveRole === 'admin'
+        ? [...ALL_VIATICOS_PANELS]
+        : cleanedAllowedModules.includes('viaticos')
+        ? sanitizeViaticosPanels(
+            formViaticosPanels,
+            effectiveRole,
+            cleanedAllowedModules,
+            effectiveUserType
+          )
+        : [];
+
+    if (
+      effectiveRole !== 'admin' &&
+      cleanedAllowedModules.includes('viaticos') &&
+      cleanedViaticosPanels.length === 0
+    ) {
+      setFormError(
+        'Habilitaste el módulo de Liquidación de Viáticos: selecciona al menos una opción o panel lateral visible para este usuario.'
+      );
+      return;
+    }
+
     const legacy = deriveLegacyCompanyFields(
       sanitizedAccess,
       cleanedAllowedModules,
@@ -703,7 +808,9 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       email: cleanEmail,
       displayName: formName.trim() || cleanEmail.split('@')[0],
       role: effectiveRole,
+      userType: effectiveUserType,
       allowedModules: cleanedAllowedModules,
+      viaticosPanels: cleanedViaticosPanels,
       companyScope: legacy.companyScope,
       allowedCompanies: legacy.allowedCompanies,
       moduleCompanyAccess: sanitizedAccess,
@@ -1615,6 +1722,11 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                               <div className={`font-bold ${roleColor}`}>
                                 {ROLE_METADATA[rec.role].label}
                               </div>
+                              {rec.userType && (
+                                <div className="text-[11px] font-medium text-slate-600 mt-0.5">
+                                  {USER_TYPE_METADATA[rec.userType]?.shortLabel || rec.userType}
+                                </div>
+                              )}
                               {isSuper && (
                                 <div className="text-[10px] text-slate-400">
                                   Principal protegido
@@ -1637,6 +1749,15 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                                   {functionalAssigned.map((modId) => {
                                     const rule = getRecordModuleCompanyRule(rec, modId);
                                     const modMeta = MODULE_COMPANY_DB_META[modId];
+                                    const grantedPanels =
+                                      modId === 'viaticos'
+                                        ? Array.isArray(rec.viaticosPanels)
+                                          ? rec.viaticosPanels
+                                          : rec.userType
+                                          ? USER_TYPE_METADATA[rec.userType]?.defaultViaticosPanels ||
+                                            ALL_VIATICOS_PANELS
+                                          : ALL_VIATICOS_PANELS
+                                        : null;
                                     return (
                                       <div
                                         key={modId}
@@ -1647,23 +1768,38 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                                           className="w-4 h-4 shrink-0 mt-0.5"
                                         />
                                         <div className="min-w-0 flex-1">
-                                          <span className="font-semibold text-slate-800">
-                                            {modMeta.shortName}:
-                                          </span>{' '}
-                                          {rule.scope === 'all' ? (
-                                            <span className="text-slate-600">
-                                              Todas las sociedades ({moduleCompanyDatabases[modId].filter((c) => c.activo !== false).length})
-                                            </span>
-                                          ) : (
-                                            <span className="text-[#19377B]">
-                                              <strong className="tabular-nums">
-                                                {rule.companies.length}
-                                              </strong>{' '}
-                                              —{' '}
+                                          <div>
+                                            <span className="font-semibold text-slate-800">
+                                              {modMeta.shortName}:
+                                            </span>{' '}
+                                            {rule.scope === 'all' ? (
                                               <span className="text-slate-600">
-                                                {rule.companies.join(', ') || 'Ninguna'}
+                                                Todas las sociedades ({moduleCompanyDatabases[modId].filter((c) => c.activo !== false).length})
                                               </span>
-                                            </span>
+                                            ) : (
+                                              <span className="text-[#19377B]">
+                                                <strong className="tabular-nums">
+                                                  {rule.companies.length}
+                                                </strong>{' '}
+                                                —{' '}
+                                                <span className="text-slate-600">
+                                                  {rule.companies.join(', ') || 'Ninguna'}
+                                                </span>
+                                              </span>
+                                            )}
+                                          </div>
+                                          {modId === 'viaticos' && grantedPanels && (
+                                            <div className="text-[11px] text-[#1E60A8] mt-0.5">
+                                              Paneles:{' '}
+                                              <span className="font-medium text-slate-600">
+                                                {grantedPanels
+                                                  .map(
+                                                    (p) =>
+                                                      VIATICOS_PANEL_METADATA[p]?.shortLabel || p
+                                                  )
+                                                  .join(', ') || 'Ninguno'}
+                                              </span>
+                                            </div>
                                           )}
                                         </div>
                                       </div>
@@ -2692,10 +2828,52 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                 </div>
               </div>
 
+              {/* User Functional Profile Type */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label className="font-semibold text-slate-700">
+                    Tipo de Usuario / Perfil Funcional *
+                  </label>
+                  <span className="text-[11px] text-slate-500">
+                    Preconfigura el rol y los paneles sugeridos
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {ALL_USER_TYPES.map((typeId) => {
+                    const meta = USER_TYPE_METADATA[typeId];
+                    const selected = formUserType === typeId;
+                    const disabled = isEditingSuperAdmin && typeId !== 'administrador';
+                    return (
+                      <button
+                        key={typeId}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => handleSelectUserType(typeId)}
+                        className={`text-left p-3 rounded-xl border transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                          selected
+                            ? 'border-[#1E60A8] bg-[#1E60A8]/8 ring-1 ring-[#1E60A8]/30'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="font-bold text-slate-900">{meta.label}</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#1E60A8]">
+                            {ROLE_METADATA[meta.recommendedRole].shortLabel}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-1 leading-snug">
+                          {meta.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Role Selection */}
               <div>
                 <label className="block font-semibold text-slate-700 mb-2">
-                  Rol de Acceso en la Plataforma *
+                  Nivel de Permisos (Rol Base) *
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {(['admin', 'operador', 'consulta'] as UserRole[]).map((role) => {
@@ -2709,8 +2887,18 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                         onClick={() => {
                           setFormRole(role);
                           if (role === 'admin') {
+                            setFormUserType('administrador');
                             setFormModules([...ALL_SUITE_MODULES]);
+                            setFormViaticosPanels([...ALL_VIATICOS_PANELS]);
                           } else {
+                            if (formUserType === 'administrador') {
+                              const fallbackType: UserTypeId =
+                                role === 'operador' ? 'liquidador' : 'auditor';
+                              setFormUserType(fallbackType);
+                              setFormViaticosPanels([
+                                ...USER_TYPE_METADATA[fallbackType].defaultViaticosPanels,
+                              ]);
+                            }
                             setFormModules((prev) => {
                               const cleaned = prev.filter((m) => m !== 'ajustes');
                               const next =
@@ -2797,6 +2985,84 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                     );
                   })}
                 </div>
+
+                {/* Granular Viáticos Lateral Panels Selector */}
+                {(formRole === 'admin' || formModules.includes('viaticos')) && (
+                  <div className="mt-3 p-4 rounded-2xl border border-[#1E60A8]/25 bg-sky-50/45 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-bold text-[#132B63]">
+                          Opciones / Paneles Laterales visibles en Liquidación de Viáticos
+                        </div>
+                        <div className="text-[11px] text-slate-600">
+                          Elige exactamente qué pestañas del menú lateral verá este usuario al ingresar a Viáticos.
+                        </div>
+                      </div>
+                      {formRole !== 'admin' && (
+                        <div className="flex items-center gap-2.5 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => setFormViaticosPanels([...ALL_VIATICOS_PANELS])}
+                            className="font-semibold text-[#1E60A8] hover:underline cursor-pointer"
+                          >
+                            Todas
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormViaticosPanels([
+                                'cerradas',
+                                'contabilidad',
+                                'historial',
+                                'correos',
+                              ])
+                            }
+                            className="font-semibold text-slate-700 hover:underline cursor-pointer"
+                          >
+                            Perfil Contabilidad
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {ALL_VIATICOS_PANELS.map((panelId) => {
+                        const pMeta = VIATICOS_PANEL_METADATA[panelId];
+                        const isChecked =
+                          formRole === 'admin' || formViaticosPanels.includes(panelId);
+                        return (
+                          <label
+                            key={panelId}
+                            className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-colors ${
+                              formRole === 'admin'
+                                ? 'bg-white/70 border-slate-200 cursor-default'
+                                : isChecked
+                                ? 'bg-white border-[#1E60A8]/50 shadow-2xs cursor-pointer'
+                                : 'bg-white/60 border-slate-200 hover:bg-white cursor-pointer'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={formRole === 'admin'}
+                              onChange={() => handleToggleViaticosPanel(panelId)}
+                              className="mt-0.5 rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900 leading-tight">
+                                {pMeta.label}
+                              </div>
+                              <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                                {pMeta.description}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Step 2: Independent Per-Module Company Access */}
