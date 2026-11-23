@@ -907,7 +907,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
           </div>
         )}
 
-        <main className="flex-1 p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8 max-w-[1480px] mx-auto w-full min-w-0">
+        <main className="flex-1 p-3 lg:p-8 pb-24 lg:pb-8 max-w-[1480px] mx-auto w-full min-w-0">
           {activeTab === 'liquidador' ? (
             <ViaticosLiquidadorView
               liquidation={activeLiquidation}
@@ -1102,7 +1102,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
                 type="button"
                 aria-current={isActive ? 'page' : undefined}
                 onClick={() => setActiveTab(item.id)}
-                className={`relative flex flex-col items-center justify-center gap-1 text-[11px] font-bold transition-colors cursor-pointer ${
+                className={`relative flex flex-col items-center justify-center gap-1 text-xs font-bold transition-colors cursor-pointer ${
                   isActive ? 'text-[#132B63]' : 'text-slate-500'
                 }`}
               >
@@ -1110,7 +1110,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
                   <span className="absolute top-0 left-4 right-4 h-0.5 rounded-b-full bg-[#1E60A8]" />
                 )}
                 <Icon className={`w-5 h-5 ${isActive ? 'text-[#1E60A8]' : 'text-slate-400'}`} />
-                <span className="truncate max-w-[78px]">{item.label}</span>
+                <span className="truncate max-w-[82px]">{item.label}</span>
               </button>
             );
           })}

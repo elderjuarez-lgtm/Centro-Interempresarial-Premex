@@ -99,9 +99,9 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 pt-safe">
-      <div className="px-3 sm:px-5 lg:px-8 py-2 lg:py-3 flex items-center justify-between gap-2 sm:gap-3">
+      <div className="px-3 lg:px-8 py-2 lg:py-3 flex items-center justify-between gap-2 lg:gap-3">
         {/* Left: Mobile toggle + Breadcrumb + Active Title */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 overflow-hidden">
+        <div className="flex items-center gap-2 lg:gap-3 flex-1 min-w-0 overflow-hidden">
           <button
             type="button"
             onClick={onToggleMobileMenu}
@@ -112,7 +112,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
           </button>
 
           <div className="flex-1 min-w-0 overflow-hidden">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 min-w-0 overflow-hidden">
+            <div className="flex items-center gap-1.5 text-xs lg:text-[11px] font-semibold text-slate-500 min-w-0 overflow-hidden">
               <button
                 type="button"
                 onClick={() => onSwitchModule('launcher')}
@@ -141,7 +141,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               )}
             </div>
 
-            <h2 className="text-sm lg:text-lg font-bold text-slate-900 tracking-tight truncate">
+            <h2 className="text-base lg:text-lg font-bold text-slate-900 tracking-tight truncate">
               {activeTab === 'liquidador'
                 ? activeLiquidation
                   ? `${activeLiquidation.lineaLiquidacion || 'Sin título'} · Sem #${activeLiquidation.semana || '-'}`
@@ -220,7 +220,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               onClick={onSaveToCloud}
               disabled={isSavingCloud}
               aria-label={isSavingCloud ? 'Sincronizando en la nube' : 'Respaldar en la nube'}
-              className={`inline-flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] lg:min-w-0 lg:min-h-[38px] px-2.5 lg:px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
+              className={`inline-flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-[38px] px-2.5 lg:px-3 py-1.5 text-sm lg:text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
                 isSavingCloud
                   ? 'bg-sky-50 border-sky-200 text-[#132B63]'
                   : hasUnsavedChanges
@@ -259,10 +259,10 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               type="button"
               onClick={onOpenCloseConfirmModal}
               disabled={!hasItems}
-              className="inline-flex items-center gap-1.5 min-h-[40px] lg:min-h-[38px] px-3 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 min-h-[44px] lg:min-h-[38px] px-3.5 lg:px-3 py-1.5 text-sm lg:text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               title="Cerrar esta liquidación sin necesidad de enviarla por correo"
             >
-              <Lock className="w-3.5 h-3.5 shrink-0" />
+              <Lock className="w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0" />
               <span className="lg:hidden">Cerrar</span>
               <span className="hidden lg:inline">Cerrar Liquidación</span>
             </button>
@@ -275,14 +275,14 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               disabled={!hasItems}
               className={`${
                 canCloseActive ? 'hidden lg:inline-flex' : 'inline-flex'
-              } items-center justify-center gap-1.5 min-h-[40px] lg:min-h-[38px] px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 ${
+              } items-center justify-center gap-1.5 min-h-[44px] lg:min-h-[38px] px-3.5 lg:px-3 py-1.5 text-sm lg:text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 ${
                 canCloseActive
                   ? 'text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200'
                   : 'text-white bg-[#1E60A8] hover:bg-[#132B63]'
               }`}
               title="Preparar envío por correo electrónico con Excel y PDF"
             >
-              <Send className="w-3.5 h-3.5 shrink-0" />
+              <Send className="w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0" />
               <span className="lg:hidden">Enviar</span>
               <span className="hidden lg:inline">Enviar Correo</span>
             </button>
