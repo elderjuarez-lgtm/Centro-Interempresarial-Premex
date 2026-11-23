@@ -27,6 +27,8 @@ import {
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -94,6 +96,7 @@ interface ViaticosLiquidadorViewProps {
   isDownloadingExcel: boolean;
   isDownloadingPdf: boolean;
   onOpenClosedArchive: () => void;
+  zoomPercent?: number;
 }
 
 interface PendingUploadFile {
@@ -190,7 +193,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   isDownloadingExcel,
   isDownloadingPdf,
   onOpenClosedArchive,
+  zoomPercent = 100,
 }) => {
+  const isZoomHigh = zoomPercent >= 120;
+  const isZoomExtra = zoomPercent >= 135;
   const baseCurrency: ViaticoCurrency = liquidation?.monedaBase || 'Quetzales';
   const lastCliente = useMemo(() => {
     const items = liquidation?.items || [];
@@ -233,6 +239,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     item: ViaticoExpenseItem;
     media: StoredReceiptMedia;
   } | null>(null);
+  const [receiptZoom, setReceiptZoom] = useState<number>(1);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -814,13 +821,13 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     switcherScope !== 'all';
 
   return (
-    <div className="space-y-4 lg:space-y-6">
+    <div className="space-y-4 lg:space-y-5">
       {/* 1A. MOBILE PHONE LIQUIDATION CONTEXT & COLLAPSIBLE HEADER (< lg) */}
       <section className="lg:hidden bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
-        <div className="p-4 space-y-3.5">
+        <div className="px-3 py-3.5 space-y-3.5">
           {/* Active Liquidation Picker + New Action */}
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-extrabold uppercase tracking-wider text-slate-500">
                 Liquidación activa
               </span>
@@ -828,7 +835,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsMobileFiltersOpen((v) => !v)}
-                  className={`inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 text-sm font-semibold rounded-xl border transition-colors cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 min-h-[2.5rem] px-3 py-1.5 text-sm font-semibold rounded-xl border transition-colors cursor-pointer ${
                     isMobileFiltersOpen || hasActiveSwitcherFilters
                       ? 'bg-sky-50 text-[#132B63] border-sky-200'
                       : 'bg-slate-50 text-slate-700 border-slate-200'
@@ -841,7 +848,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   <button
                     type="button"
                     onClick={onCreateNewLiquidation}
-                    className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-1.5 text-sm font-bold text-[#132B63] bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                    className="inline-flex items-center gap-1.5 min-h-[2.5rem] px-3.5 py-1.5 text-sm font-bold text-[#132B63] bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
                   >
                     <Plus className="w-4 h-4 text-[#1E60A8]" />
                     <span>Nueva</span>
@@ -854,7 +861,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               value={liquidation.id}
               aria-label="Seleccionar liquidación activa"
               onChange={(e) => onSelectLiquidation(e.target.value)}
-              className="w-full min-h-[54px] px-4 py-3 text-base font-bold text-[#132B63] bg-slate-50 border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+              className="w-full min-h-[3.375rem] px-3.5 py-3 text-base font-bold text-[#132B63] bg-slate-50 border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
             >
               {!filteredSwitcherLiquidaciones.some((l) => l.id === liquidation.id) && (
                 <option value={liquidation.id}>
@@ -872,8 +879,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
           {/* Expandable Filter Panel on Mobile */}
           {isMobileFiltersOpen && (
-            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-              <div className="grid grid-cols-3 bg-slate-200/80 p-1 rounded-xl">
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className={`grid gap-1 bg-slate-200/80 p-1 rounded-xl ${isZoomExtra ? 'grid-cols-1' : 'grid-cols-3'}`}>
                 <button
                   type="button"
                   onClick={() =>
@@ -883,7 +890,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       switcherCurrencyFilter
                     )
                   }
-                  className={`min-h-[42px] px-2 text-sm font-bold rounded-lg transition-colors cursor-pointer tabular-nums ${
+                  className={`min-h-[2.625rem] px-2 text-sm font-bold rounded-lg transition-colors cursor-pointer tabular-nums ${
                     switcherScope === 'open'
                       ? 'bg-white text-[#132B63] shadow-2xs'
                       : 'text-slate-600'
@@ -900,7 +907,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       switcherCurrencyFilter
                     )
                   }
-                  className={`min-h-[42px] px-2 text-sm font-bold rounded-lg transition-colors cursor-pointer tabular-nums ${
+                  className={`min-h-[2.625rem] px-2 text-sm font-bold rounded-lg transition-colors cursor-pointer tabular-nums ${
                     switcherScope === 'closed'
                       ? 'bg-white text-[#132B63] shadow-2xs'
                       : 'text-slate-600'
@@ -917,7 +924,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       switcherCurrencyFilter
                     )
                   }
-                  className={`min-h-[42px] px-2 text-sm font-bold rounded-lg transition-colors cursor-pointer tabular-nums ${
+                  className={`min-h-[2.625rem] px-2 text-sm font-bold rounded-lg transition-colors cursor-pointer tabular-nums ${
                     switcherScope === 'all'
                       ? 'bg-white text-[#132B63] shadow-2xs'
                       : 'text-slate-600'
@@ -927,7 +934,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className={`grid gap-2.5 ${isZoomHigh ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 <select
                   value={switcherWeekFilter}
                   aria-label="Filtrar por semana"
@@ -938,7 +945,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       switcherCurrencyFilter
                     )
                   }
-                  className="w-full min-h-[48px] px-3 text-base font-semibold text-slate-800 bg-white border border-slate-300 rounded-xl"
+                  className="w-full min-h-[3rem] px-3 text-base font-semibold text-slate-800 bg-white border border-slate-300 rounded-xl"
                 >
                   <option value="ALL">Todas las semanas</option>
                   {availableWeeks.map((w) => (
@@ -958,7 +965,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       e.target.value as 'ALL' | ViaticoCurrency
                     )
                   }
-                  className="w-full min-h-[48px] px-3 text-base font-semibold text-slate-800 bg-white border border-slate-300 rounded-xl"
+                  className="w-full min-h-[3rem] px-3 text-base font-semibold text-slate-800 bg-white border border-slate-300 rounded-xl"
                 >
                   <option value="ALL">Todas monedas</option>
                   {availableCurrencies.map((cur) => (
@@ -977,7 +984,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     setSwitcherWeekFilter('ALL');
                     setSwitcherCurrencyFilter('ALL');
                   }}
-                  className="w-full min-h-[42px] text-sm font-bold text-[#1E60A8] bg-white border border-sky-200 rounded-xl cursor-pointer"
+                  className="w-full min-h-[2.625rem] text-sm font-bold text-[#1E60A8] bg-white border border-sky-200 rounded-xl cursor-pointer"
                 >
                   Limpiar filtros
                 </button>
@@ -986,12 +993,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           )}
 
           {/* Compact Summary Strip + Toggle to Edit Header Details */}
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3">
-            <div className="min-w-0">
+          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
               <div className="text-sm font-bold text-slate-900 truncate">
                 {liquidation.consultorNombre}
               </div>
-              <div className="text-xs text-slate-500 truncate mt-0.5 tabular-nums">
+              <div className="text-xs text-slate-500 break-words mt-0.5 tabular-nums">
                 Sem #{liquidation.semana || '-'} · {liquidation.monedaBase} · {liquidation.empresa} ·{' '}
                 {liquidation.items.length} fact.
               </div>
@@ -1003,22 +1010,22 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-2 pt-1">
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             <button
               type="button"
               onClick={() => setIsMobileHeaderExpanded((v) => !v)}
-              className="flex-1 inline-flex items-center justify-center gap-2 min-h-[46px] px-4 py-2 text-sm font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl cursor-pointer"
+              className="flex-1 min-w-[200px] inline-flex items-center justify-center gap-2 min-h-[2.875rem] px-3.5 py-2 text-sm font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl cursor-pointer"
             >
               {isMobileHeaderExpanded ? (
                 <>
-                  <ChevronUp className="w-4 h-4 text-[#1E60A8]" />
+                  <ChevronUp className="w-4 h-4 text-[#1E60A8] shrink-0" />
                   <span>Ocultar datos de liquidación</span>
                 </>
               ) : (
                 <>
-                  <Pencil className="w-4 h-4 text-[#1E60A8]" />
+                  <Pencil className="w-4 h-4 text-[#1E60A8] shrink-0" />
                   <span>Editar datos de liquidación</span>
-                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                  <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
                 </>
               )}
             </button>
@@ -1027,7 +1034,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenClosedArchive}
-                className="inline-flex items-center justify-center gap-1.5 min-h-[46px] px-3.5 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl cursor-pointer shrink-0"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[2.875rem] px-3.5 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl cursor-pointer shrink-0"
               >
                 <Archive className="w-4 h-4 text-[#1E60A8]" />
                 <span>{closedLiquidaciones.length}</span>
@@ -1048,11 +1055,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   disabled={isLocked}
                   onChange={(e) => onUpdateHeader({ lineaLiquidacion: e.target.value })}
                   placeholder="Ej. Visita Premicol SA de CV"
-                  className="w-full min-h-[52px] px-4 py-3 text-base font-semibold text-slate-900 bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
+                  className="w-full min-h-[3.25rem] px-3.5 py-3 text-base font-semibold text-slate-900 bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className={`grid gap-3 ${isZoomHigh ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1.5">
                     Semana #
@@ -1064,7 +1071,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     disabled={isLocked}
                     onChange={(e) => onUpdateHeader({ semana: e.target.value })}
                     placeholder="Ej. 48"
-                    className="w-full min-h-[52px] px-4 py-3 text-base font-bold text-slate-900 text-center bg-white border border-slate-300 rounded-2xl tabular-nums focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
+                    className="w-full min-h-[3.25rem] px-3.5 py-3 text-base font-bold text-slate-900 text-center bg-white border border-slate-300 rounded-2xl tabular-nums focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
                   />
                 </div>
                 <div>
@@ -1077,7 +1084,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     onChange={(e) =>
                       onUpdateHeader({ monedaBase: e.target.value as ViaticoCurrency })
                     }
-                    className="w-full min-h-[52px] px-4 py-3 text-base font-bold text-slate-900 bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
+                    className="w-full min-h-[3.25rem] px-3.5 py-3 text-base font-bold text-slate-900 bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
                   >
                     {VIATICO_CURRENCIES.map((cur) => (
                       <option key={cur} value={cur}>
@@ -1107,7 +1114,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       monedaBase: chosen.monedaBase,
                     });
                   }}
-                  className="w-full min-h-[52px] px-4 py-3 text-base font-semibold text-slate-900 bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
+                  className="w-full min-h-[3.25rem] px-3.5 py-3 text-base font-semibold text-slate-900 bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
                 >
                   {!availableConsultores.some((c) => c.id === liquidation.consultorId) && (
                     <option value={liquidation.consultorId}>
@@ -1131,7 +1138,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     value={liquidation.empresa}
                     onChange={(e) => onUpdateHeader({ empresa: e.target.value })}
                     aria-label="Sociedad de la liquidación"
-                    className="w-full min-h-[52px] px-4 py-3 text-base font-bold text-[#132B63] bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                    className="w-full min-h-[3.25rem] px-3.5 py-3 text-base font-bold text-[#132B63] bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                   >
                     {!moduleCompanies.some((c) => c.nombre === liquidation.empresa) && (
                       <option value={liquidation.empresa}>{liquidation.empresa}</option>
@@ -1576,12 +1583,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:flex lg:flex-wrap items-center gap-2.5 lg:gap-2 w-full lg:w-auto shrink-0">
+          <div className={`grid gap-2.5 lg:gap-2 w-full lg:w-auto shrink-0 ${isZoomExtra ? 'grid-cols-1' : 'grid-cols-2 lg:flex lg:flex-wrap items-center'}`}>
             <button
               type="button"
               onClick={onOpenPlanillaPdfPreview}
               disabled={liquidation.items.length === 0}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               <Printer className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
               <span>Vista PDF</span>
@@ -1590,7 +1597,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               type="button"
               onClick={onQuickDownloadExcel}
               disabled={liquidation.items.length === 0 || isDownloadingExcel}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-emerald-800 bg-white hover:bg-emerald-50 border border-slate-300 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-emerald-800 bg-white hover:bg-emerald-50 border border-slate-300 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               {isDownloadingExcel ? (
                 <Loader2 className="w-4 h-4 lg:w-3.5 lg:h-3.5 animate-spin" />
@@ -1603,7 +1610,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               type="button"
               onClick={onQuickDownloadPdf}
               disabled={liquidation.items.length === 0 || isDownloadingPdf}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-rose-800 bg-white hover:bg-rose-50 border border-slate-300 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-rose-800 bg-white hover:bg-rose-50 border border-slate-300 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               {isDownloadingPdf ? (
                 <Loader2 className="w-4 h-4 lg:w-3.5 lg:h-3.5 animate-spin" />
@@ -1616,7 +1623,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               type="button"
               onClick={onOpenCloseEmailModal}
               disabled={liquidation.items.length === 0}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               <Send className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
               <span>Correo</span>
@@ -1625,7 +1632,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenClosedArchive}
-                className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-2xl lg:rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-2xl lg:rounded-lg transition-colors cursor-pointer whitespace-nowrap"
               >
                 <Archive className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
                 <span>Ver Cerradas</span>
@@ -1635,7 +1642,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <button
                 type="button"
                 onClick={onCreateNewLiquidation}
-                className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-sky-100 hover:bg-sky-200 rounded-2xl lg:rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-sky-100 hover:bg-sky-200 rounded-2xl lg:rounded-lg transition-colors cursor-pointer whitespace-nowrap"
               >
                 <Plus className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
                 <span>Nueva</span>
@@ -1648,7 +1655,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       {/* 2. CAPTURA DE FACTURA (ESTRUCTURA AMPLIA MÓVIL + DESKTOP) */}
       {!isLocked && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
-          <div className="px-4 lg:px-5 py-4 lg:py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+          <div className="px-3.5 lg:px-5 py-4 lg:py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-lg lg:text-sm font-extrabold text-slate-900">
               {editingItemId
                 ? 'Editar Factura Seleccionada'
@@ -1662,9 +1669,9 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             )}
           </div>
 
-          <div className="p-4 lg:p-5 grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className={`px-3 py-4 lg:p-5 grid grid-cols-1 gap-5 lg:gap-6 ${isZoomExtra ? '' : 'lg:grid-cols-12'}`}>
             {/* LEFT (5 cols): Receipt Uploader + Camera + Live Preview */}
-            <div className="lg:col-span-5 space-y-3.5">
+            <div className={`${isZoomExtra ? '' : 'lg:col-span-5'} space-y-3.5`}>
               {/* Hidden inputs */}
               <input
                 ref={fileInputRef}
@@ -1692,8 +1699,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               {/* Dropzone / Active Preview */}
               {activeMediaPreview ? (
                 <div className="rounded-2xl lg:rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
-                  <div className="px-3.5 lg:px-3 py-2.5 lg:py-2 bg-slate-100/90 border-b border-slate-200 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0 text-sm lg:text-xs font-semibold text-slate-700">
+                  <div className="px-3.5 lg:px-3 py-2.5 lg:py-2 bg-slate-100/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1 text-sm lg:text-xs font-semibold text-slate-700">
                       {activeMediaPreview.mimeType === 'application/pdf' ? (
                         <FileText className="w-5 h-5 lg:w-4 lg:h-4 text-rose-600 shrink-0" />
                       ) : (
@@ -1708,7 +1715,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                           onClick={handleRotateCurrentPreview}
                           disabled={isExtractingAi || isRotatingImage}
                           title="Rotar imagen 90° en sentido horario"
-                          className="inline-flex items-center gap-1.5 min-h-[44px] lg:min-h-0 px-3 lg:px-2 py-2 lg:py-1 text-sm lg:text-[11px] font-bold text-slate-700 hover:bg-slate-200/80 rounded-xl lg:rounded-lg cursor-pointer disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 min-h-[2.75rem] lg:min-h-0 px-3 lg:px-2 py-2 lg:py-1 text-sm lg:text-[11px] font-bold text-slate-700 hover:bg-slate-200/80 rounded-xl lg:rounded-lg cursor-pointer disabled:opacity-50"
                         >
                           {isRotatingImage ? (
                             <Loader2 className="w-4 h-4 lg:w-3.5 lg:h-3.5 animate-spin" />
@@ -1723,7 +1730,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         onClick={handleReExtractCurrent}
                         disabled={isExtractingAi || isRotatingImage}
                         title="Volver a leer datos de la factura con IA"
-                        className="inline-flex items-center gap-1.5 min-h-[44px] lg:min-h-0 px-3 lg:px-2 py-2 lg:py-1 text-sm lg:text-[11px] font-bold text-[#1E60A8] hover:bg-blue-50 rounded-xl lg:rounded-lg cursor-pointer disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 min-h-[2.75rem] lg:min-h-0 px-3 lg:px-2 py-2 lg:py-1 text-sm lg:text-[11px] font-bold text-[#1E60A8] hover:bg-blue-50 rounded-xl lg:rounded-lg cursor-pointer disabled:opacity-50"
                       >
                         <Sparkles className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
                         <span>Re-leer IA</span>
@@ -1741,7 +1748,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                           }));
                         }}
                         title="Quitar archivo adjunto"
-                        className="min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-0 inline-flex items-center justify-center p-1.5 text-slate-400 hover:text-rose-600 rounded-xl lg:rounded-lg cursor-pointer"
+                        className="min-w-[2.75rem] min-h-[2.75rem] lg:min-w-0 lg:min-h-0 inline-flex items-center justify-center p-1.5 text-slate-400 hover:text-rose-600 rounded-xl lg:rounded-lg cursor-pointer"
                       >
                         <X className="w-5 h-5 lg:w-4 lg:h-4" />
                       </button>
@@ -1781,7 +1788,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                           <a
                             href={activeMediaPreview.dataUrl}
                             download={activeMediaPreview.fileName}
-                            className="inline-flex items-center gap-2 min-h-[48px] px-5 py-2.5 text-sm font-bold text-[#132B63] bg-white border border-slate-300 rounded-2xl"
+                            className="inline-flex items-center gap-2 min-h-[3rem] px-5 py-2.5 text-sm font-bold text-[#132B63] bg-white border border-slate-300 rounded-2xl"
                           >
                             <Eye className="w-4 h-4 text-[#1E60A8]" />
                             <span>Abrir / Descargar PDF</span>
@@ -1839,7 +1846,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         <button
                           type="button"
                           onClick={() => cameraInputRef.current?.click()}
-                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[56px] lg:min-h-0 px-5 lg:px-4 py-3.5 lg:py-2 text-base lg:text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
+                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[3.5rem] lg:min-h-0 px-5 lg:px-4 py-3.5 lg:py-2 text-base lg:text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
                         >
                           <Camera className="w-5 h-5 lg:w-3.5 lg:h-3.5" />
                           <span>Tomar Foto de Factura</span>
@@ -1847,7 +1854,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[52px] lg:min-h-0 px-5 lg:px-4 py-3 lg:py-2 text-base lg:text-xs font-bold text-[#132B63] bg-white hover:bg-slate-100 border border-slate-300 rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
+                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[3.25rem] lg:min-h-0 px-5 lg:px-4 py-3 lg:py-2 text-base lg:text-xs font-bold text-[#132B63] bg-white hover:bg-slate-100 border border-slate-300 rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
                         >
                           <Upload className="w-5 h-5 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
                           <span>Subir Galería / PDF</span>
@@ -1864,7 +1871,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   <button
                     type="button"
                     onClick={() => cameraInputRef.current?.click()}
-                    className="inline-flex items-center justify-center gap-2 min-h-[50px] lg:min-h-0 px-4 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-[#132B63] bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl cursor-pointer"
+                    className="inline-flex items-center justify-center gap-2 min-h-[3.125rem] lg:min-h-0 px-4 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-[#132B63] bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl cursor-pointer"
                   >
                     <Camera className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8] shrink-0" />
                     <span>Tomar otra foto</span>
@@ -1872,7 +1879,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center justify-center gap-2 min-h-[50px] lg:min-h-0 px-4 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl cursor-pointer"
+                    className="inline-flex items-center justify-center gap-2 min-h-[3.125rem] lg:min-h-0 px-4 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl cursor-pointer"
                   >
                     <Upload className="w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0" />
                     <span>Cambiar archivo</span>
@@ -1905,7 +1912,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         type="button"
                         onClick={handleReExtractCurrent}
                         disabled={isExtractingAi}
-                        className="w-full lg:w-auto inline-flex items-center justify-center gap-2 min-h-[46px] lg:min-h-0 px-4 lg:px-3.5 py-2.5 lg:py-1 text-sm lg:text-[11px] font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-50 rounded-xl lg:rounded-lg transition-colors cursor-pointer"
+                        className="w-full lg:w-auto inline-flex items-center justify-center gap-2 min-h-[2.875rem] lg:min-h-0 px-4 lg:px-3.5 py-2.5 lg:py-1 text-sm lg:text-[11px] font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-50 rounded-xl lg:rounded-lg transition-colors cursor-pointer"
                       >
                         <Sparkles className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
                         <span>Reintentar lectura IA</span>
@@ -1917,7 +1924,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             </div>
 
             {/* RIGHT (7 cols): Editable Extracted Fields + Commercial Digitization */}
-            <form onSubmit={handleSubmitItem} className="lg:col-span-7 space-y-6 lg:space-y-4">
+            <form onSubmit={handleSubmitItem} className={`${isZoomExtra ? '' : 'lg:col-span-7'} space-y-6 lg:space-y-4`}>
               {formError && (
                 <div className="px-4 py-3 rounded-2xl lg:rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm lg:text-xs font-medium flex items-center gap-2.5">
                   <AlertTriangle className="w-5 h-5 lg:w-4 lg:h-4 shrink-0" />
@@ -1951,7 +1958,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       value={form.proveedor}
                       onChange={(e) => setForm({ ...form, proveedor: e.target.value })}
                       placeholder="Nombre del comercio o razón social"
-                      className="w-full min-h-[54px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs font-medium text-slate-900 rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                      className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs font-medium text-slate-900 rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                     />
                   </div>
 
@@ -1974,11 +1981,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         })
                       }
                       placeholder="0.00"
-                      className="w-full min-h-[56px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-2xl lg:text-xs font-extrabold lg:font-normal text-right font-mono tabular-nums text-[#132B63] lg:text-slate-900 rounded-2xl lg:rounded-lg border-2 lg:border border-[#1E60A8]/40 lg:border-slate-300 bg-sky-50/20 lg:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                      className="w-full min-h-[3.5rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-2xl lg:text-xs font-extrabold lg:font-normal text-right font-mono tabular-nums text-[#132B63] lg:text-slate-900 rounded-2xl lg:rounded-lg border-2 lg:border border-[#1E60A8]/40 lg:border-slate-300 bg-sky-50/20 lg:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                     />
                   </div>
 
-                  <div className="lg:col-span-4 grid grid-cols-2 gap-3">
+                  <div className={`lg:col-span-4 grid gap-3 ${isZoomHigh ? 'grid-cols-1' : 'grid-cols-2'}`}>
                     <div>
                       <label className="block text-sm lg:text-[11px] font-bold lg:font-semibold text-slate-700 mb-1.5 lg:mb-1">
                         Moneda
@@ -1988,7 +1995,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         onChange={(e) =>
                           handleCurrencyChange(e.target.value as ViaticoCurrency)
                         }
-                        className="w-full min-h-[54px] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-base lg:text-xs font-semibold rounded-2xl lg:rounded-lg border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                        className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-base lg:text-xs font-semibold rounded-2xl lg:rounded-lg border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                       >
                         {VIATICO_CURRENCIES.map((cur) => (
                           <option key={cur} value={cur}>
@@ -2009,14 +2016,14 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         min="0.0001"
                         value={form.tipoCambio}
                         onChange={(e) => setForm({ ...form, tipoCambio: e.target.value })}
-                        className="w-full min-h-[54px] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs text-right font-mono tabular-nums rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                        className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs text-right font-mono tabular-nums rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                       />
                     </div>
                   </div>
                 </div>
 
                 {/* Taxes + Valor Reintegrar Inline Bar */}
-                <div className="rounded-2xl lg:rounded-xl bg-slate-50 border border-slate-200/90 p-4 lg:p-3 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-3 items-center">
+                <div className="rounded-2xl lg:rounded-xl bg-slate-50 border border-slate-200/90 p-3.5 lg:p-3 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-3 items-center">
                   <div className="lg:col-span-4">
                     <div className="text-xs lg:text-[10px] font-extrabold uppercase tracking-wider text-slate-600 lg:text-slate-500 mb-2 lg:mb-1">
                       ¿Aplica Impuestos?
@@ -2034,7 +2041,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                                 : String(DEFAULT_TAX_RATE_BY_CURRENCY[prev.moneda] || 12),
                           }))
                         }
-                        className={`min-h-[48px] lg:min-h-0 px-3 py-2.5 lg:py-1 text-sm lg:text-xs font-bold lg:font-semibold transition-colors cursor-pointer ${
+                        className={`min-h-[3rem] lg:min-h-0 px-3 py-2.5 lg:py-1 text-sm lg:text-xs font-bold lg:font-semibold transition-colors cursor-pointer ${
                           form.aplicaImpuestos
                             ? 'bg-[#1E60A8] text-white'
                             : 'text-slate-600 hover:bg-slate-50'
@@ -2052,7 +2059,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                             montoImpuestoManual: '',
                           }))
                         }
-                        className={`min-h-[48px] lg:min-h-0 px-3 py-2.5 lg:py-1 text-sm lg:text-xs font-bold lg:font-semibold transition-colors cursor-pointer ${
+                        className={`min-h-[3rem] lg:min-h-0 px-3 py-2.5 lg:py-1 text-sm lg:text-xs font-bold lg:font-semibold transition-colors cursor-pointer ${
                           !form.aplicaImpuestos
                             ? 'bg-slate-700 text-white'
                             : 'text-slate-600 hover:bg-slate-50'
@@ -2064,7 +2071,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   </div>
 
                   {form.aplicaImpuestos ? (
-                    <div className="lg:col-span-5 grid grid-cols-2 lg:grid-cols-12 gap-3 lg:gap-2.5 items-end">
+                    <div className={`lg:col-span-5 grid lg:grid-cols-12 gap-3 lg:gap-2.5 items-end ${isZoomHigh ? 'grid-cols-1' : 'grid-cols-2'}`}>
                       <div className="lg:col-span-4">
                         <label className="block text-xs lg:text-[10px] font-bold uppercase tracking-wider text-slate-600 lg:text-slate-500 mb-1.5 lg:mb-1">
                           % Impuesto
@@ -2083,7 +2090,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                               montoImpuestoManual: '',
                             })
                           }
-                          className="w-full min-h-[50px] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1 text-lg lg:text-xs text-right font-mono tabular-nums bg-white rounded-2xl lg:rounded-lg border border-slate-300"
+                          className="w-full min-h-[3.125rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1 text-lg lg:text-xs text-right font-mono tabular-nums bg-white rounded-2xl lg:rounded-lg border border-slate-300"
                         />
                       </div>
                       <div className="lg:col-span-8">
@@ -2104,7 +2111,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                             onChange={(e) =>
                               setForm({ ...form, montoImpuestoManual: e.target.value })
                             }
-                            className="w-full lg:w-20 min-h-[50px] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1 text-lg lg:text-xs text-right font-mono tabular-nums bg-white rounded-2xl lg:rounded-lg border border-slate-300"
+                            className="w-full lg:w-20 min-h-[3.125rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1 text-lg lg:text-xs text-right font-mono tabular-nums bg-white rounded-2xl lg:rounded-lg border border-slate-300"
                           />
                           <span className="text-xs lg:text-[11px] text-slate-500 font-mono tabular-nums truncate">
                             Base: {formatViaticoAmount(computedTax.valorSinImpuesto)}
@@ -2118,7 +2125,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     </div>
                   )}
 
-                  <div className="lg:col-span-3 flex items-center justify-between lg:block lg:text-right pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-200/80">
+                  <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-2 lg:block lg:text-right pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-200/80">
                     <div className="text-xs lg:text-[10px] font-extrabold uppercase tracking-wider text-slate-600 lg:text-slate-500">
                       Valor Reintegrar ({baseCurrency})
                     </div>
@@ -2139,7 +2146,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       value={form.fechaDoc}
                       onChange={(e) => setForm({ ...form, fechaDoc: e.target.value })}
                       placeholder="DD/MM/YYYY"
-                      className="w-full min-h-[52px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] tabular-nums"
+                      className="w-full min-h-[3.25rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] tabular-nums"
                     />
                   </div>
 
@@ -2152,7 +2159,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       value={form.serieDoc}
                       onChange={(e) => setForm({ ...form, serieDoc: e.target.value })}
                       placeholder="Ej. FD0887E5"
-                      className="w-full min-h-[52px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] font-mono"
+                      className="w-full min-h-[3.25rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] font-mono"
                     />
                   </div>
 
@@ -2165,7 +2172,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       value={form.noDoc}
                       onChange={(e) => setForm({ ...form, noDoc: e.target.value })}
                       placeholder="Número factura"
-                      className="w-full min-h-[52px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] font-mono"
+                      className="w-full min-h-[3.25rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] font-mono"
                     />
                   </div>
 
@@ -2178,7 +2185,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       value={form.nit}
                       onChange={(e) => setForm({ ...form, nit: e.target.value })}
                       placeholder="NIT / ID fiscal"
-                      className="w-full min-h-[52px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] font-mono"
+                      className="w-full min-h-[3.25rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] font-mono"
                     />
                   </div>
                 </div>
@@ -2202,7 +2209,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       onChange={(e) =>
                         setForm({ ...form, categoria: e.target.value as ViaticoCategory })
                       }
-                      className="w-full min-h-[54px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs font-medium rounded-2xl lg:rounded-lg border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                      className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs font-medium rounded-2xl lg:rounded-lg border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                     >
                       {VIATICO_CATEGORIES.map((cat) => (
                         <option key={cat} value={cat}>
@@ -2224,7 +2231,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         setForm({ ...form, clienteContacto: e.target.value })
                       }
                       placeholder="Ej. Premicol - Sarmientos y Bodega"
-                      className="w-full min-h-[54px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                      className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                     />
                     <datalist id="viaticos-cliente-list">
                       {clienteSuggestions.map((s) => (
@@ -2245,7 +2252,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         setForm({ ...form, objetivoComercial: e.target.value })
                       }
                       placeholder="Ej. Seguimiento planta / visita técnica"
-                      className="w-full min-h-[54px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                      className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                     />
                     <datalist id="viaticos-objetivo-list">
                       {objetivoSuggestions.map((s) => (
@@ -2267,7 +2274,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         setForm({ ...form, descripcionGasto: e.target.value })
                       }
                       placeholder="Ej. Desayuno 28 de julio, Elder-Melania y Cecilia"
-                      className="w-full min-h-[54px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                      className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                     />
                   </div>
 
@@ -2280,7 +2287,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       value={form.kilometraje}
                       onChange={(e) => setForm({ ...form, kilometraje: e.target.value })}
                       placeholder="Ej. 310 km"
-                      className="w-full min-h-[54px] lg:min-h-0 px-4 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] tabular-nums"
+                      className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] tabular-nums"
                     />
                   </div>
                 </div>
@@ -2291,7 +2298,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 <button
                   type="button"
                   onClick={() => handleResetForm(false)}
-                  className="w-full lg:w-auto inline-flex items-center justify-center gap-2 min-h-[50px] lg:min-h-0 px-4 lg:px-3 py-3 lg:py-2 text-sm lg:text-xs font-bold lg:font-semibold text-slate-600 hover:text-slate-900 bg-slate-50 lg:bg-transparent hover:bg-slate-100 border border-slate-200 lg:border-0 rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
+                  className="w-full lg:w-auto inline-flex items-center justify-center gap-2 min-h-[3.125rem] lg:min-h-0 px-4 lg:px-3 py-3 lg:py-2 text-sm lg:text-xs font-bold lg:font-semibold text-slate-600 hover:text-slate-900 bg-slate-50 lg:bg-transparent hover:bg-slate-100 border border-slate-200 lg:border-0 rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
                 >
                   <RotateCcw className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
                   <span>{editingItemId ? 'Cancelar edición' : 'Limpiar campos'}</span>
@@ -2300,7 +2307,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 <button
                   type="submit"
                   disabled={isExtractingAi}
-                  className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[56px] lg:min-h-0 px-6 lg:px-5 py-3.5 lg:py-2 text-base lg:text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-50 rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
+                  className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[3.5rem] lg:min-h-0 px-6 lg:px-5 py-3.5 lg:py-2 text-base lg:text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-50 rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
                 >
                   {editingItemId ? (
                     <>
@@ -2326,7 +2333,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
       {/* 3. PLANILLA OFICIAL PREMEX (Diseño Original Resumen Excel en Móvil y Desktop) */}
       <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
-        <div className="px-4 lg:px-5 py-4 lg:py-3.5 border-b border-slate-200 flex flex-col lg:flex-row lg:flex-wrap lg:items-center lg:justify-between gap-3.5 lg:gap-3">
+        <div className="px-3.5 lg:px-5 py-4 lg:py-3.5 border-b border-slate-200 flex flex-col lg:flex-row lg:flex-wrap lg:items-center lg:justify-between gap-3.5 lg:gap-3">
           <div>
             <h3 className="text-base lg:text-sm font-extrabold lg:font-bold text-slate-900">
               Detalle de Liquidación de Viáticos ({liquidation.items.length})
@@ -2343,12 +2350,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 lg:flex lg:flex-wrap items-center gap-2.5 lg:gap-2 w-full lg:w-auto">
+          <div className={`grid gap-2.5 lg:gap-2 w-full lg:w-auto ${isZoomExtra ? 'grid-cols-1' : 'grid-cols-2 lg:flex lg:flex-wrap items-center'}`}>
             <button
               type="button"
               onClick={onOpenPlanillaPdfPreview}
               disabled={liquidation.items.length === 0}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-sky-50/70 hover:bg-sky-100 border border-sky-200 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-sky-50/70 hover:bg-sky-100 border border-sky-200 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
               title="Visualizar e imprimir la planilla oficial en formato PDF"
             >
               <Printer className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
@@ -2359,7 +2366,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               type="button"
               onClick={onQuickDownloadExcel}
               disabled={liquidation.items.length === 0 || isDownloadingExcel}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               {isDownloadingExcel ? (
                 <Loader2 className="w-4 h-4 lg:w-3.5 lg:h-3.5 animate-spin text-emerald-700" />
@@ -2373,7 +2380,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               type="button"
               onClick={onQuickDownloadPdf}
               disabled={liquidation.items.length === 0 || isDownloadingPdf}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               {isDownloadingPdf ? (
                 <Loader2 className="w-4 h-4 lg:w-3.5 lg:h-3.5 animate-spin text-rose-700" />
@@ -2388,7 +2395,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 type="button"
                 onClick={onOpenCloseConfirmModal}
                 disabled={liquidation.items.length === 0}
-                className="inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
               >
                 <Lock className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
                 <span>Cerrar Liquidación</span>
@@ -2399,7 +2406,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               type="button"
               onClick={onOpenCloseEmailModal}
               disabled={liquidation.items.length === 0}
-              className="col-span-2 lg:col-span-1 inline-flex items-center justify-center gap-2 min-h-[48px] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              className={`${isZoomExtra ? '' : 'col-span-2 lg:col-span-1'} inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold lg:font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap`}
             >
               <Send className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
               <span>Enviar Correo</span>
@@ -2660,14 +2667,17 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       {lightboxItem && (
         <div
           className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-end lg:items-center justify-center p-0 lg:p-4"
-          onClick={() => setLightboxItem(null)}
+          onClick={() => {
+            setReceiptZoom(1);
+            setLightboxItem(null);
+          }}
         >
           <div
-            className="bg-white rounded-t-3xl lg:rounded-2xl border border-slate-200 shadow-2xl max-w-4xl w-full max-h-[92vh] overflow-hidden flex flex-col pb-safe"
+            className="bg-white rounded-t-3xl lg:rounded-2xl border border-slate-200 shadow-2xl max-w-5xl w-full max-h-[92vh] overflow-hidden flex flex-col pb-safe"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-4 lg:px-5 py-3.5 bg-[#132B63] text-white flex items-center justify-between gap-3">
-              <div className="min-w-0">
+            <div className="px-4 lg:px-5 py-3.5 bg-[#132B63] text-white flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
                 <div className="text-base lg:text-sm font-bold truncate">
                   {lightboxItem.item.proveedor} ·{' '}
                   {formatViaticoAmount(
@@ -2684,7 +2694,36 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   · {lightboxItem.media.fileName}
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
+                {lightboxItem.media.mimeType !== 'application/pdf' && (
+                  <div className="inline-flex items-center bg-white/10 rounded-xl p-0.5 mr-1">
+                    <button
+                      type="button"
+                      onClick={() => setReceiptZoom((z) => Math.max(1, Number((z - 0.5).toFixed(1))))}
+                      disabled={receiptZoom <= 1}
+                      aria-label="Alejar comprobante"
+                      className="min-w-[36px] min-h-[36px] inline-flex items-center justify-center text-white disabled:opacity-40 rounded-lg cursor-pointer"
+                    >
+                      <ZoomOut className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptZoom(1)}
+                      className="px-2 text-xs font-mono font-bold text-white tabular-nums cursor-pointer"
+                    >
+                      {Math.round(receiptZoom * 100)}%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptZoom((z) => Math.min(2.5, Number((z + 0.5).toFixed(1))))}
+                      disabled={receiptZoom >= 2.5}
+                      aria-label="Acercar comprobante"
+                      className="min-w-[36px] min-h-[36px] inline-flex items-center justify-center text-white disabled:opacity-40 rounded-lg cursor-pointer"
+                    >
+                      <ZoomIn className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
                 <a
                   href={lightboxItem.media.dataUrl}
                   download={lightboxItem.media.fileName || 'factura.jpg'}
@@ -2696,7 +2735,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 </a>
                 <button
                   type="button"
-                  onClick={() => setLightboxItem(null)}
+                  onClick={() => {
+                    setReceiptZoom(1);
+                    setLightboxItem(null);
+                  }}
                   className="min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-0 inline-flex items-center justify-center p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-xl lg:rounded-lg cursor-pointer"
                   aria-label="Cerrar vista previa"
                 >
@@ -2731,11 +2773,20 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   </div>
                 </>
               ) : (
-                <img
-                  src={lightboxItem.media.dataUrl}
-                  alt={lightboxItem.media.fileName}
-                  className="max-h-[72vh] max-w-full object-contain rounded-lg shadow-md"
-                />
+                <div className="overflow-auto max-h-[74vh] max-w-full flex items-center justify-center">
+                  <img
+                    src={lightboxItem.media.dataUrl}
+                    alt={lightboxItem.media.fileName}
+                    style={
+                      receiptZoom > 1
+                        ? { width: `${Math.round(receiptZoom * 100)}%`, maxWidth: 'none' }
+                        : undefined
+                    }
+                    className={`${
+                      receiptZoom === 1 ? 'max-h-[72vh] max-w-full' : ''
+                    } object-contain rounded-lg shadow-md transition-all`}
+                  />
+                </div>
               )}
             </div>
           </div>
