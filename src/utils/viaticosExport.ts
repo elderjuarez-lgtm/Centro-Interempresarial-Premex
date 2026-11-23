@@ -1638,12 +1638,11 @@ export async function exportViaticosPlanillaPdf(
 
 export function buildViaticosEmailDraft(
   liquidation: ViaticoLiquidation,
-  costCenter?: string
+  _costCenter?: string
 ): {
   subject: string;
   body: string;
 } {
-  const resolvedCostCenter = String(costCenter ?? liquidation.centroCosto ?? '').trim();
   const totalFormatted = formatViaticoAmount(
     liquidation.totalLiquidacion,
     liquidation.monedaBase,
@@ -1654,17 +1653,6 @@ export function buildViaticosEmailDraft(
     liquidation.consultorNombre
   } (${liquidation.lineaLiquidacion})`;
 
-  const lines = liquidation.items.map(
-    (item, idx) =>
-      `${idx + 1}. ${item.fechaDoc || '-'} | ${item.proveedor} | Doc: ${
-        [item.serieDoc, item.noDoc].filter(Boolean).join('-') || '-'
-      } | ${item.categoria} | ${formatViaticoAmount(
-        item.valorReintegrar,
-        liquidation.monedaBase,
-        true
-      )}${item.aplicaImpuestos ? ' (Con impuestos)' : ' (Sin impuestos)'}`
-  );
-
   const body = [
     'Estimado equipo de Contabilidad y Tesorería,',
     '',
@@ -1674,26 +1662,8 @@ export function buildViaticosEmailDraft(
     `• Semana #: ${liquidation.semana || '-'}`,
     `• Consultor: ${liquidation.consultorNombre} (${liquidation.consultorEmail || 'Sin correo'})`,
     `• Empresa / Sociedad: ${liquidation.empresa}`,
-    `• Centro de Costo: ${resolvedCostCenter || 'Sin asignar'}`,
     `• Cantidad de comprobantes: ${liquidation.items.length}`,
-    `• Total con impuestos: ${formatViaticoAmount(
-      liquidation.totalConImpuestos,
-      liquidation.monedaBase,
-      true
-    )} (Impuesto estimado: ${formatViaticoAmount(
-      liquidation.totalImpuestos,
-      liquidation.monedaBase,
-      true
-    )})`,
-    `• Total sin impuestos: ${formatViaticoAmount(
-      liquidation.totalSinImpuestos,
-      liquidation.monedaBase,
-      true
-    )}`,
     `• TOTAL LIQUIDACIÓN A REINTEGRAR: ${totalFormatted}`,
-    '',
-    'Detalle resumido de gastos:',
-    ...lines,
     '',
     'Se adjuntan a este correo los archivos oficiales descargados desde la Suite Premex:',
     '1. Archivo Excel (.xlsx) diligenciado con el formato oficial Premex y detalle de impuestos.',
