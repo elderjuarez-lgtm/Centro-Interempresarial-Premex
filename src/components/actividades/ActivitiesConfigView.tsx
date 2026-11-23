@@ -24,6 +24,7 @@ import {
 } from '../../types';
 import {
   ACTIVITY_PERIODICITY_OPTIONS,
+  computeBusinessDayDetailsForPeriod,
   formatPeriodLabel,
   formatShortDateEs,
   normalizeResponsibleIds,
@@ -33,8 +34,8 @@ import {
   COUNTRY_HOLIDAY_OPTIONS,
   DEFAULT_ACTIVITY_COUNTRY,
   getCountryHolidaysForPeriod,
+  getNextMonthPeriodKey,
   normalizeActivityCountry,
-  resolveBusinessDayDateForPeriod,
 } from '../../utils/countryHolidays';
 import { normalizeEmail } from '../../utils/permissions';
 
@@ -118,17 +119,22 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
     return Array.from(set);
   }, [activeSocieties]);
 
+  const duePeriodKey = useMemo(
+    () => getNextMonthPeriodKey(data.selectedPeriod),
+    [data.selectedPeriod]
+  );
+
   const actBusinessDayPreviews = useMemo(
     () =>
       activeCountries.map((country) =>
-        resolveBusinessDayDateForPeriod(data.selectedPeriod, actDiaSugerido, country)
+        computeBusinessDayDetailsForPeriod(data.selectedPeriod, actDiaSugerido, country)
       ),
     [activeCountries, data.selectedPeriod, actDiaSugerido]
   );
 
   const selectedSocHolidays = useMemo(
-    () => getCountryHolidaysForPeriod(data.selectedPeriod, socPais),
-    [data.selectedPeriod, socPais]
+    () => getCountryHolidaysForPeriod(duePeriodKey, socPais),
+    [duePeriodKey, socPais]
   );
 
   const knownPeopleForNotifyPicker = useMemo(() => {
@@ -761,10 +767,10 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
 
                 <div className="md:col-span-4 rounded-xl border border-blue-200/80 bg-blue-50/50 px-3.5 py-2.5 text-[11px] text-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span>
-                    <strong className="text-[#132B63]">Cálculo por días hábiles:</strong> se excluyen sábados, domingos y los feriados oficiales del país de cada empresa.
+                    <strong className="text-[#132B63]">Vencimiento en días hábiles del mes siguiente:</strong> para el cierre de {formatPeriodLabel(data.selectedPeriod)}, vence en {formatPeriodLabel(duePeriodKey)} (excluyendo sábados, domingos y feriados de cada país).
                   </span>
                   <span className="font-mono font-semibold text-[#132B63] shrink-0">
-                    {formatPeriodLabel(data.selectedPeriod)}:{' '}
+                    {formatPeriodLabel(duePeriodKey)}:{' '}
                     {actBusinessDayPreviews
                       .map((p) => `${p.country} ${formatShortDateEs(p.dateYmd)}`)
                       .join(' · ')}
@@ -1152,14 +1158,14 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
 
                 <div className="rounded-xl border border-blue-200/80 bg-blue-50/50 px-3.5 py-2.5 text-[11px] text-slate-700">
                   <strong className="text-[#132B63]">
-                    Feriados oficiales ({normalizeActivityCountry(socPais)} ·{' '}
-                    {formatPeriodLabel(data.selectedPeriod)}):
+                    Feriados oficiales ({normalizeActivityCountry(socPais)} · vencimiento{' '}
+                    {formatPeriodLabel(duePeriodKey)}):
                   </strong>{' '}
                   {selectedSocHolidays.length > 0
                     ? selectedSocHolidays
                         .map((h) => `${formatShortDateEs(h.dateYmd)} (${h.name})`)
                         .join(' · ')
-                    : 'Sin feriados oficiales en este mes.'}{' '}
+                    : 'Sin feriados oficiales en ese mes.'}{' '}
                   <span className="text-slate-500">
                     (Se excluyen sábados, domingos y feriados oficiales.)
                   </span>
@@ -1254,7 +1260,7 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                       .filter(Boolean) as string[];
                     const socCountry = normalizeActivityCountry(soc.pais);
                     const periodHolidays = getCountryHolidaysForPeriod(
-                      data.selectedPeriod,
+                      duePeriodKey,
                       socCountry
                     );
                     return (
@@ -1266,9 +1272,9 @@ export const ActivitiesConfigView: React.FC<ActivitiesConfigViewProps> = ({
                           <div className="text-[10px] text-slate-500">
                             {periodHolidays.length > 0
                               ? `${periodHolidays.length} feriado(s) en ${formatPeriodLabel(
-                                  data.selectedPeriod
+                                  duePeriodKey
                                 )}`
-                              : `Sin feriados en ${formatPeriodLabel(data.selectedPeriod)}`}
+                              : `Sin feriados en ${formatPeriodLabel(duePeriodKey)}`}
                           </div>
                         </td>
                         <td className="px-3 py-3 text-slate-700">

@@ -25,8 +25,8 @@ export interface ExtractedInvoiceData {
 }
 
 const IMAGE_EXT_REGEX = /\.(jpe?g|png|webp|heic|heif|gif|bmp|avif)$/i;
-// Keep JSON + base64 safely below Vercel's 4.5 MB Serverless Function body limit
-const MAX_SAFE_IMAGE_DATAURL_CHARS = 2_400_000;
+// Fast mobile upload budget (~650 KB JPEG <= 880k base64 chars) — crisp for OCR & single-doc Firestore sync
+const MAX_SAFE_IMAGE_DATAURL_CHARS = 880_000;
 const MAX_SAFE_PDF_DATAURL_CHARS = 4_000_000;
 
 export function detectInvoiceFileKind(file: File): {
@@ -67,40 +67,148 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+/**
+ * Pure TypeScript JPEG APP1/EXIF Orientation reader (values 1..8).
+ * Returns 1 when not present or not a JPEG.
+ */
+export function readJpegExifOrientation(bytes: Uint8Array): number {
+  if (bytes.length < 12 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    return 1;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 2;
+
+  while (offset + 4 <= view.byteLength) {
+    const marker = view.getUint16(offset, false);
+    offset += 2;
+    if (marker === 0xffda || marker === 0xffd9) break;
+    if (offset + 2 > view.byteLength) break;
+    const segLen = view.getUint16(offset, false);
+    if (segLen < 2) break;
+
+    if (marker === 0xffe1 && offset + segLen <= view.byteLength) {
+      // "Exif\0\0" header
+      if (
+        offset + 10 <= view.byteLength &&
+        view.getUint32(offset + 2, false) === 0x45786966 &&
+        view.getUint16(offset + 6, false) === 0x0000
+      ) {
+        const tiffStart = offset + 8;
+        if (tiffStart + 8 <= view.byteLength) {
+          const endianTag = view.getUint16(tiffStart, false);
+          const little = endianTag === 0x4949;
+          if (little || endianTag === 0x4d4d) {
+            const firstIfdRel = view.getUint32(tiffStart + 4, little);
+            const ifdStart = tiffStart + firstIfdRel;
+            if (ifdStart + 2 <= view.byteLength) {
+              const entries = view.getUint16(ifdStart, little);
+              for (let i = 0; i < entries; i++) {
+                const entryOff = ifdStart + 2 + i * 12;
+                if (entryOff + 12 > view.byteLength) break;
+                const tag = view.getUint16(entryOff, little);
+                if (tag === 0x0112) {
+                  const val = view.getUint16(entryOff + 8, little);
+                  return val >= 1 && val <= 8 ? val : 1;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    offset += segLen;
+  }
+  return 1;
+}
+
+function drawOrientedSourceToCanvas(
+  source: CanvasImageSource,
+  srcW: number,
+  srcH: number,
+  orientation: number,
+  maxDim: number,
+  quality: number
+): string | null {
+  const swapsAxes = orientation >= 5 && orientation <= 8;
+  const targetNaturalW = swapsAxes ? srcH : srcW;
+  const targetNaturalH = swapsAxes ? srcW : srcH;
+
+  let drawTotalW = targetNaturalW;
+  let drawTotalH = targetNaturalH;
+  if (drawTotalW > maxDim || drawTotalH > maxDim) {
+    const ratio = Math.min(maxDim / drawTotalW, maxDim / drawTotalH);
+    drawTotalW = Math.max(1, Math.round(drawTotalW * ratio));
+    drawTotalH = Math.max(1, Math.round(drawTotalH * ratio));
+  }
+
+  // Scaled pre-transform rectangle
+  const boxW = swapsAxes ? drawTotalH : drawTotalW;
+  const boxH = swapsAxes ? drawTotalW : drawTotalH;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = drawTotalW;
+  canvas.height = drawTotalH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, drawTotalW, drawTotalH);
+
+  switch (orientation) {
+    case 2:
+      ctx.transform(-1, 0, 0, 1, drawTotalW, 0);
+      break;
+    case 3:
+      ctx.transform(-1, 0, 0, -1, drawTotalW, drawTotalH);
+      break;
+    case 4:
+      ctx.transform(1, 0, 0, -1, 0, drawTotalH);
+      break;
+    case 5:
+      ctx.transform(0, 1, 1, 0, 0, 0);
+      break;
+    case 6:
+      ctx.transform(0, 1, -1, 0, drawTotalW, 0);
+      break;
+    case 7:
+      ctx.transform(0, -1, -1, 0, drawTotalW, drawTotalH);
+      break;
+    case 8:
+      ctx.transform(0, -1, 1, 0, 0, drawTotalH);
+      break;
+    default:
+      break;
+  }
+
+  ctx.drawImage(source, 0, 0, boxW, boxH);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
 function encodeSourceToAdaptiveJpeg(
   source: CanvasImageSource,
   naturalWidth: number,
-  naturalHeight: number
+  naturalHeight: number,
+  exifOrientation = 1
 ): string | null {
   const attempts: { maxDim: number; quality: number }[] = [
-    { maxDim: 2400, quality: 0.88 },
-    { maxDim: 2000, quality: 0.84 },
-    { maxDim: 1650, quality: 0.78 },
-    { maxDim: 1350, quality: 0.7 },
-    { maxDim: 1080, quality: 0.62 },
+    { maxDim: 1650, quality: 0.82 },
+    { maxDim: 1450, quality: 0.78 },
+    { maxDim: 1280, quality: 0.72 },
+    { maxDim: 1080, quality: 0.64 },
   ];
 
   let lastDataUrl: string | null = null;
   for (const step of attempts) {
-    let width = naturalWidth;
-    let height = naturalHeight;
-    if (width > step.maxDim || height > step.maxDim) {
-      const ratio = Math.min(step.maxDim / width, step.maxDim / height);
-      width = Math.max(1, Math.round(width * ratio));
-      height = Math.max(1, Math.round(height * ratio));
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return lastDataUrl;
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(source, 0, 0, width, height);
-
-    const encoded = canvas.toDataURL('image/jpeg', step.quality);
+    const encoded = drawOrientedSourceToCanvas(
+      source,
+      naturalWidth,
+      naturalHeight,
+      exifOrientation,
+      step.maxDim,
+      step.quality
+    );
+    if (!encoded) return lastDataUrl;
     lastDataUrl = encoded;
     if (encoded.length <= MAX_SAFE_IMAGE_DATAURL_CHARS) {
       return encoded;
@@ -120,9 +228,8 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
 
 /**
  * Normalizes mobile camera photos & screenshots:
- * - Bakes EXIF orientation into upright pixels when supported by the browser
- * - Progressively compresses into a sharp JPEG guaranteed to stay well under
- *   Vercel's 4.5MB serverless body limit and upload quickly over mobile data
+ * - Explicitly reads EXIF Orientation and bakes upright vertical pixels without double-rotation
+ * - Progressively compresses into a sharp JPEG optimized for fast 4G/LTE upload and crisp OCR
  * - Preserves PDFs untouched
  */
 export async function prepareFileForExtraction(
@@ -134,26 +241,55 @@ export async function prepareFileForExtraction(
     return { dataUrl: originalDataUrl, mimeType: 'application/pdf' };
   }
 
-  // First try createImageBitmap with EXIF orientation support (best for Android/iOS cameras)
+  let exifOrientation = 1;
+  try {
+    const headerSlice = await file.slice(0, 128 * 1024).arrayBuffer();
+    exifOrientation = readJpegExifOrientation(new Uint8Array(headerSlice));
+  } catch {
+    exifOrientation = 1;
+  }
+
+  // Deterministic orientation baking: request raw sensor pixels ('none') and apply EXIF manually.
   if (typeof createImageBitmap === 'function') {
     try {
-      const bitmap = await createImageBitmap(file, {
-        imageOrientation: 'from-image',
+      const rawBitmap = await createImageBitmap(file, {
+        imageOrientation: 'none',
       } as ImageBitmapOptions);
       try {
         const compressed = encodeSourceToAdaptiveJpeg(
-          bitmap,
-          bitmap.width,
-          bitmap.height
+          rawBitmap,
+          rawBitmap.width,
+          rawBitmap.height,
+          exifOrientation
         );
         if (compressed) {
           return { dataUrl: compressed, mimeType: 'image/jpeg' };
         }
       } finally {
-        bitmap.close?.();
+        rawBitmap.close?.();
       }
     } catch {
-      // Fall through to HTMLImageElement decoding
+      // Fallback: browser does not support imageOrientation: 'none'; try auto-orientation
+      try {
+        const autoBitmap = await createImageBitmap(file, {
+          imageOrientation: 'from-image',
+        } as ImageBitmapOptions);
+        try {
+          const compressed = encodeSourceToAdaptiveJpeg(
+            autoBitmap,
+            autoBitmap.width,
+            autoBitmap.height,
+            1
+          );
+          if (compressed) {
+            return { dataUrl: compressed, mimeType: 'image/jpeg' };
+          }
+        } finally {
+          autoBitmap.close?.();
+        }
+      } catch {
+        // Fall through to HTMLImageElement decoding
+      }
     }
   }
 
@@ -162,7 +298,8 @@ export async function prepareFileForExtraction(
     const compressed = encodeSourceToAdaptiveJpeg(
       img,
       img.naturalWidth || img.width,
-      img.naturalHeight || img.height
+      img.naturalHeight || img.height,
+      1
     );
     if (compressed) {
       return { dataUrl: compressed, mimeType: 'image/jpeg' };
@@ -178,7 +315,7 @@ export async function prepareFileForExtraction(
 
 /**
  * Ensures an already stored data URL (e.g. when pressing "Re-leer IA") fits
- * cleanly inside the server payload budget.
+ * cleanly inside the fast mobile server payload budget.
  */
 export async function ensureDataUrlWithinLimit(
   dataUrl: string,
@@ -199,7 +336,8 @@ export async function ensureDataUrlWithinLimit(
     const compressed = encodeSourceToAdaptiveJpeg(
       img,
       img.naturalWidth || img.width,
-      img.naturalHeight || img.height
+      img.naturalHeight || img.height,
+      1
     );
     if (compressed) {
       return { dataUrl: compressed, mimeType: 'image/jpeg' };
@@ -212,7 +350,7 @@ export async function ensureDataUrlWithinLimit(
 
 /**
  * Rotates an image data URL clockwise by 90 degrees so sideways mobile receipts
- * can be straightened visually, for OCR, and for the compiled PDF.
+ * can be straightened visually, for OCR, and for the compiled vertical PDF.
  */
 export async function rotateImageDataUrl90(
   dataUrl: string
@@ -221,7 +359,7 @@ export async function rotateImageDataUrl90(
   const srcW = img.naturalWidth || img.width;
   const srcH = img.naturalHeight || img.height;
 
-  const maxDim = 2200;
+  const maxDim = 1650;
   let drawW = srcW;
   let drawH = srcH;
   if (drawW > maxDim || drawH > maxDim) {
@@ -244,9 +382,9 @@ export async function rotateImageDataUrl90(
   ctx.rotate(Math.PI / 2);
   ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
 
-  let rotated = canvas.toDataURL('image/jpeg', 0.86);
+  let rotated = canvas.toDataURL('image/jpeg', 0.84);
   if (rotated.length > MAX_SAFE_IMAGE_DATAURL_CHARS) {
-    rotated = canvas.toDataURL('image/jpeg', 0.74);
+    rotated = canvas.toDataURL('image/jpeg', 0.72);
   }
   return { dataUrl: rotated, mimeType: 'image/jpeg' };
 }
@@ -269,6 +407,10 @@ function parseSafeNumber(val: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function extractInvoiceViaServer(params: {
   dataUrl: string;
   mimeType: string;
@@ -286,26 +428,63 @@ export async function extractInvoiceViaServer(params: {
     );
   }
 
-  let response: Response;
-  try {
-    response = await fetch('/api/viaticos/extract-invoice', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        base64Data: safeMedia.dataUrl,
-        mimeType: safeMedia.mimeType,
-        fileName: params.fileName,
-        baseCurrency: params.baseCurrency,
-      }),
-    });
-  } catch {
-    throw new Error(
-      'No se pudo conectar con el servidor de lectura IA. Verifica tu conexión a internet y presiona "Reintentar lectura IA".'
-    );
-  }
+  const requestBody = JSON.stringify({
+    base64Data: safeMedia.dataUrl,
+    mimeType: safeMedia.mimeType,
+    fileName: params.fileName,
+    baseCurrency: params.baseCurrency,
+  });
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
+  const maxClientAttempts = 2;
+  let response: Response | null = null;
+  let payload: any = {};
+
+  for (let attempt = 0; attempt < maxClientAttempts; attempt++) {
+    if (attempt > 0) {
+      await waitMs(1300);
+    }
+
+    const controller =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), 58_000)
+      : null;
+
+    try {
+      response = await fetch('/api/viaticos/extract-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: requestBody,
+        signal: controller?.signal,
+      });
+    } catch (err: any) {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (attempt < maxClientAttempts - 1) continue;
+      if (err?.name === 'AbortError') {
+        throw new Error(
+          'La lectura de la factura tardó más de lo esperado por la red móvil. Tu comprobante quedó adjunto: presiona "Reintentar lectura IA".'
+        );
+      }
+      throw new Error(
+        'No se pudo conectar con el servidor de lectura IA. Verifica tu conexión a internet y presiona "Reintentar lectura IA".'
+      );
+    }
+
+    if (timeoutId) clearTimeout(timeoutId);
+    payload = await response.json().catch(() => ({}));
+
+    if (response.ok) {
+      break;
+    }
+
+    const isTransient =
+      response.status === 502 ||
+      response.status === 503 ||
+      response.status === 504;
+    if (isTransient && attempt < maxClientAttempts - 1) {
+      continue;
+    }
+
     if (response.status === 413) {
       throw new Error(
         'La imagen o documento es demasiado pesado para el servidor (HTTP 413). Intenta tomar la foto con menor resolución o presiona "Reintentar lectura IA".'

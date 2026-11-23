@@ -43,6 +43,11 @@
 
 @media print {
   @page {
+    size: letter portrait;
+    margin: 8mm;
+  }
+
+  @page landscape-sheet {
     size: letter landscape;
     margin: 8mm;
   }
@@ -60,6 +65,7 @@
   }
 
   .bank-print-sheet {
+    page: landscape-sheet;
     box-shadow: none !important;
     border-radius: 0 !important;
     margin: 0 !important;

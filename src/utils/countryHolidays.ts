@@ -5,11 +5,24 @@ export interface CountryHolidayEntry {
 
 export interface BusinessDayResolution {
   dateYmd: string;
+  targetMonthKey: string; // YYYY-MM month in which the business day was resolved
   requestedBusinessDay: number;
   effectiveBusinessDay: number;
   country: string;
   skippedHolidays: CountryHolidayEntry[];
 }
+
+/**
+ * Returns the following month in YYYY-MM format (e.g. '2026-11' -> '2026-12', '2026-12' -> '2027-01').
+ */
+export const getNextMonthPeriodKey = (periodKey: string): string => {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(periodKey || '').trim());
+  const now = new Date();
+  const year = match ? Number(match[1]) : now.getFullYear();
+  const monthIdx = match ? Number(match[2]) - 1 : now.getMonth();
+  const next = new Date(year, monthIdx + 1, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+};
 
 export const DEFAULT_ACTIVITY_COUNTRY = 'Colombia';
 
@@ -520,6 +533,7 @@ export const resolveBusinessDayDateForPeriod = (
   const year = match ? Number(match[1]) : now.getFullYear();
   const month = match ? Number(match[2]) : now.getMonth() + 1;
 
+  const targetMonthKey = toYmd(year, month, 1).slice(0, 7);
   const daysInMonth = new Date(year, month, 0).getDate();
   const requestedBusinessDay = Math.min(31, Math.max(1, Math.round(businessDayNumber || 10)));
   const holidaysMap = getCountryHolidaysMapForYear(country, year);
@@ -545,6 +559,7 @@ export const resolveBusinessDayDateForPeriod = (
     if (businessCount === requestedBusinessDay) {
       return {
         dateYmd: ymd,
+        targetMonthKey,
         requestedBusinessDay,
         effectiveBusinessDay: businessCount,
         country,
@@ -555,6 +570,7 @@ export const resolveBusinessDayDateForPeriod = (
 
   return {
     dateYmd: lastBusinessYmd,
+    targetMonthKey,
     requestedBusinessDay,
     effectiveBusinessDay: Math.max(1, businessCount),
     country,

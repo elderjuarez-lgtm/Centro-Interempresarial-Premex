@@ -99,13 +99,13 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 pt-safe">
-      <div className="px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
+      <div className="px-3 sm:px-5 lg:px-8 py-2 lg:py-3 flex items-center justify-between gap-2 sm:gap-3">
         {/* Left: Mobile toggle + Breadcrumb + Active Title */}
         <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 overflow-hidden">
           <button
             type="button"
             onClick={onToggleMobileMenu}
-            className="lg:hidden min-w-[44px] min-h-[44px] -ml-1.5 inline-flex items-center justify-center text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
+            className="lg:hidden min-w-[44px] min-h-[44px] -ml-1.5 inline-flex items-center justify-center text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
             aria-label="Abrir menú"
           >
             <Menu className="w-5 h-5" />
@@ -120,8 +120,9 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               >
                 Premex
               </button>
-              <ChevronRight className="hidden sm:block w-3 h-3 text-slate-400 shrink-0" />
-              <span className="hidden sm:inline text-[#19377B] truncate">
+              <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
+              <span className="text-[#19377B] truncate lg:hidden">Viáticos</span>
+              <span className="hidden lg:inline text-[#19377B] truncate">
                 Liquidación de Viáticos
               </span>
               {activeTab === 'liquidador' && statusInfo && (
@@ -131,8 +132,8 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
                     className={`inline-flex items-center gap-1 min-w-0 truncate ${statusInfo.color}`}
                   >
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusInfo.dot}`} />
-                    <span className="sm:hidden truncate">{statusInfo.shortText}</span>
-                    <span className="hidden sm:inline whitespace-nowrap">
+                    <span className="lg:hidden truncate">{statusInfo.shortText}</span>
+                    <span className="hidden lg:inline whitespace-nowrap">
                       {statusInfo.text}
                     </span>
                   </span>
@@ -140,27 +141,27 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               )}
             </div>
 
-            <h2 className="text-sm sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+            <h2 className="text-sm lg:text-lg font-bold text-slate-900 tracking-tight truncate">
               {activeTab === 'liquidador'
                 ? activeLiquidation
-                  ? `${activeLiquidation.lineaLiquidacion || 'Sin título'} · Sem #${activeLiquidation.semana || '-'} · ${activeLiquidation.monedaBase}`
+                  ? `${activeLiquidation.lineaLiquidacion || 'Sin título'} · Sem #${activeLiquidation.semana || '-'}`
                   : 'Panel de Liquidadores'
                 : activeTab === 'cerradas'
-                ? 'Consulta de Liquidaciones Cerradas'
+                ? 'Liquidaciones Cerradas'
                 : activeTab === 'contabilidad'
-                ? 'Contabilidad y Carga a Odoo'
-                : 'Historial General y Consultores'}
+                ? 'Contabilidad y Odoo'
+                : 'Historial y Consultores'}
             </h2>
           </div>
         </div>
 
-        {/* Right: Single-Line Actions */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* Right: Mobile Essential Actions + Desktop Full Toolbar */}
+        <div className="flex items-center gap-1.5 lg:gap-2 shrink-0">
           {permissions.canOperate && (
             <button
               type="button"
               onClick={onCreateNewLiquidation}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               title="Iniciar otra liquidación (semana / moneda) sin cerrar las actuales"
             >
               <Plus className="w-3.5 h-3.5 text-[#1E60A8]" />
@@ -174,7 +175,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
                 type="button"
                 onClick={onOpenPlanillaPdfPreview}
                 disabled={!hasItems}
-                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
                 title="Visualizar planilla Excel en formato PDF para imprimir"
               >
                 <Printer className="w-3.5 h-3.5 text-[#1E60A8]" />
@@ -185,7 +186,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
                 type="button"
                 onClick={onQuickDownloadExcel}
                 disabled={!hasItems || isDownloadingExcel}
-                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
                 title="Descargar Excel en formato oficial Premex"
               >
                 {isDownloadingExcel ? (
@@ -200,7 +201,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
                 type="button"
                 onClick={onQuickDownloadPdf}
                 disabled={!hasItems || isDownloadingPdf}
-                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
                 title="Descargar PDF compilado con todas las facturas e imágenes"
               >
                 {isDownloadingPdf ? (
@@ -218,7 +219,8 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               type="button"
               onClick={onSaveToCloud}
               disabled={isSavingCloud}
-              className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
+              aria-label={isSavingCloud ? 'Sincronizando en la nube' : 'Respaldar en la nube'}
+              className={`inline-flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] lg:min-w-0 lg:min-h-[38px] px-2.5 lg:px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
                 isSavingCloud
                   ? 'bg-sky-50 border-sky-200 text-[#132B63]'
                   : hasUnsavedChanges
@@ -234,10 +236,10 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               }
             >
               {isSavingCloud ? (
-                <Loader2 className="w-4 h-4 sm:w-3.5 sm:h-3.5 animate-spin text-[#1E60A8]" />
+                <Loader2 className="w-4 h-4 animate-spin text-[#1E60A8]" />
               ) : (
                 <Cloud
-                  className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${
+                  className={`w-4 h-4 ${
                     hasUnsavedChanges ? 'text-amber-600' : 'text-emerald-600'
                   }`}
                 />
@@ -257,12 +259,12 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               type="button"
               onClick={onOpenCloseConfirmModal}
               disabled={!hasItems}
-              className="inline-flex items-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 min-h-[40px] lg:min-h-[38px] px-3 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               title="Cerrar esta liquidación sin necesidad de enviarla por correo"
             >
               <Lock className="w-3.5 h-3.5 shrink-0" />
-              <span className="sm:hidden">Cerrar</span>
-              <span className="hidden sm:inline">Cerrar Liquidación</span>
+              <span className="lg:hidden">Cerrar</span>
+              <span className="hidden lg:inline">Cerrar Liquidación</span>
             </button>
           )}
 
@@ -271,7 +273,9 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               type="button"
               onClick={onOpenCloseEmailModal}
               disabled={!hasItems}
-              className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 ${
+              className={`${
+                canCloseActive ? 'hidden lg:inline-flex' : 'inline-flex'
+              } items-center justify-center gap-1.5 min-h-[40px] lg:min-h-[38px] px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 ${
                 canCloseActive
                   ? 'text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200'
                   : 'text-white bg-[#1E60A8] hover:bg-[#132B63]'
@@ -279,13 +283,14 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
               title="Preparar envío por correo electrónico con Excel y PDF"
             >
               <Send className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden sm:inline">Enviar Correo</span>
+              <span className="lg:hidden">Enviar</span>
+              <span className="hidden lg:inline">Enviar Correo</span>
             </button>
           )}
 
           {/* Account */}
           {currentUser ? (
-            <div className="hidden sm:flex items-center gap-1.5 pl-2 border-l border-slate-200">
+            <div className="hidden lg:flex items-center gap-1.5 pl-2 border-l border-slate-200">
               {currentUser.photoURL ? (
                 <img
                   src={currentUser.photoURL}
@@ -314,7 +319,7 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
             <button
               type="button"
               onClick={onSignInWithGoogle}
-              className="hidden sm:inline-flex items-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl whitespace-nowrap shrink-0 cursor-pointer"
+              className="hidden lg:inline-flex items-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl whitespace-nowrap shrink-0 cursor-pointer"
             >
               Iniciar Sesión
             </button>

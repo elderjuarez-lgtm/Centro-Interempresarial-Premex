@@ -249,11 +249,11 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* KPI Summary Strip */}
       {isClosedMode ? (
         <section className="bg-white rounded-2xl border border-slate-200/90 grid grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
-          <div className="p-5">
+          <div className="p-3.5 sm:p-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Liquidaciones Cerradas
             </div>
@@ -265,11 +265,11 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             </div>
           </div>
 
-          <div className="p-5">
+          <div className="p-3.5 sm:p-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Semanas Concluidas
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+            <div className="mt-1.5 text-xl sm:text-2xl font-bold text-slate-900 font-mono tabular-nums">
               {stats.distinctWeeks}
             </div>
             <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
@@ -278,11 +278,11 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             </div>
           </div>
 
-          <div className="p-5">
+          <div className="p-3.5 sm:p-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Comprobantes Respaldados
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-emerald-700 font-mono tabular-nums">
+            <div className="mt-1.5 text-xl sm:text-2xl font-bold text-emerald-700 font-mono tabular-nums">
               {stats.totalFacturas}
             </div>
             <div className="mt-0.5 text-xs text-slate-500">
@@ -290,7 +290,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             </div>
           </div>
 
-          <div className="p-5">
+          <div className="p-3.5 sm:p-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Total Cerrado por Moneda
             </div>
@@ -312,11 +312,11 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
         </section>
       ) : (
         <section className="bg-white rounded-2xl border border-slate-200/90 grid grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
-          <div className="p-5">
+          <div className="p-3.5 sm:p-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Liquidaciones Visibles
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+            <div className="mt-1.5 text-xl sm:text-2xl font-bold text-slate-900 font-mono tabular-nums">
               {stats.total}
             </div>
             <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
@@ -324,21 +324,21 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             </div>
           </div>
 
-          <div className="p-5">
+          <div className="p-3.5 sm:p-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Liquidaciones Abiertas
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-amber-700 font-mono tabular-nums">
+            <div className="mt-1.5 text-xl sm:text-2xl font-bold text-amber-700 font-mono tabular-nums">
               {stats.borradores}
             </div>
             <div className="mt-0.5 text-xs text-slate-500">En curso · Pendientes de cierre</div>
           </div>
 
-          <div className="p-5">
+          <div className="p-3.5 sm:p-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Cerradas / Enviadas
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-emerald-700 font-mono tabular-nums">
+            <div className="mt-1.5 text-xl sm:text-2xl font-bold text-emerald-700 font-mono tabular-nums">
               {stats.cerradas + stats.enviadas}
             </div>
             <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
@@ -346,11 +346,11 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             </div>
           </div>
 
-          <div className="p-5">
+          <div className="p-3.5 sm:p-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Consultores Disponibles
             </div>
-            <div className="mt-1.5 text-2xl font-bold text-[#132B63] font-mono tabular-nums">
+            <div className="mt-1.5 text-xl sm:text-2xl font-bold text-[#132B63] font-mono tabular-nums">
               {consultores.filter((c) => c.activo).length}
             </div>
             <div className="mt-0.5 text-xs text-slate-500">
@@ -361,78 +361,79 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
       )}
 
       {/* Filter & Sub-navigation Toolbar */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-white rounded-2xl border border-slate-200/90 p-3 sm:p-3.5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         {isClosedMode ? (
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-[#132B63]/10 text-[#132B63] flex items-center justify-center shrink-0">
+            <div className="w-9 h-9 rounded-lg bg-[#132B63]/10 text-[#132B63] flex items-center justify-center shrink-0">
               <Archive className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-xs font-bold text-slate-900">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900">
                 Archivo de Liquidaciones Cerradas ({filteredLiquidaciones.length})
               </h3>
             </div>
           </div>
         ) : (
-          <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70">
+          <div className="grid grid-cols-2 sm:inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70 w-full lg:w-auto">
             <button
               type="button"
               onClick={() => setSubTab('liquidaciones')}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              className={`min-h-[40px] lg:min-h-0 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer truncate ${
                 subTab === 'liquidaciones'
                   ? 'bg-white text-[#19377B] shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Todas las Liquidaciones ({liquidaciones.length})
+              Liquidaciones ({liquidaciones.length})
             </button>
             <button
               type="button"
               onClick={() => setSubTab('consultores')}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              className={`min-h-[40px] lg:min-h-0 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer truncate ${
                 subTab === 'consultores'
                   ? 'bg-white text-[#19377B] shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Consultores Disponibles ({consultores.length})
+              Consultores ({consultores.length})
             </button>
           </div>
         )}
 
         {isClosedMode || subTab === 'liquidaciones' ? (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
             {/* Search */}
-            <div className="relative w-52 sm:w-60">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <div className="relative col-span-2 sm:w-60">
+              <Search className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Buscar línea, consultor o sociedad..."
-                className="w-full pl-8 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                className="w-full min-h-[44px] lg:min-h-0 pl-9 lg:pl-8 pr-8 py-2 lg:py-1.5 text-base lg:text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  aria-label="Limpiar búsqueda"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4" />
                 </button>
               )}
             </div>
 
             {/* Week Filter */}
-            <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
+            <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5">
               <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
               <select
                 value={weekFilter}
                 aria-label="Filtrar por semana"
                 onChange={(e) => setWeekFilter(e.target.value)}
-                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+                className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
               >
-                <option value="ALL">Todas las semanas</option>
+                <option value="ALL">Todas semanas</option>
                 {availableWeeks.map((w) => (
                   <option key={w} value={w}>
                     Semana #{w}
@@ -442,7 +443,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             </div>
 
             {/* Currency Filter */}
-            <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
+            <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5">
               <Coins className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
               <select
                 value={currencyFilter}
@@ -450,9 +451,9 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                 onChange={(e) =>
                   setCurrencyFilter(e.target.value as 'ALL' | ViaticoCurrency)
                 }
-                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+                className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
               >
-                <option value="ALL">Todas las monedas</option>
+                <option value="ALL">Monedas</option>
                 {availableCurrencies.map((cur) => (
                   <option key={cur} value={cur}>
                     {cur} ({CURRENCY_SYMBOLS[cur]})
@@ -468,7 +469,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               onChange={(e) =>
                 setStatusFilter(e.target.value as 'ALL' | ViaticoLiquidationStatus)
               }
-              className="text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5"
+              className="col-span-2 sm:col-span-1 min-h-[44px] lg:min-h-0 text-sm lg:text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5"
             >
               {isClosedMode ? (
                 <>
@@ -495,9 +496,9 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                   setWeekFilter('ALL');
                   setCurrencyFilter('ALL');
                 }}
-                className="text-xs font-semibold text-[#1E60A8] hover:text-[#132B63] px-2 py-1 cursor-pointer whitespace-nowrap"
+                className="min-h-[40px] lg:min-h-0 text-xs font-semibold text-[#1E60A8] hover:text-[#132B63] px-2.5 py-1 cursor-pointer whitespace-nowrap text-left sm:text-center"
               >
-                Limpiar
+                Limpiar filtros
               </button>
             )}
 
@@ -505,9 +506,9 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               <button
                 type="button"
                 onClick={onCreateNewLiquidation}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+                className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-1.5 min-h-[44px] lg:min-h-0 px-3.5 py-2 lg:py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer whitespace-nowrap"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
                 <span>Nueva Liquidación</span>
               </button>
             )}
@@ -517,19 +518,203 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             <button
               type="button"
               onClick={openNewConsultorModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 min-h-[44px] lg:min-h-0 px-3.5 py-2 lg:py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
               <span>Agregar Consultor</span>
             </button>
           )
         )}
       </div>
 
-      {/* LIQUIDACIONES TABLE (Used in both 'cerradas' and 'historial' modes) */}
+      {/* LIQUIDACIONES VIEW (Used in both 'cerradas' and 'historial' modes) */}
       {(isClosedMode || subTab === 'liquidaciones') && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Mobile Native Card List (< lg) */}
+          <div className="lg:hidden divide-y divide-slate-200">
+            {filteredLiquidaciones.length === 0 ? (
+              <div className="py-12 px-5 text-center text-sm text-slate-500">
+                {isClosedMode && scopedLiquidaciones.length === 0
+                  ? 'Aún no hay liquidaciones cerradas registradas. Cuando cierres una liquidación aparecerá aquí para consulta y descarga.'
+                  : 'No se encontraron liquidaciones con los filtros seleccionados.'}
+              </div>
+            ) : (
+              filteredLiquidaciones.map((liq) => {
+                const isActive = liq.id === activeLiquidationId;
+                const isDraft = liq.estado === 'borrador';
+                const cc = resolveLiquidationCostCenter(liq, consultores);
+                return (
+                  <div
+                    key={liq.id}
+                    className={`p-4 space-y-3 ${isActive ? 'bg-sky-50/70' : 'bg-white'}`}
+                  >
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono text-xs font-extrabold text-[#1E60A8]">
+                            Sem #{liq.semana || '-'}
+                          </span>
+                          <span className="text-slate-300">·</span>
+                          <span
+                            className={`text-[11px] font-bold ${
+                              liq.estado === 'enviada'
+                                ? 'text-emerald-700'
+                                : liq.estado === 'cerrada'
+                                ? 'text-sky-700'
+                                : 'text-amber-700'
+                            }`}
+                          >
+                            {liq.estado === 'enviada'
+                              ? 'Cerrada y Enviada'
+                              : liq.estado === 'cerrada'
+                              ? 'Cerrada'
+                              : 'Abierta'}
+                          </span>
+                          {isActive && (
+                            <span className="text-[11px] font-bold text-[#1E60A8]">
+                              · En vista
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-900 mt-0.5 break-words">
+                          {liq.lineaLiquidacion || 'Sin título'}
+                        </h4>
+                        <div className="text-xs text-slate-600 mt-0.5">
+                          {liq.consultorNombre} · {liq.empresa}
+                        </div>
+                        {cc && (
+                          <div className="text-[11px] font-semibold text-[#132B63] mt-0.5">
+                            C.C.: {cc}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <div className="text-base font-extrabold font-mono tabular-nums text-[#132B63]">
+                          {formatViaticoAmount(liq.totalLiquidacion, liq.monedaBase, true)}
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono">
+                          {liq.items.length} {liq.items.length === 1 ? 'factura' : 'facturas'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => onOpenLiquidation(liq.id)}
+                        className="inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 py-2 text-xs font-bold text-[#132B63] bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                      >
+                        <FolderOpen className="w-4 h-4 text-[#1E60A8]" />
+                        <span>{isDraft ? 'Abrir' : 'Consultar'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onOpenCloseEmailFor(liq)}
+                        disabled={liq.items.length === 0}
+                        className="inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-45 rounded-xl cursor-pointer"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span>Enviar Gmail</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onDownloadExcel(liq)}
+                        disabled={liq.items.length === 0}
+                        className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 py-2 text-xs font-semibold text-emerald-800 bg-white border border-slate-200 disabled:opacity-45 rounded-xl cursor-pointer"
+                      >
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                        <span>Excel</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onDownloadPdf(liq)}
+                        disabled={liq.items.length === 0}
+                        className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 py-2 text-xs font-semibold text-rose-800 bg-white border border-slate-200 disabled:opacity-45 rounded-xl cursor-pointer"
+                      >
+                        <FileText className="w-4 h-4 text-rose-700" />
+                        <span>PDF Vertical</span>
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => onPreviewPlanillaPdf(liq)}
+                        disabled={liq.items.length === 0}
+                        className="inline-flex items-center gap-1.5 min-h-[38px] px-2.5 py-1 text-xs font-semibold text-[#1E60A8] bg-slate-50 border border-slate-200 rounded-lg disabled:opacity-40 cursor-pointer"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Vista Planilla</span>
+                      </button>
+
+                      <div className="flex items-center gap-1.5">
+                        {isDraft && permissions.canOperate && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenCloseConfirmFor(liq)}
+                            disabled={liq.items.length === 0}
+                            className="inline-flex items-center gap-1 min-h-[38px] px-3 py-1 text-xs font-bold text-[#132B63] bg-slate-100 rounded-lg disabled:opacity-40 cursor-pointer"
+                          >
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>Cerrar</span>
+                          </button>
+                        )}
+                        {!isDraft && permissions.isAdmin && onReopenLiquidation && (
+                          <button
+                            type="button"
+                            onClick={() => onReopenLiquidation(liq.id)}
+                            className="inline-flex items-center gap-1 min-h-[38px] px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer"
+                          >
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>Reabrir</span>
+                          </button>
+                        )}
+                        {permissions.canOperate &&
+                          (isDraft || permissions.isAdmin) &&
+                          (confirmDeleteLiqId === liq.id ? (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onDeleteLiquidation(liq.id);
+                                  setConfirmDeleteLiqId(null);
+                                }}
+                                className="min-h-[38px] px-3 py-1 text-xs font-bold bg-rose-600 text-white rounded-lg cursor-pointer"
+                              >
+                                Eliminar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteLiqId(null)}
+                                className="min-h-[38px] px-2.5 py-1 text-xs font-semibold bg-slate-100 text-slate-600 rounded-lg cursor-pointer"
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteLiqId(liq.id)}
+                              aria-label="Eliminar liquidación"
+                              className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop Table (>= lg) */}
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -790,7 +975,66 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
             )}
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Native Cards for Consultores (< lg) */}
+          <div className="lg:hidden divide-y divide-slate-200">
+            {consultores.map((c) => (
+              <div
+                key={c.id}
+                className={`p-4 space-y-2 ${c.activo ? 'bg-white' : 'bg-slate-50 opacity-70'}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
+                      <UserCheck className="w-4 h-4 text-[#1E60A8] shrink-0" />
+                      <span className="truncate">{c.nombreCompleto}</span>
+                    </div>
+                    <div className="text-xs font-mono text-slate-600 truncate mt-0.5">
+                      {c.email}
+                    </div>
+                    {c.cargo && <div className="text-[11px] text-slate-500 mt-0.5">{c.cargo}</div>}
+                  </div>
+                  <span
+                    className={`text-xs font-bold shrink-0 ${
+                      c.activo ? 'text-emerald-700' : 'text-slate-400'
+                    }`}
+                  >
+                    {c.activo ? 'Activo' : 'Inactivo'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">
+                  <div className="text-slate-700">
+                    <strong>{c.empresa}</strong> · {c.monedaBase} ·{' '}
+                    <span className={c.centroCosto ? 'font-semibold text-[#132B63]' : 'text-amber-700 italic'}>
+                      {c.centroCosto || 'Sin C.C.'}
+                    </span>
+                  </div>
+                  {permissions.isAdmin && (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => openEditConsultorModal(c)}
+                        className="inline-flex items-center gap-1 min-h-[38px] px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-slate-100 rounded-lg cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteConsultor(c.id)}
+                        aria-label="Eliminar consultor"
+                        className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -879,35 +1123,36 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
       {/* Consultant Create / Edit Modal (Admin only) */}
       {isConsultorModalOpen && permissions.isAdmin && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
           onClick={() => setIsConsultorModalOpen(false)}
         >
           <div
-            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden"
+            className="bg-white rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden max-h-[92dvh] flex flex-col pb-safe"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 bg-[#132B63] text-white flex items-center justify-between">
-              <h3 className="text-sm font-bold">
+            <div className="px-5 py-4 bg-[#132B63] text-white flex items-center justify-between shrink-0">
+              <h3 className="text-sm sm:text-base font-bold">
                 {editingConsultorId ? 'Editar Consultor' : 'Nuevo Consultor Liquidador'}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsConsultorModalOpen(false)}
-                className="p-1 text-blue-200 hover:text-white rounded-lg cursor-pointer"
+                aria-label="Cerrar"
+                className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-blue-200 hover:text-white rounded-xl cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveConsultor} className="p-5 space-y-3.5">
+            <form onSubmit={handleSaveConsultor} className="p-4 sm:p-5 space-y-3.5 overflow-y-auto">
               {cError && (
-                <div className="px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
+                <div className="px-3 py-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
                   {cError}
                 </div>
               )}
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Nombre Completo *
                 </label>
                 <input
@@ -916,12 +1161,12 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                   value={cNombre}
                   onChange={(e) => setCNombre(e.target.value)}
                   placeholder="Ej. Elder Juarez Hernandez"
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Correo Corporativo *
                 </label>
                 <input
@@ -930,13 +1175,13 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                   value={cEmail}
                   onChange={(e) => setCEmail(e.target.value)}
                   placeholder="elder.juarez@premexcorp.com"
-                  className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs font-mono rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                     Empresa / Sociedad
                   </label>
                   <input
@@ -945,7 +1190,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                     value={cEmpresa}
                     onChange={(e) => setCEmpresa(e.target.value)}
                     placeholder="Premex Corp"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                    className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                   />
                   <datalist id="viaticos-module-companies-list">
                     {moduleCompanies.map((comp) => (
@@ -957,13 +1202,13 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                   </datalist>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                     Moneda Base
                   </label>
                   <select
                     value={cMoneda}
                     onChange={(e) => setCMoneda(e.target.value as ViaticoCurrency)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white"
+                    className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs rounded-xl border border-slate-300 bg-white"
                   >
                     {VIATICO_CURRENCIES.map((cur) => (
                       <option key={cur} value={cur}>
@@ -975,7 +1220,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Centro de Costo
                 </label>
                 <input
@@ -984,7 +1229,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                   value={cCentroCosto}
                   onChange={(e) => setCCentroCosto(e.target.value)}
                   placeholder="Ej. CC-201 Comercial Guatemala"
-                  className="w-full px-3 py-2 text-xs font-semibold text-[#132B63] rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs font-semibold text-[#132B63] rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
                 <datalist id="viaticos-cost-centers-list">
                   {existingCostCenters.map((cc) => (
@@ -994,7 +1239,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Cargo / Área
                 </label>
                 <input
@@ -1002,31 +1247,31 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                   value={cCargo}
                   onChange={(e) => setCCargo(e.target.value)}
                   placeholder="Ej. Consultor Técnico Comercial"
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
-              <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer pt-1">
+              <label className="flex items-center gap-2.5 text-sm sm:text-xs text-slate-700 cursor-pointer pt-1">
                 <input
                   type="checkbox"
                   checked={cActivo}
                   onChange={(e) => setCActivo(e.target.checked)}
-                  className="rounded border-slate-300 text-[#1E60A8]"
+                  className="w-4 h-4 rounded border-slate-300 text-[#1E60A8]"
                 />
                 <span>Consultor activo disponible en el listado</span>
               </label>
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+              <div className="pt-3 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-stretch sm:items-center sm:justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsConsultorModalOpen(false)}
-                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                  className="min-h-[44px] sm:min-h-0 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-0 px-4 py-2 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>Guardar Consultor</span>

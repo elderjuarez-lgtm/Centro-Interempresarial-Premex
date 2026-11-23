@@ -665,7 +665,7 @@ export interface ActivityTemplate {
   id: string;
   nombre: string;
   periodicidad: ActivityPeriodicity;
-  /** Día hábil sugerido del mes para cumplimiento (1..31; excluye sábados, domingos y feriados oficiales del país de cada empresa) */
+  /** Día hábil sugerido del mes siguiente al cierre para cumplimiento (1..31; excluye sábados, domingos y feriados oficiales del país de cada empresa) */
   diaSugerido: number;
   descripcion?: string;
   /** Mapa codigoSociedad -> lista de responsibleIds (vacío si no aplica a esa sociedad) */

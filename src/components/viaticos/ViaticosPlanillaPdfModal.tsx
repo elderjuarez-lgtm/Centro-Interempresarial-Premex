@@ -473,41 +473,51 @@ export const ViaticosPlanillaPdfModal: React.FC<ViaticosPlanillaPdfModalProps> =
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4"
+      className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-[1280px] h-[92vh] flex flex-col overflow-hidden"
+        className="bg-white rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl w-full max-w-[1280px] h-[94dvh] sm:h-[92vh] flex flex-col overflow-hidden pb-safe"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Modal Header */}
-        <div className="px-4 sm:px-6 py-3.5 bg-[#132B63] text-white flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-200">
-              Visualización PDF e Impresión de Planilla · Semana #{liquidation.semana || '-'} ·{' '}
-              {liquidation.monedaBase}
+        <div className="px-4 sm:px-6 py-3.5 bg-[#132B63] text-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
+          <div className="flex items-start justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-200 truncate">
+                Vista Planilla · Semana #{liquidation.semana || '-'} ·{' '}
+                {liquidation.monedaBase}
+              </div>
+              <h3 className="text-sm sm:text-base font-bold truncate mt-0.5">
+                {liquidation.lineaLiquidacion || 'Liquidación de Viáticos'} —{' '}
+                {liquidation.consultorNombre}
+              </h3>
             </div>
-            <h3 className="text-sm sm:text-base font-bold truncate mt-0.5">
-              {liquidation.lineaLiquidacion || 'Liquidación de Viáticos'} —{' '}
-              {liquidation.consultorNombre}
-            </h3>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Cerrar vista previa"
+              className="sm:hidden min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-blue-200 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer shrink-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handlePrintPlanilla}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-[#132B63] bg-white hover:bg-sky-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-1.5 min-h-[42px] sm:min-h-0 px-3 py-2 text-xs font-bold text-[#132B63] bg-white hover:bg-sky-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             >
               <Printer className="w-4 h-4 text-[#1E60A8]" />
-              <span>Imprimir Planilla</span>
+              <span>Imprimir</span>
             </button>
 
             <button
               type="button"
               onClick={handleDownloadPdf}
               disabled={!pdfBlobUrl || isGenerating}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#1E60A8] hover:bg-sky-600 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-1.5 min-h-[42px] sm:min-h-0 px-3 py-2 text-xs font-bold text-white bg-[#1E60A8] hover:bg-sky-600 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             >
               {isGenerating ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -535,7 +545,7 @@ export const ViaticosPlanillaPdfModal: React.FC<ViaticosPlanillaPdfModalProps> =
               type="button"
               onClick={onClose}
               aria-label="Cerrar vista previa"
-              className="p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
+              className="hidden sm:inline-flex min-w-[40px] min-h-[40px] items-center justify-center text-blue-200 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -543,31 +553,31 @@ export const ViaticosPlanillaPdfModal: React.FC<ViaticosPlanillaPdfModalProps> =
         </div>
 
         {/* Sub-Toolbar: View Switcher & Metadata */}
-        <div className="px-4 sm:px-6 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="inline-flex items-center bg-slate-200/80 p-0.5 rounded-xl">
+        <div className="px-4 sm:px-6 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+          <div className="grid grid-cols-2 sm:inline-flex items-center bg-slate-200/80 p-0.5 rounded-xl w-full sm:w-auto">
             <button
               type="button"
               onClick={() => setViewMode('sheet')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] sm:min-h-0 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                 viewMode === 'sheet'
                   ? 'bg-white text-[#132B63] shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <TableIcon className="w-3.5 h-3.5" />
-              <span>Vista Hoja Imprimible</span>
+              <span>Hoja Imprimible</span>
             </button>
             <button
               type="button"
               onClick={() => setViewMode('pdf')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] sm:min-h-0 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                 viewMode === 'pdf'
                   ? 'bg-white text-[#132B63] shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>Documento PDF (.pdf)</span>
+              <span>Documento PDF</span>
             </button>
           </div>
 
@@ -575,10 +585,6 @@ export const ViaticosPlanillaPdfModal: React.FC<ViaticosPlanillaPdfModalProps> =
             <span>
               <strong className="text-slate-800">C.C.:</strong>{' '}
               {costCenter || 'Sin asignar'}
-            </span>
-            <span className="text-slate-300">·</span>
-            <span>
-              <strong className="text-slate-800">Formato:</strong> Carta Horizontal (Landscape)
             </span>
             <span className="text-slate-300">·</span>
             <span className="font-mono font-bold text-[#132B63] tabular-nums">

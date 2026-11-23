@@ -14,8 +14,8 @@ const ALLOWED_INVOICE_MIMES = new Set([
   'application/pdf',
 ]);
 
-// Short circuit-breaker window when primary model experiences a temporary 503 demand spike
-let primaryModelCooldownUntil = 0;
+// Per-model cooldown windows (short 60s on 503 demand spikes, 30 min on 429 daily quota exhaustion)
+const modelCooldownUntil = new Map<string, number>();
 
 export interface ExtractInvoiceRequestBody {
   base64Data?: unknown;
@@ -105,14 +105,17 @@ function extractUpstreamErrorMeta(err: unknown): {
 }
 
 function isFailoverEligibleError(err: unknown): boolean {
+  if (err instanceof SyntaxError) return true;
   const { code, statusText, rawMessage } = extractUpstreamErrorMeta(err);
   const combined = `${statusText} ${rawMessage}`.toUpperCase();
   return (
     code === 503 ||
+    code === 502 ||
     code === 500 ||
     code === 429 ||
     code === 504 ||
     code === 404 ||
+    code === 408 ||
     combined.includes('NOT_FOUND') ||
     combined.includes('UNAVAILABLE') ||
     combined.includes('HIGH DEMAND') ||
@@ -122,7 +125,8 @@ function isFailoverEligibleError(err: unknown): boolean {
     combined.includes('FETCH FAILED') ||
     combined.includes('ECONNRESET') ||
     combined.includes('ETIMEDOUT') ||
-    combined.includes('EMPTY_MODEL_RESPONSE')
+    combined.includes('EMPTY_MODEL_RESPONSE') ||
+    combined.includes('INVALID_JSON_RESPONSE')
   );
 }
 
@@ -136,7 +140,16 @@ function parseModelJsonObject(rawText: string): Record<string, unknown> {
   if (firstBrace !== -1 && lastBrace > firstBrace) {
     clean = clean.slice(firstBrace, lastBrace + 1);
   }
-  return JSON.parse(clean) as Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(clean);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('INVALID_JSON_RESPONSE: Expected JSON object');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'JSON parse error';
+    throw new Error(`INVALID_JSON_RESPONSE: ${msg}`);
+  }
 }
 
 function normalizeDateField(raw: unknown): string {
@@ -333,6 +346,7 @@ const INVOICE_RESPONSE_SCHEMA = {
 interface ExtractionAttemptSpec {
   model: string;
   useLowThinking: boolean;
+  useSchema: boolean;
   delayBeforeMs: number;
   timeoutMs: number;
 }
@@ -362,58 +376,63 @@ async function runInvoiceExtractionWithFailover(params: {
   systemInstruction: string;
 }): Promise<{ extracted: Record<string, unknown>; modelUsed: string }> {
   const customModel = (process.env.GEMINI_INVOICE_MODEL || '').trim();
-  const liteInCooldown = Date.now() < primaryModelCooldownUntil;
+  const now = Date.now();
 
-  const baseAttempts: ExtractionAttemptSpec[] = liteInCooldown
-    ? [
-        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 0, timeoutMs: 22_000 },
-        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 400, timeoutMs: 20_000 },
-        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 800, timeoutMs: 20_000 },
-      ]
-    : [
-        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 0, timeoutMs: 20_000 },
-        { model: 'gemini-4-hydrogen', useLowThinking: true, delayBeforeMs: 400, timeoutMs: 22_000 },
-        { model: 'gemini-3.1-flash-lite', useLowThinking: false, delayBeforeMs: 800, timeoutMs: 20_000 },
-      ];
+  const candidateLadder: ExtractionAttemptSpec[] = [
+    { model: 'gemini-4-hydrogen', useLowThinking: true, useSchema: true, delayBeforeMs: 0, timeoutMs: 16_000 },
+    { model: 'gemini-3.1-flash-lite', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 15_000 },
+    { model: 'gemini-3.6-flash', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 18_000 },
+    { model: 'gemini-3.5-flash', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 18_000 },
+    { model: 'gemini-3.5-flash-lite', useLowThinking: false, useSchema: false, delayBeforeMs: 200, timeoutMs: 16_000 },
+    { model: 'gemini-3.6-flash', useLowThinking: false, useSchema: false, delayBeforeMs: 300, timeoutMs: 18_000 },
+  ];
+
+  const healthyFirst = candidateLadder.filter((a) => (modelCooldownUntil.get(a.model) || 0) <= now);
+  const coolingLast = candidateLadder.filter((a) => (modelCooldownUntil.get(a.model) || 0) > now);
+  const orderedLadder = [...healthyFirst, ...coolingLast];
 
   const attempts: ExtractionAttemptSpec[] = customModel
     ? [
-        { model: customModel, useLowThinking: false, delayBeforeMs: 0, timeoutMs: 22_000 },
-        ...baseAttempts.filter((a) => a.model !== customModel),
+        { model: customModel, useLowThinking: false, useSchema: true, delayBeforeMs: 0, timeoutMs: 18_000 },
+        ...orderedLadder.filter((a) => a.model !== customModel),
       ]
-    : baseAttempts;
+    : orderedLadder;
 
-  const deadlineAt = Date.now() + 52_000;
+  const deadlineAt = Date.now() + 54_000;
   let lastError: unknown = null;
-  const skipped404Models = new Set<string>();
+  const skippedModels = new Set<string>();
 
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i];
-    if (skipped404Models.has(attempt.model)) continue;
+    if (skippedModels.has(attempt.model)) continue;
 
     const remainingBeforeDelay = deadlineAt - Date.now();
     if (remainingBeforeDelay <= 3_000) break;
 
-    if (attempt.delayBeforeMs > 0) {
+    if (attempt.delayBeforeMs > 0 && i > 0) {
       await sleep(Math.min(attempt.delayBeforeMs, Math.max(0, remainingBeforeDelay - 3_000)));
     }
 
     const effectiveTimeout = Math.min(attempt.timeoutMs, deadlineAt - Date.now());
-    if (effectiveTimeout <= 2_000) break;
+    if (effectiveTimeout <= 2_500) break;
 
     try {
+      const config: Record<string, unknown> = {
+        systemInstruction: params.systemInstruction,
+        responseMimeType: 'application/json',
+      };
+      if (attempt.useSchema) {
+        config.responseSchema = INVOICE_RESPONSE_SCHEMA;
+      }
+      if (attempt.useLowThinking) {
+        config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+      }
+
       const response = await withTimeout(
         params.ai.models.generateContent({
           model: attempt.model,
           contents: { parts: [params.filePart, params.promptPart] },
-          config: {
-            systemInstruction: params.systemInstruction,
-            responseMimeType: 'application/json',
-            responseSchema: INVOICE_RESPONSE_SCHEMA,
-            ...(attempt.useLowThinking
-              ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-              : {}),
-          },
+          config,
         }),
         effectiveTimeout,
         attempt.model
@@ -425,29 +444,28 @@ async function runInvoiceExtractionWithFailover(params: {
       }
 
       const parsed = parseModelJsonObject(rawText);
-      if (attempt.model === 'gemini-3.1-flash-lite') {
-        primaryModelCooldownUntil = 0;
-      }
+      modelCooldownUntil.delete(attempt.model);
       return { extracted: parsed, modelUsed: attempt.model };
     } catch (err) {
       lastError = err;
-      const { code, statusText } = extractUpstreamErrorMeta(err);
+      const { code, statusText, rawMessage } = extractUpstreamErrorMeta(err);
+      const shortMsg = rawMessage.replace(/\s+/g, ' ').slice(0, 220);
       console.warn(
-        `[viaticos/extract-invoice] Attempt ${i + 1}/${attempts.length} failed on ${attempt.model} (code=${code}, status=${statusText || 'ERR'})`
+        `[viaticos/extract-invoice] Attempt ${i + 1}/${attempts.length} failed on ${attempt.model} (code=${code}, status=${statusText || 'ERR'}): ${shortMsg}`
       );
 
       if (code === 404 || statusText.includes('NOT_FOUND')) {
-        skipped404Models.add(attempt.model);
+        skippedModels.add(attempt.model);
+        modelCooldownUntil.set(attempt.model, Date.now() + 60 * 60_000);
+      } else if (code === 429 || statusText.includes('RESOURCE_EXHAUSTED')) {
+        skippedModels.add(attempt.model);
+        const isPerDay = statusText.includes('PERDAY') || statusText.includes('PER_DAY') || rawMessage.toUpperCase().includes('PER DAY');
+        modelCooldownUntil.set(attempt.model, Date.now() + (isPerDay ? 30 * 60_000 : 90_000));
+      } else if (code === 503 || statusText.includes('UNAVAILABLE') || statusText.includes('DEADLINE_EXCEEDED')) {
+        modelCooldownUntil.set(attempt.model, Date.now() + 60_000);
       }
 
-      if (
-        attempt.model === 'gemini-3.1-flash-lite' &&
-        (code === 503 || statusText.includes('UNAVAILABLE') || statusText.includes('DEADLINE_EXCEEDED'))
-      ) {
-        primaryModelCooldownUntil = Date.now() + 60_000;
-      }
-
-      if (!isFailoverEligibleError(err)) {
+      if (!isFailoverEligibleError(err) && code !== 400) {
         throw err;
       }
     }

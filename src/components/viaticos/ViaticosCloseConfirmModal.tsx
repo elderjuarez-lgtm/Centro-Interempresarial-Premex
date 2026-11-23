@@ -109,16 +109,16 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-2 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-xl w-full overflow-hidden"
+        className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-xl w-full max-h-[92dvh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div
-          className={`px-6 py-4 text-white flex items-center justify-between gap-4 ${
+          className={`px-4 sm:px-6 py-3.5 sm:py-4 text-white flex items-center justify-between gap-3 shrink-0 ${
             isAlreadyClosed ? 'bg-emerald-800' : 'bg-[#132B63]'
           }`}
         >
@@ -136,13 +136,13 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
             type="button"
             onClick={onClose}
             aria-label="Cerrar ventana"
-            className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
+            className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto">
           {/* Summary KPI Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pb-4 border-b border-slate-200">
             <div>
@@ -232,11 +232,11 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
                 </div>
               )}
 
-              <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
+              <div className="pt-2 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+                  className="w-full sm:w-auto min-h-[44px] sm:min-h-0 px-4 py-2.5 sm:py-2 text-sm sm:text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
                 >
                   Seguir Editando
                 </button>
@@ -244,7 +244,7 @@ export const ViaticosCloseConfirmModal: React.FC<ViaticosCloseConfirmModalProps>
                   type="button"
                   onClick={handleConfirm}
                   disabled={isClosing || liquidation.items.length === 0}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[46px] sm:min-h-0 px-4 py-2.5 sm:py-2 text-sm sm:text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
                 >
                   {isClosing ? (
                     <Loader2 className="w-4 h-4 animate-spin" />

@@ -105,20 +105,20 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-2 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden"
+        className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full max-h-[92dvh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 bg-[#132B63] text-white flex items-center justify-between gap-4">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-[#132B63] text-white flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-200">
               Liquidación de Viáticos · Premex
             </div>
-            <h3 className="text-base font-bold mt-0.5">
+            <h3 className="text-base font-bold mt-0.5 truncate">
               Iniciar Nueva Liquidación
             </h3>
           </div>
@@ -126,16 +126,16 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
             type="button"
             onClick={onClose}
             aria-label="Cerrar ventana"
-            className="p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
+            className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-blue-200 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto">
           {/* Parallel open liquidations reassurance */}
           {openLiquidacionesCount > 0 && (
-            <div className="px-3.5 py-2 rounded-xl bg-sky-50/80 border border-sky-200/80 text-xs text-slate-700 flex items-center gap-2">
+            <div className="px-3.5 py-2.5 rounded-xl bg-sky-50/80 border border-sky-200/80 text-xs text-slate-700 flex items-center gap-2">
               <Layers className="w-4 h-4 text-[#1E60A8] shrink-0" />
               <span>
                 Liquidaciones abiertas actualmente:{' '}
@@ -148,7 +148,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
           )}
 
           {error && (
-            <div className="px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
+            <div className="px-3.5 py-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
               {error}
             </div>
           )}
@@ -165,7 +165,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
               value={lineaLiquidacion}
               onChange={(e) => setLineaLiquidacion(e.target.value)}
               placeholder="Ej. Visita Premicol Honduras, Gira Occidente..."
-              className="w-full px-3.5 py-2 text-xs font-medium text-slate-900 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+              className="w-full min-h-[44px] sm:min-h-0 px-3.5 py-2.5 sm:py-2 text-base sm:text-xs font-medium text-slate-900 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
             />
           </div>
 
@@ -178,11 +178,12 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
               </label>
               <input
                 type="text"
+                inputMode="numeric"
                 required
                 value={semana}
                 onChange={(e) => setSemana(e.target.value)}
                 placeholder="Ej. 32"
-                className="w-full px-3.5 py-2 text-xs font-mono font-semibold text-slate-900 tabular-nums rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                className="w-full min-h-[44px] sm:min-h-0 px-3.5 py-2.5 sm:py-2 text-base sm:text-xs font-mono font-semibold text-slate-900 tabular-nums rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
               />
             </div>
 
@@ -194,7 +195,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
               <select
                 value={monedaBase}
                 onChange={(e) => setMonedaBase(e.target.value as ViaticoCurrency)}
-                className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                className="w-full min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
               >
                 {VIATICO_CURRENCIES.map((cur) => (
                   <option key={cur} value={cur}>
@@ -215,7 +216,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
               value={consultorId}
               disabled={isLockedToOwnConsultor}
               onChange={(e) => handleConsultorChange(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] disabled:bg-slate-50 disabled:text-slate-600"
+              className="w-full min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] disabled:bg-slate-50 disabled:text-slate-600"
             >
               {availableConsultores.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -236,7 +237,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
                 <select
                   value={empresa}
                   onChange={(e) => setEmpresa(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                  className="w-full min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                 >
                   {!moduleCompanies.some((c) => c.nombre === empresa) && (
                     <option value={empresa}>{empresa}</option>
@@ -253,7 +254,7 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
                   value={empresa}
                   onChange={(e) => setEmpresa(e.target.value)}
                   placeholder="Premex Corp"
-                  className="w-full px-3.5 py-2 text-xs font-medium text-slate-900 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                  className="w-full min-h-[44px] sm:min-h-0 px-3.5 py-2.5 sm:py-2 text-base sm:text-xs font-medium text-slate-900 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                 />
               )}
             </div>
@@ -268,25 +269,25 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
                 value={centroCosto}
                 onChange={(e) => setCentroCosto(e.target.value)}
                 placeholder="Cargado desde consultor"
-                className="w-full px-3.5 py-2 text-xs font-semibold text-[#132B63] rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                className="w-full min-h-[44px] sm:min-h-0 px-3.5 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-[#132B63] rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
               />
             </div>
           </div>
 
           {/* Actions */}
-          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+          <div className="pt-3 border-t border-slate-100 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+              className="w-full sm:w-auto min-h-[44px] sm:min-h-0 px-4 py-2.5 sm:py-2 text-sm sm:text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 min-h-[46px] sm:min-h-0 px-4 py-2.5 sm:py-2 text-sm sm:text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
               <span>Crear y Abrir Liquidación</span>
             </button>
           </div>

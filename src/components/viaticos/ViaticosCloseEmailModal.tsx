@@ -539,7 +539,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
             {/* Recipients */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-700 mb-1">
                   Para (separa varios correos con coma)
                 </label>
                 <input
@@ -548,12 +548,12 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                   value={recipientEmail}
                   onChange={(e) => setRecipientEmail(e.target.value)}
                   placeholder="contabilidad@premexcorp.com"
-                  className="w-full min-h-[42px] px-3 py-2 text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                  className="w-full min-h-[44px] px-3 py-2 text-base sm:text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-700 mb-1">
                   CC (Copia al Consultor / Jefatura)
                 </label>
                 <input
@@ -562,18 +562,18 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                   value={ccEmail}
                   onChange={(e) => setCcEmail(e.target.value)}
                   placeholder="consultor@premexcorp.com"
-                  className="w-full min-h-[42px] px-3 py-2 text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                  className="w-full min-h-[44px] px-3 py-2 text-base sm:text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">Asunto</label>
+              <label className="block text-xs sm:text-[11px] font-semibold text-slate-700 mb-1">Asunto</label>
               <input
                 type="text"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                className="w-full min-h-[42px] px-3 py-2 text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                className="w-full min-h-[44px] px-3 py-2 text-base sm:text-xs bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
               />
             </div>
 
@@ -598,7 +598,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                     type="checkbox"
                     checked={attachExcel}
                     onChange={(e) => setAttachExcel(e.target.checked)}
-                    className="mt-0.5 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
                   />
                   <div className="min-w-0">
                     <div className="text-xs font-bold flex items-center gap-1.5">
@@ -622,7 +622,7 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                     type="checkbox"
                     checked={attachReceiptsPdf}
                     onChange={(e) => setAttachReceiptsPdf(e.target.checked)}
-                    className="mt-0.5 rounded border-slate-300 text-rose-700 focus:ring-rose-600"
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-rose-700 focus:ring-rose-600"
                   />
                   <div className="min-w-0">
                     <div className="text-xs font-bold flex items-center gap-1.5">
@@ -636,12 +636,12 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
                 </label>
               </div>
 
-              <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-700 cursor-pointer select-none">
+              <label className="flex items-center gap-2 pt-1 text-xs sm:text-[11px] text-slate-700 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={attachPlanillaPdf}
                   onChange={(e) => setAttachPlanillaPdf(e.target.checked)}
-                  className="rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
+                  className="w-4 h-4 rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
                 />
                 <span>
                   Adjuntar adicionalmente la <strong>Planilla Imprimible Horizontal (.pdf)</strong>
@@ -650,14 +650,14 @@ export const ViaticosCloseEmailModal: React.FC<ViaticosCloseEmailModalProps> = (
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+              <label className="block text-xs sm:text-[11px] font-semibold text-slate-700 mb-1">
                 Cuerpo del Correo
               </label>
               <textarea
-                rows={6}
+                rows={5}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono leading-relaxed bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                className="w-full px-3 py-2 text-base sm:text-xs font-mono leading-relaxed bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
               />
             </div>
 

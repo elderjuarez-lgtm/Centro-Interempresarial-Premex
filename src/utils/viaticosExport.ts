@@ -1,7 +1,8 @@
 import ExcelJS from 'exceljs';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
 import { ViaticoLiquidation } from '../types';
 import { StoredReceiptMedia } from '../services/viaticosMediaStore';
+import { readJpegExifOrientation } from '../services/viaticosInvoiceAi';
 import { formatViaticoAmount, roundMoney } from './viaticos';
 import { PREMEX_LOGO_SRC } from '../components/ModuleIcons';
 
@@ -380,9 +381,59 @@ export async function exportViaticosExcel(
   return filename;
 }
 
+function drawCanvasWithExifOrientation(
+  source: CanvasImageSource,
+  srcW: number,
+  srcH: number,
+  orientation: number
+): string | null {
+  const swapsAxes = orientation >= 5 && orientation <= 8;
+  const targetW = swapsAxes ? srcH : srcW;
+  const targetH = swapsAxes ? srcW : srcH;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, targetW, targetH);
+
+  switch (orientation) {
+    case 2:
+      ctx.transform(-1, 0, 0, 1, targetW, 0);
+      break;
+    case 3:
+      ctx.transform(-1, 0, 0, -1, targetW, targetH);
+      break;
+    case 4:
+      ctx.transform(1, 0, 0, -1, 0, targetH);
+      break;
+    case 5:
+      ctx.transform(0, 1, 1, 0, 0, 0);
+      break;
+    case 6:
+      ctx.transform(0, 1, -1, 0, targetW, 0);
+      break;
+    case 7:
+      ctx.transform(0, -1, -1, 0, targetW, targetH);
+      break;
+    case 8:
+      ctx.transform(0, -1, 1, 0, 0, targetH);
+      break;
+    default:
+      break;
+  }
+
+  ctx.drawImage(source, 0, 0, srcW, srcH);
+  return canvas.toDataURL('image/jpeg', 0.9);
+}
+
 /**
- * Normalizes any browser-supported image dataUrl into clean PNG/JPEG bytes
- * suitable for embedding inside pdf-lib.
+ * Normalizes any browser-supported image dataUrl into clean upright PNG/JPEG bytes
+ * suitable for embedding inside pdf-lib (explicitly baking JPEG EXIF Orientation
+ * so vertical phone photos never appear rotated horizontally inside the PDF).
  */
 async function convertDataUrlToEmbeddableImage(
   dataUrl: string,
@@ -390,37 +441,71 @@ async function convertDataUrlToEmbeddableImage(
 ): Promise<{ bytes: Uint8Array; format: 'jpeg' | 'png' } | null> {
   const cleanMime = mimeType.toLowerCase();
 
-  // Direct fast-path for standard JPEG / PNG
-  if (cleanMime === 'image/jpeg' || cleanMime === 'image/jpg' || cleanMime === 'image/png') {
-    try {
-      const res = await fetch(dataUrl);
-      const buf = new Uint8Array(await res.arrayBuffer());
-      return {
-        bytes: buf,
-        format: cleanMime === 'image/png' ? 'png' : 'jpeg',
-      };
-    } catch {
-      // fall through to canvas conversion
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const buf = new Uint8Array(await blob.arrayBuffer());
+
+    if (cleanMime === 'image/png') {
+      return { bytes: buf, format: 'png' };
     }
+
+    const exifOrientation =
+      cleanMime === 'image/jpeg' || cleanMime === 'image/jpg'
+        ? readJpegExifOrientation(buf)
+        : 1;
+
+    // Only skip canvas normalization for standard upright (EXIF=1) JPEGs
+    if ((cleanMime === 'image/jpeg' || cleanMime === 'image/jpg') && exifOrientation === 1) {
+      return { bytes: buf, format: 'jpeg' };
+    }
+
+    // Bake EXIF orientation deterministically using raw pixels ('none') + EXIF transform
+    if (typeof createImageBitmap === 'function') {
+      try {
+        const rawBitmap = await createImageBitmap(blob, {
+          imageOrientation: 'none',
+        } as ImageBitmapOptions);
+        try {
+          const jpegUrl = drawCanvasWithExifOrientation(
+            rawBitmap,
+            rawBitmap.width,
+            rawBitmap.height,
+            exifOrientation
+          );
+          if (jpegUrl) {
+            const outRes = await fetch(jpegUrl);
+            return {
+              bytes: new Uint8Array(await outRes.arrayBuffer()),
+              format: 'jpeg',
+            };
+          }
+        } finally {
+          rawBitmap.close?.();
+        }
+      } catch {
+        // Fallback below if browser does not support imageOrientation: 'none'
+      }
+    }
+  } catch {
+    // Fall through to HTMLImageElement decoding
   }
 
-  // Convert WebP / other image formats cleanly via HTMLCanvasElement
+  // Fallback: browser <img> auto-orients EXIF / converts WebP cleanly via HTMLCanvasElement
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = async () => {
       try {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
+        const jpegUrl = drawCanvasWithExifOrientation(
+          img,
+          img.naturalWidth || img.width,
+          img.naturalHeight || img.height,
+          1
+        );
+        if (!jpegUrl) {
           resolve(null);
           return;
         }
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0);
-        const jpegUrl = canvas.toDataURL('image/jpeg', 0.92);
         const res = await fetch(jpegUrl);
         resolve({ bytes: new Uint8Array(await res.arrayBuffer()), format: 'jpeg' });
       } catch {
@@ -739,12 +824,16 @@ export async function generateViaticosReceiptsPdfBytes(
         const res = await fetch(media.dataUrl);
         const pdfBytes = await res.arrayBuffer();
         const srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-        const pageIndices = srcDoc.getPageIndices();
-        const copiedPages = await pdfDoc.copyPages(srcDoc, pageIndices);
-        copiedPages.forEach((copied, pIdx) => {
-          const added = pdfDoc.addPage(copied);
+        const srcPages = srcDoc.getPages();
+
+        for (let pIdx = 0; pIdx < srcPages.length; pIdx++) {
+          const srcPage = srcPages[pIdx];
+          const embeddedPage = await pdfDoc.embedPage(srcPage);
+          // Always keep compiled PDF sheets strictly Vertical Letter [612, 792]
+          const added = pdfDoc.addPage([612, 792]);
           const { width: pw, height: ph } = added.getSize();
-          // Subtle header ribbon on first page of embedded PDF
+          const topBannerH = pIdx === 0 ? 26 : 0;
+
           if (pIdx === 0) {
             added.drawRectangle({
               x: 0,
@@ -771,7 +860,58 @@ export async function generateViaticosReceiptsPdfBytes(
               }
             );
           }
-        });
+
+          const rot = ((srcPage.getRotation().angle % 360) + 360) % 360;
+          const rawW = embeddedPage.width || 612;
+          const rawH = embeddedPage.height || 792;
+          const effW = rot === 90 || rot === 270 ? rawH : rawW;
+          const effH = rot === 90 || rot === 270 ? rawW : rawH;
+
+          const pad = 18;
+          const availW = pw - pad * 2;
+          const availH = ph - topBannerH - pad * 2;
+          const scale = Math.min(availW / effW, availH / effH);
+
+          const drawW = rawW * scale;
+          const drawH = rawH * scale;
+          const visualW = effW * scale;
+          const visualH = effH * scale;
+          const boxLeft = (pw - visualW) / 2;
+          const boxBottom = pad + (availH - visualH) / 2;
+
+          if (rot === 90) {
+            added.drawPage(embeddedPage, {
+              x: boxLeft,
+              y: boxBottom + visualH,
+              width: drawW,
+              height: drawH,
+              rotate: degrees(-90),
+            });
+          } else if (rot === 180) {
+            added.drawPage(embeddedPage, {
+              x: boxLeft + visualW,
+              y: boxBottom + visualH,
+              width: drawW,
+              height: drawH,
+              rotate: degrees(180),
+            });
+          } else if (rot === 270) {
+            added.drawPage(embeddedPage, {
+              x: boxLeft + visualW,
+              y: boxBottom,
+              width: drawW,
+              height: drawH,
+              rotate: degrees(90),
+            });
+          } else {
+            added.drawPage(embeddedPage, {
+              x: boxLeft,
+              y: boxBottom,
+              width: drawW,
+              height: drawH,
+            });
+          }
+        }
         embeddedCount++;
       } catch (err) {
         console.warn('Could not merge attached PDF receipt:', media.fileName, err);

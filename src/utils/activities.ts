@@ -14,6 +14,7 @@ import {
 import { normalizeEmail } from './permissions';
 import {
   BusinessDayResolution,
+  getNextMonthPeriodKey,
   normalizeActivityCountry,
   resolveBusinessDayDateForPeriod,
 } from './countryHolidays';
@@ -474,20 +475,25 @@ export const isClosureExecutionId = (executionId?: string | null): boolean =>
   String(executionId || '').startsWith('closure__');
 
 /**
- * Computes the N-th business day (`día hábil`) date in `periodKey` (YYYY-MM) for a company's country.
- * Saturdays, Sundays, and official public holidays of that country are excluded as non-working days.
+ * Computes the N-th business day (`día hábil`) date for closing `periodKey` (YYYY-MM).
+ * Because monthly close activities fall due after month-end, business days are counted
+ * starting in the FOLLOWING month (`getNextMonthPeriodKey(periodKey)`), excluding Saturdays,
+ * Sundays, and official public holidays of the company's country.
  */
 export const computeBusinessDayDetailsForPeriod = (
   periodKey: string,
   diaSugerido: number,
   country?: string | null
-): BusinessDayResolution => resolveBusinessDayDateForPeriod(periodKey, diaSugerido, country);
+): BusinessDayResolution => {
+  const duePeriodKey = getNextMonthPeriodKey(periodKey);
+  return resolveBusinessDayDateForPeriod(duePeriodKey, diaSugerido, country);
+};
 
 export const computeSuggestedDateForPeriod = (
   periodKey: string,
   diaSugerido: number,
   country?: string | null
-): string => resolveBusinessDayDateForPeriod(periodKey, diaSugerido, country).dateYmd;
+): string => computeBusinessDayDetailsForPeriod(periodKey, diaSugerido, country).dateYmd;
 
 export const formatShortDateEs = (isoOrYmd?: string): string => {
   if (!isoOrYmd) return '—';
@@ -705,7 +711,7 @@ export const materializePeriodAssignments = (
         const responsibleNamesLabel = resolvedResponsibles.map((r) => r.nombre).join(', ');
         const executionId = makeExecutionId(periodKey, activity.id, society.codigo);
         const existing = data.executions[executionId];
-        const businessDayInfo = resolveBusinessDayDateForPeriod(
+        const businessDayInfo = computeBusinessDayDetailsForPeriod(
           periodKey,
           activity.diaSugerido,
           society.pais

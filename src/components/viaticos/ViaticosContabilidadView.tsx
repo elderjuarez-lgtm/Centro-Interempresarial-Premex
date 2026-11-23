@@ -372,9 +372,9 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
   const taxableInvoicesCount = dataset.expenseRows.filter((r) => r.aplicaImpuestos).length;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       {/* 1. Executive Header + Odoo Export Toolbar */}
-      <section className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <section className="bg-white rounded-2xl border border-slate-200/90 p-3.5 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3.5">
         <div className="min-w-0">
           <div className="text-[11px] font-bold uppercase tracking-wider text-[#1E60A8]">
             Contabilidad · Consolidado Multi-Liquidador para Odoo
@@ -384,12 +384,12 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           </h2>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={handleExportOdooExcel}
             disabled={dataset.expenseRows.length === 0 || isExportingExcel}
-            className="inline-flex items-center gap-2 min-h-[40px] px-4 py-2 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-2 min-h-[44px] lg:min-h-[40px] px-4 py-2 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
             <span>
@@ -401,18 +401,18 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             type="button"
             onClick={() => handleExportOdooCsv('asientos')}
             disabled={dataset.journalLines.length === 0}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             title="CSV en formato exacto de importación Odoo (account.move / line_ids)"
           >
             <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
-            <span>CSV Asientos Odoo</span>
+            <span>CSV Asientos</span>
           </button>
 
           <button
             type="button"
             onClick={() => handleExportOdooCsv('facturas')}
             disabled={dataset.expenseRows.length === 0}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             title="CSV plano consolidado con todas las facturas y centros de costo"
           >
             <Download className="w-3.5 h-3.5 text-emerald-700" />
@@ -423,8 +423,8 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             type="button"
             onClick={handleExportContabilidadPdf}
             disabled={dataset.expenseRows.length === 0 || isExportingPdf}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
-            title="Descargar reporte PDF horizontal resumido para archivo contable"
+            className="inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            title="Descargar reporte PDF resumido para archivo contable"
           >
             <FileText className="w-3.5 h-3.5 text-rose-700" />
             <span>{isExportingPdf ? 'Generando PDF...' : 'PDF Resumen'}</span>
@@ -433,7 +433,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           <button
             type="button"
             onClick={() => setShowOdooConfig((v) => !v)}
-            className={`inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer whitespace-nowrap ${
+            className={`inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer whitespace-nowrap ${
               showOdooConfig
                 ? 'bg-sky-50 text-[#132B63] border-sky-300'
                 : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
@@ -468,11 +468,11 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             </button>
           </div>
 
-          <div className="p-5 space-y-5">
+          <div className="p-4 sm:p-5 space-y-5">
             {/* Journal, IVA & Payable Account settings */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Diario Contable Odoo (journal_id)
                 </label>
                 <input
@@ -481,12 +481,12 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                   onChange={(e) =>
                     setOdooConfig({ ...odooConfig, diarioNombre: e.target.value })
                   }
-                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Prefijo Referencia Asiento
                 </label>
                 <input
@@ -496,12 +496,12 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                     setOdooConfig({ ...odooConfig, prefijoReferencia: e.target.value })
                   }
                   placeholder="VIAT"
-                  className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Criterio Fecha Contable
                 </label>
                 <select
@@ -513,7 +513,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                         .value as ViaticoOdooConfig['criterioFechaContable'],
                     })
                   }
-                  className="w-full px-3 py-1.5 text-xs bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 >
                   <option value="fecha_cierre">Fecha de cierre / actualización</option>
                   <option value="fecha_factura">Fecha de documento (factura)</option>
@@ -522,7 +522,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Etiqueta Impuesto Odoo (tax_ids)
                 </label>
                 <input
@@ -532,12 +532,12 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                     setOdooConfig({ ...odooConfig, etiquetaImpuesto: e.target.value })
                   }
                   placeholder="IVA 12% Compras"
-                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Cuenta IVA Crédito Fiscal (Código)
                 </label>
                 <input
@@ -546,12 +546,12 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                   onChange={(e) =>
                     setOdooConfig({ ...odooConfig, cuentaIvaCodigo: e.target.value })
                   }
-                  className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Nombre Cuenta IVA
                 </label>
                 <input
@@ -560,12 +560,12 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                   onChange={(e) =>
                     setOdooConfig({ ...odooConfig, cuentaIvaNombre: e.target.value })
                   }
-                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Cuenta Contrapartida Empleados (Haber)
                 </label>
                 <input
@@ -577,12 +577,12 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                       cuentaContrapartidaCodigo: e.target.value,
                     })
                   }
-                  className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
                   Nombre Cuenta Contrapartida
                 </label>
                 <input
@@ -594,7 +594,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                       cuentaContrapartidaNombre: e.target.value,
                     })
                   }
-                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
             </div>
@@ -610,31 +610,33 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                   return (
                     <div
                       key={cat}
-                      className="flex items-center gap-2 p-2 rounded-xl border border-slate-200 bg-slate-50/70"
+                      className="flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70"
                     >
-                      <span className="w-36 text-xs font-semibold text-slate-800 truncate shrink-0">
+                      <span className="sm:w-36 text-xs font-semibold text-slate-800 truncate shrink-0">
                         {cat}
                       </span>
-                      <input
-                        type="text"
-                        value={cfg?.accountCode || ''}
-                        onChange={(e) =>
-                          updateCategoryAccount(cat, 'accountCode', e.target.value)
-                        }
-                        aria-label={`Código cuenta Odoo para ${cat}`}
-                        placeholder="Código"
-                        className="w-24 px-2 py-1 text-xs font-mono bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 shrink-0"
-                      />
-                      <input
-                        type="text"
-                        value={cfg?.accountName || ''}
-                        onChange={(e) =>
-                          updateCategoryAccount(cat, 'accountName', e.target.value)
-                        }
-                        aria-label={`Nombre cuenta Odoo para ${cat}`}
-                        placeholder="Nombre cuenta"
-                        className="flex-1 min-w-0 px-2 py-1 text-xs bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                      />
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <input
+                          type="text"
+                          value={cfg?.accountCode || ''}
+                          onChange={(e) =>
+                            updateCategoryAccount(cat, 'accountCode', e.target.value)
+                          }
+                          aria-label={`Código cuenta Odoo para ${cat}`}
+                          placeholder="Código"
+                          className="w-24 min-h-[40px] lg:min-h-0 px-2 py-1 text-base lg:text-xs font-mono bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 shrink-0"
+                        />
+                        <input
+                          type="text"
+                          value={cfg?.accountName || ''}
+                          onChange={(e) =>
+                            updateCategoryAccount(cat, 'accountName', e.target.value)
+                          }
+                          aria-label={`Nombre cuenta Odoo para ${cat}`}
+                          placeholder="Nombre cuenta"
+                          className="flex-1 min-w-0 min-h-[40px] lg:min-h-0 px-2 py-1 text-base lg:text-xs bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                        />
+                      </div>
                     </div>
                   );
                 })}
@@ -778,74 +780,75 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
       )}
 
       {/* 5. Filter Toolbar & Sub-View Navigation */}
-      <section className="bg-white rounded-2xl border border-slate-200/90 p-3.5 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <section className="bg-white rounded-2xl border border-slate-200/90 p-3 sm:p-3.5 space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           {/* Sub-Tab Switcher */}
-          <div className="inline-flex flex-wrap items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70">
+          <div className="grid grid-cols-3 sm:inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70 w-full lg:w-auto">
             <button
               type="button"
               onClick={() => setSubTab('facturas')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              className={`min-h-[40px] lg:min-h-0 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs font-semibold rounded-lg transition-colors cursor-pointer truncate ${
                 subTab === 'facturas'
                   ? 'bg-white text-[#132B63] shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Consolidado de Facturas ({dataset.expenseRows.length})
+              Facturas ({dataset.expenseRows.length})
             </button>
             <button
               type="button"
               onClick={() => setSubTab('asientos')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              className={`min-h-[40px] lg:min-h-0 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs font-semibold rounded-lg transition-colors cursor-pointer truncate ${
                 subTab === 'asientos'
                   ? 'bg-white text-[#132B63] shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Asientos Odoo Debe/Haber ({dataset.journalLines.length})
+              Asientos ({dataset.journalLines.length})
             </button>
             <button
               type="button"
               onClick={() => setSubTab('centros')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              className={`min-h-[40px] lg:min-h-0 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs font-semibold rounded-lg transition-colors cursor-pointer truncate ${
                 subTab === 'centros'
                   ? 'bg-white text-[#132B63] shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Centros de Costo y Lote ({selectedLiquidaciones.length})
+              Lote y C.C. ({selectedLiquidaciones.length})
             </button>
           </div>
 
           {/* Search */}
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div className="relative w-full lg:w-64">
+            <Search className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Buscar proveedor, NIT, consultor, C.C..."
-              className="w-full pl-8 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+              className="w-full min-h-[44px] lg:min-h-0 pl-9 lg:pl-8 pr-8 py-2 lg:py-1.5 text-base lg:text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Limpiar búsqueda"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
         </div>
 
         {/* Multi-Liquidador Filters Row */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
           <select
             value={statusFilter}
             aria-label="Filtrar por estado"
             onChange={(e) => setStatusFilter(e.target.value as StatusScopeFilter)}
-            className="text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 cursor-pointer"
+            className="col-span-2 sm:col-span-1 min-h-[44px] lg:min-h-0 text-sm lg:text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 cursor-pointer"
           >
             <option value="ALL">Todos los estados</option>
             <option value="CLOSED_AND_SENT">Solo Cerradas y Enviadas</option>
@@ -854,15 +857,15 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             <option value="borrador">Solo Abiertas (Borrador)</option>
           </select>
 
-          <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
+          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5">
             <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
             <select
               value={weekFilter}
               aria-label="Filtrar por semana"
               onChange={(e) => setWeekFilter(e.target.value)}
-              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
             >
-              <option value="ALL">Todas las semanas</option>
+              <option value="ALL">Semanas</option>
               {filterOptions.weeks.map((w) => (
                 <option key={w} value={w}>
                   Semana #{w}
@@ -871,13 +874,32 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             </select>
           </div>
 
-          <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
+          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5">
+            <Coins className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+            <select
+              value={currencyFilter}
+              aria-label="Filtrar por moneda"
+              onChange={(e) =>
+                setCurrencyFilter(e.target.value as 'ALL' | ViaticoCurrency)
+              }
+              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+            >
+              <option value="ALL">Monedas</option>
+              {filterOptions.currencies.map((cur) => (
+                <option key={cur} value={cur}>
+                  {cur} ({CURRENCY_SYMBOLS[cur]})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
             <Users className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
             <select
               value={consultorFilter}
               aria-label="Filtrar por liquidador"
               onChange={(e) => setConsultorFilter(e.target.value)}
-              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer max-w-[180px]"
+              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[180px]"
             >
               <option value="ALL">Todos los liquidadores</option>
               {filterOptions.consultores.map((name) => (
@@ -888,13 +910,13 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             </select>
           </div>
 
-          <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
+          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
             <Layers className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
             <select
               value={costCenterFilter}
               aria-label="Filtrar por centro de costo"
               onChange={(e) => setCostCenterFilter(e.target.value)}
-              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer max-w-[200px]"
+              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[200px]"
             >
               <option value="ALL">Todos los Centros de Costo</option>
               <option value="__UNASSIGNED__">Sin Centro de Costo</option>
@@ -907,13 +929,13 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           </div>
 
           {filterOptions.companies.length > 1 && (
-            <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
+            <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
               <Building2 className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
               <select
                 value={companyFilter}
                 aria-label="Filtrar por sociedad"
                 onChange={(e) => setCompanyFilter(e.target.value)}
-                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer max-w-[170px]"
+                className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[170px]"
               >
                 <option value="ALL">Todas las sociedades</option>
                 {filterOptions.companies.map((comp) => (
@@ -924,25 +946,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               </select>
             </div>
           )}
-
-          <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5">
-            <Coins className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
-            <select
-              value={currencyFilter}
-              aria-label="Filtrar por moneda"
-              onChange={(e) =>
-                setCurrencyFilter(e.target.value as 'ALL' | ViaticoCurrency)
-              }
-              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
-            >
-              <option value="ALL">Todas las monedas</option>
-              {filterOptions.currencies.map((cur) => (
-                <option key={cur} value={cur}>
-                  {cur} ({CURRENCY_SYMBOLS[cur]})
-                </option>
-              ))}
-            </select>
-          </div>
 
           {hasActiveFilters && (
             <button
@@ -956,7 +959,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                 setCurrencyFilter('ALL');
                 setSearchQuery('');
               }}
-              className="text-xs font-semibold text-[#1E60A8] hover:text-[#132B63] px-2 py-1 cursor-pointer whitespace-nowrap"
+              className="col-span-2 sm:col-span-1 min-h-[40px] lg:min-h-0 text-xs font-semibold text-[#1E60A8] hover:text-[#132B63] px-2 py-1 cursor-pointer whitespace-nowrap text-left sm:text-center"
             >
               Limpiar filtros
             </button>
@@ -967,13 +970,139 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
       {/* 6A. SUB-TAB 1: CONSOLIDADO DE FACTURAS (TODOS LOS LIQUIDADORES) */}
       {subTab === 'facturas' && (
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="font-bold text-slate-900">
               Detalle Consolidado de Gastos ({dataset.expenseRows.length} comprobantes)
             </span>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Native Cards (< lg) */}
+          <div className="lg:hidden divide-y divide-slate-200">
+            {dataset.expenseRows.length === 0 ? (
+              <div className="py-12 px-5 text-center text-sm text-slate-500">
+                No hay facturas en las liquidaciones seleccionadas. Ajusta los filtros o selecciona liquidaciones en &ldquo;Lote y C.C.&rdquo;.
+              </div>
+            ) : (
+              dataset.expenseRows.map((row) => (
+                <div key={row.rowKey} className="p-4 space-y-2.5 bg-white">
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-mono text-slate-500 flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-[#1E60A8]">S{row.semana}</span>
+                        <span>·</span>
+                        <span>{row.fechaDoc || 'Sin fecha'}</span>
+                        <span>·</span>
+                        <span>{row.documentoCompleto}</span>
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-900 mt-0.5 break-words">
+                        {row.proveedor}
+                      </h4>
+                      <div className="text-xs text-slate-600">
+                        {row.consultorNombre} · {row.empresa}
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <div className="text-base font-extrabold font-mono tabular-nums text-[#132B63]">
+                        {formatViaticoAmount(row.valorReintegrar, row.monedaBase, true)}
+                      </div>
+                      {row.impuestoReintegrar > 0 && (
+                        <div className="text-[11px] font-mono text-[#1E60A8]">
+                          IVA {formatViaticoAmount(row.impuestoReintegrar)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-slate-700 bg-slate-50 rounded-xl p-2.5 space-y-1">
+                    <div className="flex flex-wrap items-center justify-between gap-1">
+                      <span className="font-semibold text-[#132B63]">
+                        {row.categoria} ({row.cuentaGastoCodigo})
+                      </span>
+                      <span
+                        className={`font-semibold ${
+                          row.centroCosto ? 'text-slate-700' : 'text-amber-700 italic'
+                        }`}
+                      >
+                        {row.centroCosto || 'Sin C.C.'}
+                      </span>
+                    </div>
+                    {row.descripcionGasto && (
+                      <div className="text-[11px] text-slate-600">{row.descripcionGasto}</div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    {permissions.canOperate && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingCC({
+                            consultorId: row.consultorId,
+                            consultorNombre: row.consultorNombre,
+                            consultorEmail: row.consultorEmail,
+                            empresa: row.empresa,
+                            centroCosto: row.centroCosto,
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 min-h-[38px] px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        <span>{row.centroCosto ? 'Editar C.C.' : 'Asignar C.C.'}</span>
+                      </button>
+                    )}
+
+                    {row.attachmentId ? (
+                      mediaMap[row.attachmentId] ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setReceiptLightbox({
+                              row,
+                              media: mediaMap[row.attachmentId!],
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 min-h-[38px] px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Ver Factura</span>
+                        </button>
+                      ) : loadingMediaIds?.has(row.attachmentId) ? (
+                        <span className="inline-flex items-center gap-1.5 min-h-[38px] px-3 py-1.5 text-xs text-[#1E60A8]">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Cargando...</span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!row.attachmentId || !onLoadReceiptMedia) return;
+                            const loaded = await onLoadReceiptMedia(row.attachmentId);
+                            if (loaded) {
+                              setReceiptLightbox({ row, media: loaded });
+                            } else {
+                              onNotify(
+                                'info',
+                                `La factura "${row.attachmentName || row.documentoCompleto}" aún no está sincronizada en la nube.`
+                              );
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 min-h-[38px] px-3 py-1.5 text-xs font-bold text-[#1E60A8] bg-sky-50 border border-sky-200 rounded-lg cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Cargar Factura</span>
+                        </button>
+                      )
+                    ) : (
+                      <span className="text-xs text-slate-400">Sin imagen</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs min-w-[1260px]">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -1168,7 +1297,58 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             )}
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Native Cards for Odoo Journal Lines (< lg) */}
+          <div className="lg:hidden divide-y divide-slate-200">
+            {dataset.journalLines.length === 0 ? (
+              <div className="py-12 px-5 text-center text-sm text-slate-500">
+                No hay líneas de asiento generadas con los filtros actuales.
+              </div>
+            ) : (
+              dataset.journalLines.map((line) => (
+                <div
+                  key={line.lineKey}
+                  className={`p-4 space-y-1.5 ${
+                    line.tipoLinea === 'contrapartida'
+                      ? 'bg-sky-50/70'
+                      : line.tipoLinea === 'iva'
+                      ? 'bg-slate-50/50'
+                      : 'bg-white'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-mono text-[#132B63] font-bold">
+                        {line.asientoRef} · {line.fechaContable}
+                      </div>
+                      <div className="text-sm font-bold text-slate-900 mt-0.5">
+                        {line.cuentaCodigo} · {line.cuentaNombre}
+                      </div>
+                      <div className="text-xs text-slate-600 truncate">
+                        {line.partner} {line.partnerNit ? `(${line.partnerNit})` : ''}
+                      </div>
+                    </div>
+                    <div className="text-right font-mono font-bold tabular-nums shrink-0">
+                      {line.debito > 0 ? (
+                        <div className="text-sm text-slate-900">
+                          Debe: {formatViaticoAmount(line.debito, line.moneda, true)}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-[#132B63]">
+                          Haber: {formatViaticoAmount(line.credito, line.moneda, true)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-slate-600">{line.etiqueta}</div>
+                  <div className="text-[11px] font-semibold text-slate-700">
+                    C.C.: {line.centroCosto || 'Sin asignar'}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs min-w-[1220px]">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -1273,7 +1453,45 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                 Distribución Analítica por Centro de Costo
               </h3>
             </div>
-            <div className="overflow-x-auto">
+            {/* Mobile Cards for Cost Centers (< lg) */}
+            <div className="lg:hidden divide-y divide-slate-200">
+              {dataset.costCenterSummary.length === 0 ? (
+                <div className="py-10 px-5 text-center text-sm text-slate-500">
+                  Sin datos para agrupar por Centro de Costo.
+                </div>
+              ) : (
+                dataset.costCenterSummary.map((cc) => (
+                  <div key={`${cc.centroCosto}-${cc.monedaBase}`} className="p-4 space-y-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div
+                          className={`text-sm font-bold ${
+                            cc.centroCosto === 'Sin Centro de Costo'
+                              ? 'text-amber-700 italic'
+                              : 'text-[#132B63]'
+                          }`}
+                        >
+                          {cc.centroCosto}
+                        </div>
+                        <div className="text-xs text-slate-600 mt-0.5">
+                          {cc.consultores.join(', ')}
+                        </div>
+                      </div>
+                      <div className="text-right font-mono font-extrabold text-sm text-[#132B63] shrink-0">
+                        {formatViaticoAmount(cc.totalReintegrar, cc.monedaBase, true)}
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3">
+                      <span>{cc.liquidacionesCount} liq.</span>
+                      <span>{cc.facturasCount} fact.</span>
+                      <span>IVA: {formatViaticoAmount(cc.totalImpuesto, cc.monedaBase, true)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -1362,7 +1580,92 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* Mobile Batch Selector Cards (< lg) */}
+            <div className="lg:hidden divide-y divide-slate-200">
+              {filteredLiquidaciones.map((liq) => {
+                const isChecked = !excludedLiqIds.has(liq.id);
+                const cc = resolveLiquidationCostCenter(liq, consultores);
+                return (
+                  <div
+                    key={liq.id}
+                    className={`p-4 space-y-2.5 ${isChecked ? 'bg-white' : 'bg-slate-50/70 opacity-65'}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleLiquidationSelection(liq.id)}
+                        aria-label={`Incluir liquidación ${liq.lineaLiquidacion}`}
+                        className="mt-1 w-5 h-5 rounded border-slate-300 text-[#1E60A8] cursor-pointer shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-bold text-sm text-slate-900 break-words">
+                              <span className="font-mono text-[#1E60A8] mr-1.5">
+                                Sem #{liq.semana || '-'}
+                              </span>
+                              {liq.lineaLiquidacion || 'Sin título'}
+                            </div>
+                            <div className="text-xs text-slate-600">
+                              {liq.consultorNombre} · {liq.empresa}
+                            </div>
+                          </div>
+                          <div className="text-right font-mono font-bold text-sm text-[#132B63] shrink-0">
+                            {formatViaticoAmount(liq.totalLiquidacion, liq.monedaBase, true)}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                          <span className={cc ? 'text-xs font-semibold text-[#132B63]' : 'text-xs text-amber-700 italic'}>
+                            C.C.: {cc || 'Sin asignar'}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {permissions.canOperate && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingCC({
+                                    consultorId: liq.consultorId,
+                                    consultorNombre: liq.consultorNombre,
+                                    consultorEmail: liq.consultorEmail,
+                                    empresa: liq.empresa,
+                                    centroCosto: cc,
+                                  })
+                                }
+                                className="min-h-[38px] px-2.5 py-1 text-xs font-semibold bg-slate-100 text-slate-700 rounded-lg cursor-pointer"
+                              >
+                                C.C.
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => onDownloadLiquidationExcel(liq)}
+                              disabled={liq.items.length === 0}
+                              className="min-h-[38px] px-2.5 py-1 text-xs font-semibold text-emerald-800 bg-emerald-50 rounded-lg disabled:opacity-40 cursor-pointer"
+                            >
+                              Excel
+                            </button>
+                            {onDownloadLiquidationPdf && (
+                              <button
+                                type="button"
+                                onClick={() => onDownloadLiquidationPdf(liq)}
+                                disabled={liq.items.length === 0}
+                                className="min-h-[38px] px-2.5 py-1 text-xs font-semibold text-rose-800 bg-rose-50 rounded-lg disabled:opacity-40 cursor-pointer"
+                              >
+                                PDF
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -1511,11 +1814,11 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
       {/* Quick Inline Cost Center Assignment Modal */}
       {editingCC && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
           onClick={() => setEditingCC(null)}
         >
           <div
-            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden"
+            className="bg-white rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden pb-safe"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-5 py-4 bg-[#132B63] text-white flex items-center justify-between">
@@ -1523,18 +1826,19 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-200">
                   Centro de Costo Analítico · Odoo
                 </div>
-                <h3 className="text-sm font-bold mt-0.5">{editingCC.consultorNombre}</h3>
+                <h3 className="text-sm sm:text-base font-bold mt-0.5">{editingCC.consultorNombre}</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setEditingCC(null)}
-                className="p-1 text-blue-200 hover:text-white rounded-lg cursor-pointer"
+                aria-label="Cerrar"
+                className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-blue-200 hover:text-white rounded-xl cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveCostCenterEdit} className="p-5 space-y-4">
+            <form onSubmit={handleSaveCostCenterEdit} className="p-4 sm:p-5 space-y-4">
               <div className="text-xs text-slate-600">
                 Centro de Costo para{' '}
                 <strong className="text-slate-900">{editingCC.consultorNombre}</strong> (
@@ -1543,7 +1847,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                <label className="block text-xs sm:text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
                   Centro de Costo *
                 </label>
                 <input
@@ -1556,7 +1860,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                     setEditingCC({ ...editingCC, centroCosto: e.target.value })
                   }
                   placeholder="Ej. CC-201 Comercial Guatemala"
-                  className="w-full px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                  className="w-full min-h-[44px] sm:min-h-0 px-3.5 py-2 text-base sm:text-xs font-semibold rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                 />
                 <datalist id="contabilidad-cost-centers-list">
                   {costCenterSuggestions.map((cc) => (
@@ -1565,17 +1869,17 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                 </datalist>
               </div>
 
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
+              <div className="pt-2 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-stretch sm:items-center sm:justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setEditingCC(null)}
-                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                  className="min-h-[44px] sm:min-h-0 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-0 px-4 py-2 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>Guardar Centro de Costo</span>
@@ -1588,14 +1892,14 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
       {/* Scanned Invoice Lightbox Viewer (Admin / Contabilidad) */}
       {receiptLightbox && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
           onClick={() => setReceiptLightbox(null)}
         >
           <div
-            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            className="bg-white rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl max-w-4xl w-full max-h-[92dvh] sm:max-h-[90vh] overflow-hidden flex flex-col pb-safe"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-3.5 bg-[#132B63] text-white flex items-center justify-between gap-4">
+            <div className="px-4 sm:px-5 py-3.5 bg-[#132B63] text-white flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-bold truncate">
                   {receiptLightbox.row.proveedor} ·{' '}
@@ -1608,24 +1912,23 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                 <div className="text-[11px] text-sky-200 truncate">
                   {receiptLightbox.row.consultorNombre} · Fecha:{' '}
                   {receiptLightbox.row.fechaDoc || '-'} · Doc:{' '}
-                  {receiptLightbox.row.documentoCompleto} · Archivo:{' '}
-                  {receiptLightbox.media.fileName}
+                  {receiptLightbox.row.documentoCompleto}
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <a
                   href={receiptLightbox.media.dataUrl}
                   download={receiptLightbox.media.fileName || 'factura.jpg'}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold bg-white/15 hover:bg-white/25 text-white rounded-lg transition-colors"
+                  className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 text-xs font-semibold bg-white/15 hover:bg-white/25 text-white rounded-xl transition-colors"
                   title="Descargar factura escaneada"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Descargar</span>
+                  <Download className="w-4 h-4" />
+                  <span className="hidden sm:inline">Descargar</span>
                 </a>
                 <button
                   type="button"
                   onClick={() => setReceiptLightbox(null)}
-                  className="p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
+                  className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-blue-200 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
                   aria-label="Cerrar vista previa"
                 >
                   <X className="w-5 h-5" />
@@ -1633,13 +1936,29 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               </div>
             </div>
 
-            <div className="flex-1 bg-slate-900/5 overflow-auto flex items-center justify-center p-4 min-h-[420px]">
+            <div className="flex-1 bg-slate-900/5 overflow-auto flex items-center justify-center p-3 sm:p-4 min-h-[320px] sm:min-h-[420px]">
               {receiptLightbox.media.mimeType === 'application/pdf' ? (
-                <iframe
-                  src={receiptLightbox.media.dataUrl}
-                  title={receiptLightbox.media.fileName}
-                  className="w-full h-[70vh] rounded-lg border border-slate-200 bg-white"
-                />
+                <>
+                  <iframe
+                    src={receiptLightbox.media.dataUrl}
+                    title={receiptLightbox.media.fileName}
+                    className="hidden md:block w-full h-[70vh] rounded-lg border border-slate-200 bg-white"
+                  />
+                  <div className="md:hidden bg-white rounded-2xl border border-slate-200 p-6 text-center space-y-3 w-full">
+                    <FileText className="w-10 h-10 text-rose-700 mx-auto" />
+                    <div className="text-sm font-bold text-slate-900">
+                      Comprobante PDF ({receiptLightbox.media.fileName})
+                    </div>
+                    <a
+                      href={receiptLightbox.media.dataUrl}
+                      download={receiptLightbox.media.fileName || 'factura.pdf'}
+                      className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 py-2.5 text-xs font-bold text-white bg-[#1E60A8] rounded-xl"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Descargar PDF</span>
+                    </a>
+                  </div>
+                </>
               ) : (
                 <img
                   src={receiptLightbox.media.dataUrl}

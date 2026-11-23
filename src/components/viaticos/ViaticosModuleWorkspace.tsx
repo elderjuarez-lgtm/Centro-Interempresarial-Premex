@@ -811,7 +811,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       : 'Alcance por empresa');
 
   return (
-    <div className="min-h-screen bg-[#F5F8FC] flex flex-col font-sans text-slate-800 antialiased">
+    <div className="min-h-screen bg-[#F5F8FC] flex flex-col font-sans text-slate-800 antialiased overflow-x-hidden max-w-full">
       <ViaticosSidebar
         activeTab={activeTab}
         onSelectTab={setActiveTab}
@@ -826,7 +826,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         consultorScopeLabel={sidebarScopeLabel}
       />
 
-      <div className="lg:pl-72 flex flex-col flex-1 min-h-screen">
+      <div className="lg:pl-72 flex flex-col flex-1 min-h-screen min-w-0 max-w-full">
         <ViaticosHeader
           activeTab={activeTab}
           activeLiquidation={activeLiquidation}
@@ -861,9 +861,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
 
         {/* Company Scope & Inline Feedback Banners */}
         {(toast || permissions.getModuleCompanyScope('viaticos') === 'selected') && (
-          <div className="px-4 sm:px-6 lg:px-8 pt-4 max-w-[1480px] mx-auto w-full space-y-2">
+          <div className="px-3 sm:px-6 lg:px-8 pt-3 sm:pt-4 max-w-[1480px] mx-auto w-full min-w-0 space-y-2">
             {permissions.getModuleCompanyScope('viaticos') === 'selected' && (
-              <div className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs flex items-center gap-2">
+              <div className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs flex items-center gap-2 min-w-0">
                 <Building2 className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
                 <span className="truncate">
                   <strong className="font-semibold text-slate-800">
@@ -878,7 +878,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
 
             {toast && (
               <div
-                className={`px-4 py-2.5 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+                className={`px-3.5 py-2.5 rounded-xl border text-xs flex items-center justify-between gap-3 ${
                   toast.type === 'success'
                     ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                     : toast.type === 'error'
@@ -886,28 +886,28 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
                     : 'bg-blue-50 border-blue-200 text-blue-900'
                 }`}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   {toast.type === 'error' ? (
                     <AlertTriangle className="w-4 h-4 shrink-0" />
                   ) : (
                     <CheckCircle2 className="w-4 h-4 shrink-0" />
                   )}
-                  <span className="font-medium">{toast.message}</span>
+                  <span className="font-medium break-words">{toast.message}</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setToast(null)}
-                  className="p-1 opacity-70 hover:opacity-100 cursor-pointer"
+                  className="min-w-[36px] min-h-[36px] inline-flex items-center justify-center opacity-70 hover:opacity-100 cursor-pointer shrink-0"
                   aria-label="Cerrar notificación"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             )}
           </div>
         )}
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8 max-w-[1480px] mx-auto w-full">
+        <main className="flex-1 p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8 max-w-[1480px] mx-auto w-full min-w-0">
           {activeTab === 'liquidador' ? (
             <ViaticosLiquidadorView
               liquidation={activeLiquidation}
@@ -1083,9 +1083,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       {/* Mobile Bottom Navigation Bar */}
       <nav
         aria-label="Navegación móvil de viáticos"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe print:hidden"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe print:hidden shadow-[0_-4px_16px_rgba(15,23,42,0.06)]"
       >
-        <div className="grid grid-cols-4 h-14">
+        <div className="grid grid-cols-4 h-16">
           {(
             [
               { id: 'liquidador' as ViaticosTab, label: 'Activas', icon: FileText },
@@ -1100,13 +1100,17 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               <button
                 key={item.id}
                 type="button"
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors cursor-pointer ${
+                className={`relative flex flex-col items-center justify-center gap-1 text-[11px] font-bold transition-colors cursor-pointer ${
                   isActive ? 'text-[#132B63]' : 'text-slate-500'
                 }`}
               >
+                {isActive && (
+                  <span className="absolute top-0 left-4 right-4 h-0.5 rounded-b-full bg-[#1E60A8]" />
+                )}
                 <Icon className={`w-5 h-5 ${isActive ? 'text-[#1E60A8]' : 'text-slate-400'}`} />
-                <span className="truncate max-w-[74px]">{item.label}</span>
+                <span className="truncate max-w-[78px]">{item.label}</span>
               </button>
             );
           })}

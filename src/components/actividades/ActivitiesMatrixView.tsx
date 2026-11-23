@@ -26,7 +26,7 @@ import {
   hasAnyGoogleTaskLink,
   makeExecutionId,
 } from '../../utils/activities';
-import { normalizeActivityCountry } from '../../utils/countryHolidays';
+import { normalizeActivityCountry, getNextMonthPeriodKey } from '../../utils/countryHolidays';
 import { PeriodClosureStatus } from './ActivitiesExecutionListView';
 
 interface ActivitiesMatrixViewProps {
@@ -401,7 +401,8 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                     colSpan={3}
                     className="px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-sky-200 border-r border-white/15"
                   >
-                    {formatPeriodLabel(data.selectedPeriod)}
+                    Cierre {formatPeriodLabel(data.selectedPeriod)} · Vence{' '}
+                    {formatPeriodLabel(getNextMonthPeriodKey(data.selectedPeriod))}
                   </th>
                   <th
                     colSpan={activeSocieties.length}

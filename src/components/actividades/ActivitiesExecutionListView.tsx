@@ -22,7 +22,7 @@ import {
   formatShortDateEs,
   getGoogleTaskLinkForEmail,
 } from '../../utils/activities';
-import { normalizeActivityCountry } from '../../utils/countryHolidays';
+import { getNextMonthPeriodKey, normalizeActivityCountry } from '../../utils/countryHolidays';
 
 export interface PeriodClosureStatus {
   closureExecutionId: string;
@@ -168,7 +168,8 @@ export const ActivitiesExecutionListView: React.FC<ActivitiesExecutionListViewPr
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-wider text-[#0F766E]">
-              {formatPeriodLabel(data.selectedPeriod)}
+              Cierre {formatPeriodLabel(data.selectedPeriod)} · Vencimientos en{' '}
+              {formatPeriodLabel(getNextMonthPeriodKey(data.selectedPeriod))}
             </div>
             <h3 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight mt-0.5">
               {isAdmin ? 'Seguimiento y Confirmaciones' : 'Mis Actividades Asignadas'}
