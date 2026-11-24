@@ -27,6 +27,7 @@ import {
   ViaticoCurrency,
   ViaticoLiquidation,
   ViaticoLiquidationStatus,
+  ViaticoOdooCatalogs,
 } from '../../types';
 import {
   CURRENCY_SYMBOLS,
@@ -34,6 +35,7 @@ import {
   formatViaticoAmount,
   resolveLiquidationCostCenter,
 } from '../../utils/viaticos';
+import { findMatchingCostCenterEntry } from '../../utils/viaticosOdooCatalogs';
 import { normalizeEmail } from '../../utils/permissions';
 
 interface ViaticosHistorialViewProps {
@@ -41,6 +43,7 @@ interface ViaticosHistorialViewProps {
   liquidaciones: ViaticoLiquidation[];
   consultores: ViaticoConsultor[];
   moduleCompanies?: ModuleCompanyEntry[];
+  odooCatalogs?: ViaticoOdooCatalogs;
   activeLiquidationId: string;
   permissions: EffectivePermissions;
   isLockedToOwnConsultor: boolean;
@@ -62,6 +65,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   liquidaciones,
   consultores,
   moduleCompanies = [],
+  odooCatalogs,
   activeLiquidationId,
   permissions,
   isLockedToOwnConsultor,
@@ -104,17 +108,24 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   const [cEmpresa, setCEmpresa] = useState('Premex Corp');
   const [cCargo, setCCargo] = useState('Consultor Comercial');
   const [cCentroCosto, setCCentroCosto] = useState('');
+  const [cOdooEmployeeName, setCOdooEmployeeName] = useState('');
+  const [cOdooAnalytic, setCOdooAnalytic] = useState('');
   const [cMoneda, setCMoneda] = useState<ViaticoCurrency>('Quetzales');
   const [cActivo, setCActivo] = useState(true);
   const [cError, setCError] = useState<string | null>(null);
 
   const existingCostCenters = useMemo(() => {
     const set = new Set<string>();
+    (odooCatalogs?.costCenters || []).forEach((cc) => {
+      if (cc.activo !== false && cc.cuentaAnalitica?.trim()) {
+        set.add(cc.cuentaAnalitica.trim());
+      }
+    });
     consultores.forEach((c) => {
       if (c.centroCosto?.trim()) set.add(c.centroCosto.trim());
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [consultores]);
+  }, [consultores, odooCatalogs?.costCenters]);
 
   // Base list scoped to closed/sent in 'cerradas' mode, or all liquidaciones in 'historial' mode
   const scopedLiquidaciones = useMemo(
@@ -201,6 +212,8 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
     setCEmpresa(moduleCompanies[0]?.nombre || 'Premex Corp');
     setCCargo('Consultor Comercial');
     setCCentroCosto('');
+    setCOdooEmployeeName('');
+    setCOdooAnalytic('');
     setCMoneda('Quetzales');
     setCActivo(true);
     setCError(null);
@@ -214,6 +227,8 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
     setCEmpresa(c.empresa);
     setCCargo(c.cargo || '');
     setCCentroCosto(c.centroCosto || '');
+    setCOdooEmployeeName(c.odooEmployeeName || '');
+    setCOdooAnalytic(c.odooAnalyticDistribution || '');
     setCMoneda(c.monedaBase);
     setCActivo(c.activo);
     setCError(null);
@@ -234,6 +249,10 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
       return;
     }
 
+    const matchedCC = odooCatalogs
+      ? findMatchingCostCenterEntry(cCentroCosto, cOdooAnalytic, odooCatalogs.costCenters)
+      : null;
+
     onUpsertConsultor({
       id:
         editingConsultorId ||
@@ -242,7 +261,10 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
       email: cleanEmail,
       empresa: cEmpresa.trim() || 'Premex Corp',
       cargo: cCargo.trim(),
-      centroCosto: cCentroCosto.trim(),
+      centroCosto: matchedCC?.cuentaAnalitica || cCentroCosto.trim(),
+      odooEmployeeName: cOdooEmployeeName.trim().toUpperCase(),
+      odooAnalyticDistribution:
+        cOdooAnalytic.trim() || matchedCC?.analyticDistribution || '',
       monedaBase: cMoneda,
       activo: cActivo,
     });
@@ -1250,8 +1272,19 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                   type="text"
                   list="viaticos-cost-centers-list"
                   value={cCentroCosto}
-                  onChange={(e) => setCCentroCosto(e.target.value)}
-                  placeholder="Ej. CC-201 Comercial Guatemala"
+                  onChange={(e) => {
+                    const nextVal = e.target.value;
+                    setCCentroCosto(nextVal);
+                    if (odooCatalogs) {
+                      const match = findMatchingCostCenterEntry(
+                        nextVal,
+                        undefined,
+                        odooCatalogs.costCenters
+                      );
+                      if (match) setCOdooAnalytic(match.analyticDistribution);
+                    }
+                  }}
+                  placeholder="Ej. GT10000601 CONTABILIDAD"
                   className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs font-semibold text-[#132B63] rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
                 <datalist id="viaticos-cost-centers-list">
@@ -1259,6 +1292,55 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                     <option key={cc} value={cc} />
                   ))}
                 </datalist>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
+                    Empleado Odoo (employee_id)
+                  </label>
+                  <input
+                    type="text"
+                    list="viaticos-odoo-emp-list"
+                    value={cOdooEmployeeName}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCOdooEmployeeName(val);
+                      const matchedEmp = odooCatalogs?.employees.find(
+                        (emp) => emp.nombreCompleto.toUpperCase() === val.trim().toUpperCase()
+                      );
+                      if (matchedEmp) {
+                        if (!cCentroCosto && matchedEmp.centroCosto) {
+                          setCCentroCosto(matchedEmp.centroCosto);
+                        }
+                        if (matchedEmp.analyticDistribution) {
+                          setCOdooAnalytic(matchedEmp.analyticDistribution);
+                        }
+                      }
+                    }}
+                    placeholder="ELDER YOVANI JUAREZ..."
+                    className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs uppercase rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  />
+                  <datalist id="viaticos-odoo-emp-list">
+                    {(odooCatalogs?.employees || [])
+                      .filter((emp) => emp.activo !== false)
+                      .map((emp) => (
+                        <option key={emp.id} value={emp.nombreCompleto} />
+                      ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
+                    C.C. Interno Odoo (JSON)
+                  </label>
+                  <input
+                    type="text"
+                    value={cOdooAnalytic}
+                    onChange={(e) => setCOdooAnalytic(e.target.value)}
+                    placeholder='{"520": 100.0}'
+                    className="w-full min-h-[44px] sm:min-h-0 px-3 py-2 text-base sm:text-xs font-mono rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                  />
+                </div>
               </div>
 
               <div>

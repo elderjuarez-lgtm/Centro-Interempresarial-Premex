@@ -358,7 +358,7 @@
         },
         "viaticosPanels": {
           "type": "array",
-          "description": "Granular list of visible Viáticos lateral panel IDs (liquidador, cerradas, contabilidad, historial, correos)"
+          "description": "Granular list of visible Viáticos lateral panel IDs (liquidador, sociedades, cerradas, contabilidad, historial, correos)"
         },
         "companyScope": {
           "type": "string",
@@ -371,7 +371,7 @@
         },
         "moduleCompanyAccess": {
           "type": "object",
-          "description": "Per-module company access rules mapping functional module IDs (intercompany, bancos, viaticos, actividades, anticipos, cxc, cxp) to { scope: 'all' | 'selected', companies: string[] }"
+          "description": "Per-module company access rules mapping functional module IDs (intercompany, bancos, viaticos, actividades, clara, anticipos, cxc, cxp) to { scope: 'all' | 'selected', companies: string[] }"
         },
         "active": {
           "type": "boolean",
@@ -381,6 +381,21 @@
           "type": "string",
           "description": "Optional administrative notes",
           "maxLength": 300
+        },
+        "odooEmployeeName": {
+          "type": "string",
+          "description": "Linked Odoo uppercase employee name for Travel Expense / Odoo sheet exports",
+          "maxLength": 140
+        },
+        "centroCosto": {
+          "type": "string",
+          "description": "Assigned cost center code for this user (e.g. GT10000601 CONTABILIDAD)",
+          "maxLength": 140
+        },
+        "odooAnalyticDistribution": {
+          "type": "string",
+          "description": "Odoo analytic distribution JSON assigned to user cost center (e.g. {\"529\": 100.0})",
+          "maxLength": 120
         },
         "updatedBy": {
           "type": "string",
@@ -526,6 +541,10 @@
           "type": "array",
           "description": "Bounded catalog of grouped email mailing lists (Authorizers 'Para' and Accounting CC groups) with member names and emails"
         },
+        "odooCatalogs": {
+          "type": "object",
+          "description": "Master Odoo reference catalogs for Accounting (expense codes, document types, employees linked to permissions/emails, cost centers + analytic IDs, tax indicators, and expense distributions linked to accounts/taxes) with operating user timestamps"
+        },
         "consultoresCount": {
           "type": "integer",
           "description": "Total number of registered consultants"
@@ -659,12 +678,12 @@
     },
     "ModuleCompanyDirectory": {
       "title": "ModuleCompanyDirectory",
-      "description": "Independent master database of companies/societies dedicated to a specific functional module (bancos, viaticos, actividades, anticipos, cxc, cxp), containing no personal PII.",
+      "description": "Independent master database of companies/societies dedicated to a specific functional module (bancos, viaticos, actividades, clara, anticipos, cxc, cxp), containing no personal PII.",
       "type": "object",
       "properties": {
         "moduleId": {
           "type": "string",
-          "enum": ["bancos", "viaticos", "actividades", "anticipos", "cxc", "cxp"],
+          "enum": ["bancos", "viaticos", "actividades", "clara", "anticipos", "cxc", "cxp"],
           "description": "Target functional module identifier",
           "minLength": 1,
           "maxLength": 40
@@ -801,6 +820,99 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "ClaraWorkspace": {
+      "title": "ClaraWorkspace",
+      "description": "Corporate credit card expense automation hub (Gestión TC Clara) storing Clara card transactions, WorkManager received invoices, vendor/tercero onboarding catalog, cost center ERP rules, connector draft config, and SAP/Odoo batch export logs.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the workspace creator",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of the last user who saved the workspace",
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "description": "Descriptive title of the Clara workspace",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "selectedPeriod": {
+          "type": "string",
+          "description": "Active period filter (ALL or YYYY-MM)",
+          "minLength": 2,
+          "maxLength": 20
+        },
+        "transactions": {
+          "type": "array",
+          "description": "Bounded list (max 2500) of Clara corporate credit card transactions with WorkManager & ERP mapping state"
+        },
+        "workManagerInvoices": {
+          "type": "array",
+          "description": "Bounded list (max 2500) of WorkManager received electronic invoices for cross-checking"
+        },
+        "vendors": {
+          "type": "array",
+          "description": "Bounded catalog (max 1000) of corporate vendors / terceros synchronized or pending creation in SAP and Odoo"
+        },
+        "costCenterRules": {
+          "type": "array",
+          "description": "Bounded list (max 500) of mapping rules from Clara cost centers to SAP / Odoo centers and GL accounts"
+        },
+        "connectorConfig": {
+          "type": "object",
+          "description": "Integration mode settings (file upload vs API pending) and matching tolerance rules"
+        },
+        "batchLogs": {
+          "type": "array",
+          "description": "Bounded archive (max 200) of generated SAP and Odoo accounting or vendor export batches"
+        },
+        "transactionsCount": {
+          "type": "integer",
+          "description": "Total number of Clara transactions"
+        },
+        "invoicesCount": {
+          "type": "integer",
+          "description": "Total number of WorkManager invoices"
+        },
+        "vendorsCount": {
+          "type": "integer",
+          "description": "Total number of vendors / terceros"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "selectedPeriod",
+        "transactions",
+        "workManagerInvoices",
+        "vendors",
+        "costCenterRules",
+        "connectorConfig",
+        "batchLogs",
+        "transactionsCount",
+        "invoicesCount",
+        "vendorsCount",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -862,7 +974,13 @@
       "schema": {
         "$ref": "#/entities/ModuleCompanyDirectory"
       },
-      "description": "Stores independent master company/society catalogs for each functional module (bancos, viaticos, actividades, anticipos, cxc, cxp); readable by verified users and writable strictly by verified administrators."
+      "description": "Stores independent master company/society catalogs for each functional module (bancos, viaticos, actividades, clara, anticipos, cxc, cxp); readable by verified users and writable strictly by verified administrators."
+    },
+    "/clara_workspaces/{claraId}": {
+      "schema": {
+        "$ref": "#/entities/ClaraWorkspace"
+      },
+      "description": "Stores Gestión TC Clara workspaces linking Clara card expenses, WorkManager invoices, terceros onboarding, and SAP/Odoo exports; restricted to verified users authorized for clara."
     }
   }
 }

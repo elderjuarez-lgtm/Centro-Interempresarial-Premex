@@ -43,6 +43,7 @@ import {
   UserPermissionRecord,
   UserRole,
   UserTypeId,
+  ViaticoOdooCatalogs,
   ViaticosTab,
 } from '../../types';
 import {
@@ -74,6 +75,12 @@ import {
   sanitizeModuleCompanyEntry,
   sanitizeModuleCompanyList,
 } from '../../utils/moduleCompanies';
+import {
+  findMatchingCostCenterEntry,
+  findMatchingOdooEmployee,
+  formatAnalyticDistributionJson,
+  mergeOdooCatalogsWithDefaults,
+} from '../../utils/viaticosOdooCatalogs';
 import { activeFirebaseInfo } from '../../services/auth';
 import { AjustesModuleLogo, ModuleEmblem, PremexBrandLogo } from '../ModuleIcons';
 import { AppSwitcherMenu } from '../AppSwitcherMenu';
@@ -111,6 +118,7 @@ interface SettingsModuleWorkspaceProps {
   onStartPreviewAs: (email: string) => void;
   lastCloudSyncIso: string | null;
   hasPendingCloudSync: boolean;
+  odooCatalogs?: ViaticoOdooCatalogs;
 }
 
 type SettingsTab = 'usuarios' | 'empresas_modulos' | 'roles' | 'politica';
@@ -250,7 +258,12 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
   onStartPreviewAs,
   lastCloudSyncIso,
   hasPendingCloudSync,
+  odooCatalogs,
 }) => {
+  const resolvedOdooCatalogs = useMemo(
+    () => mergeOdooCatalogsWithDefaults(odooCatalogs),
+    [odooCatalogs]
+  );
   const [activeTab, setActiveTab] = useState<SettingsTab>('usuarios');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -291,6 +304,9 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     useState<FunctionalModuleId>('intercompany');
   const [formActive, setFormActive] = useState(true);
   const [formNotes, setFormNotes] = useState('');
+  const [formOdooEmployeeName, setFormOdooEmployeeName] = useState('');
+  const [formCentroCosto, setFormCentroCosto] = useState('');
+  const [formOdooAnalyticDistribution, setFormOdooAnalyticDistribution] = useState('');
   const [companySearch, setCompanySearch] = useState('');
   const [quickAddCompanyInput, setQuickAddCompanyInput] = useState('');
   const [isQuickAddingCompany, setIsQuickAddingCompany] = useState(false);
@@ -494,6 +510,9 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setActiveConfigModule('intercompany');
     setFormActive(true);
     setFormNotes('');
+    setFormOdooEmployeeName('');
+    setFormCentroCosto('');
+    setFormOdooAnalyticDistribution('');
     setCompanySearch('');
     setQuickAddCompanyInput('');
     setFormError(null);
@@ -539,6 +558,28 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setActiveConfigModule(firstFunctional);
     setFormActive(rec.active);
     setFormNotes(rec.notes || '');
+    const autoEmp =
+      !rec.odooEmployeeName
+        ? findMatchingOdooEmployee({
+            email: rec.email,
+            nombre: rec.displayName,
+            employees: resolvedOdooCatalogs.employees,
+          })
+        : null;
+    setFormOdooEmployeeName(rec.odooEmployeeName || autoEmp?.nombreCompleto || '');
+    const initialCC = rec.centroCosto || autoEmp?.centroCosto || '';
+    setFormCentroCosto(initialCC);
+    const matchedCC = findMatchingCostCenterEntry(
+      initialCC,
+      rec.odooAnalyticDistribution || autoEmp?.analyticDistribution,
+      resolvedOdooCatalogs.costCenters
+    );
+    setFormOdooAnalyticDistribution(
+      rec.odooAnalyticDistribution ||
+        matchedCC?.analyticDistribution ||
+        autoEmp?.analyticDistribution ||
+        ''
+    );
     setCompanySearch('');
     setQuickAddCompanyInput('');
     setFormError(null);
@@ -709,6 +750,39 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     }
   };
 
+  const handleQuickRemoveCompanyFromModuleDb = async (company: ModuleCompanyEntry) => {
+    const modId = effectiveActiveConfigModule;
+    const key = normalizeCompanyKey(company.nombre);
+    const currentDb = moduleCompanyDatabases[modId] || [];
+
+    setIsQuickAddingCompany(true);
+    try {
+      const nextDb = currentDb.filter(
+        (c) => c.id !== company.id && normalizeCompanyKey(c.nombre) !== key
+      );
+      await onSaveModuleCompanies(modId, nextDb);
+      setFormModuleCompanyAccess((prev) => {
+        const cur = prev[modId] || { scope: 'selected', companies: [] };
+        return {
+          ...prev,
+          [modId]: {
+            ...cur,
+            companies: cur.companies.filter((c) => normalizeCompanyKey(c) !== key),
+          },
+        };
+      });
+    } catch (err: unknown) {
+      setFormError(
+        formatCloudError(
+          err,
+          `No se pudo quitar "${company.nombre}" de la base de datos de ${MODULE_COMPANY_DB_META[modId].shortName}.`
+        )
+      );
+    } finally {
+      setIsQuickAddingCompany(false);
+    }
+  };
+
   const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -803,6 +877,11 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       effectiveRole
     );
 
+    const resolvedAnalyticJson = formOdooAnalyticDistribution.trim()
+      ? formatAnalyticDistributionJson(formOdooAnalyticDistribution)
+      : findMatchingCostCenterEntry(formCentroCosto, undefined, resolvedOdooCatalogs.costCenters)
+          ?.analyticDistribution || '';
+
     const nextRecord: UserPermissionRecord = {
       id: emailToPermissionDocId(cleanEmail),
       email: cleanEmail,
@@ -816,6 +895,11 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       moduleCompanyAccess: sanitizedAccess,
       active: cleanEmail === SUPER_ADMIN_EMAIL ? true : formActive,
       notes: formNotes.trim() || undefined,
+      odooEmployeeName: formOdooEmployeeName.trim()
+        ? formOdooEmployeeName.trim().toUpperCase()
+        : undefined,
+      centroCosto: formCentroCosto.trim() || undefined,
+      odooAnalyticDistribution: resolvedAnalyticJson || undefined,
       updatedAtIso: new Date().toISOString(),
     };
 
@@ -1253,7 +1337,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     {
       id: 'empresas_modulos',
       label: 'BD Empresas por Módulo',
-      description: 'Catálogo independiente (6 mód.)',
+      description: 'Catálogo independiente (8 mód.)',
       icon: Database,
       counter: String(totalCatalogCompanies),
     },
@@ -3061,6 +3145,132 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                         );
                       })}
                     </div>
+
+                    {/* Linked Odoo Employee & Cost Center Assignment */}
+                    <div className="pt-3 mt-2 border-t border-[#1E60A8]/15 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-[#132B63]">
+                            Vinculación Odoo (Empleado + Centro de Costo asignado)
+                          </div>
+                          <div className="text-[11px] text-slate-600">
+                            Al ingresar con este correo, sus liquidaciones heredan automáticamente el Empleado Odoo y su Centro de Costo.
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const matched = findMatchingOdooEmployee({
+                              email: formEmail,
+                              nombre: formName,
+                              employees: resolvedOdooCatalogs.employees,
+                            });
+                            if (matched) {
+                              setFormOdooEmployeeName(matched.nombreCompleto);
+                              if (matched.centroCosto) {
+                                setFormCentroCosto(matched.centroCosto);
+                                const ccMatch = findMatchingCostCenterEntry(
+                                  matched.centroCosto,
+                                  matched.analyticDistribution,
+                                  resolvedOdooCatalogs.costCenters
+                                );
+                                setFormOdooAnalyticDistribution(
+                                  ccMatch?.analyticDistribution ||
+                                    matched.analyticDistribution ||
+                                    ''
+                                );
+                              }
+                            }
+                          }}
+                          className="text-[11px] font-semibold text-[#1E60A8] hover:underline cursor-pointer"
+                        >
+                          Auto-vincular desde BD Empleados
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            Empleado Odoo (`employee_id`)
+                          </label>
+                          <input
+                            type="text"
+                            list="settings-odoo-employees-list"
+                            value={formOdooEmployeeName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setFormOdooEmployeeName(val);
+                              const matched = resolvedOdooCatalogs.employees.find(
+                                (emp) =>
+                                  emp.nombreCompleto.toUpperCase() ===
+                                  val.trim().toUpperCase()
+                              );
+                              if (matched?.centroCosto && !formCentroCosto) {
+                                setFormCentroCosto(matched.centroCosto);
+                                setFormOdooAnalyticDistribution(
+                                  matched.analyticDistribution || ''
+                                );
+                              }
+                            }}
+                            placeholder="Ej. ELDER YOVANI JUAREZ HERNANDEZ"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs uppercase focus:outline-hidden focus:border-[#1E60A8]"
+                          />
+                          <datalist id="settings-odoo-employees-list">
+                            {resolvedOdooCatalogs.employees
+                              .filter((e) => e.activo !== false)
+                              .map((emp) => (
+                                <option key={emp.id} value={emp.nombreCompleto} />
+                              ))}
+                          </datalist>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            Centro de Costo Asignado
+                          </label>
+                          <select
+                            value={formCentroCosto}
+                            onChange={(e) => {
+                              const nextCC = e.target.value;
+                              setFormCentroCosto(nextCC);
+                              const ccEntry = findMatchingCostCenterEntry(
+                                nextCC,
+                                undefined,
+                                resolvedOdooCatalogs.costCenters
+                              );
+                              if (ccEntry) {
+                                setFormOdooAnalyticDistribution(ccEntry.analyticDistribution);
+                              }
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs focus:outline-hidden focus:border-[#1E60A8]"
+                          >
+                            <option value="">-- Sin asignar / Heredar BD --</option>
+                            {resolvedOdooCatalogs.costCenters
+                              .filter((cc) => cc.activo !== false)
+                              .map((cc) => (
+                                <option key={cc.id} value={cc.cuentaAnalitica}>
+                                  {cc.cuentaAnalitica} ({cc.analyticDistribution})
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            C.C. Interno Odoo (`analytic_distribution`)
+                          </label>
+                          <input
+                            type="text"
+                            value={formOdooAnalyticDistribution}
+                            onChange={(e) =>
+                              setFormOdooAnalyticDistribution(e.target.value)
+                            }
+                            placeholder='Ej. {"520": 100.0}'
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono focus:outline-hidden focus:border-[#1E60A8]"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -3261,29 +3471,41 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                                     normalizeCompanyKey(opt.nombre)
                                 );
                                 return (
-                                  <label
+                                  <div
                                     key={opt.id}
-                                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
                                       checked
                                         ? 'bg-[#1E60A8]/8 border-[#1E60A8]/40 text-[#132B63] font-semibold'
                                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                                     }`}
                                   >
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={() =>
-                                        handleToggleCompanyForActiveModule(opt.nombre)
-                                      }
-                                      className="rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
-                                    />
-                                    <span className="truncate flex-1">{opt.nombre}</span>
-                                    {(opt.codigo || opt.pais) && (
-                                      <span className="text-[10px] font-normal text-slate-400 shrink-0 font-mono">
-                                        {opt.codigo || opt.pais}
-                                      </span>
-                                    )}
-                                  </label>
+                                    <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer py-0.5">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() =>
+                                          handleToggleCompanyForActiveModule(opt.nombre)
+                                        }
+                                        className="rounded border-slate-300 text-[#1E60A8] focus:ring-[#1E60A8]"
+                                      />
+                                      <span className="truncate flex-1">{opt.nombre}</span>
+                                      {(opt.codigo || opt.pais) && (
+                                        <span className="text-[10px] font-normal text-slate-400 shrink-0 font-mono">
+                                          {opt.codigo || opt.pais}
+                                        </span>
+                                      )}
+                                    </label>
+                                    <button
+                                      type="button"
+                                      disabled={isQuickAddingCompany}
+                                      onClick={() => void handleQuickRemoveCompanyFromModuleDb(opt)}
+                                      title={`Quitar "${opt.nombre}" de la BD de ${MODULE_COMPANY_DB_META[effectiveActiveConfigModule].shortName}`}
+                                      aria-label={`Quitar ${opt.nombre}`}
+                                      className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded cursor-pointer shrink-0 disabled:opacity-40"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 );
                               })
                             )}

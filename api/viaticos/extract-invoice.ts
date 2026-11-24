@@ -256,7 +256,17 @@ INSTRUCCIONES CRÍTICAS POR CAMPO:
    "Alimentación", "Combustible / Lub", "Taxis / Buses", "Hospedaje", "Peajes / Parqueo", "Boletos Aéreos", "Atención a Clientes", "Otros Gastos".
 13. descripcionSugerida: resumen breve y útil en español basado en los ítems/conceptos leídos (ej. "Desayuno y café", "Combustible gasolina súper", "Servicio de mantenimiento", "Hospedaje 3 noches").
 14. confianza: "alta" si todos los campos clave se leyeron claramente, "media" si algún campo tuvo ligera ambigüedad o falta dato menor, "baja" si la imagen es borrosa o incompleta.
-15. notasExtraccion: frase breve y útil en español (máx. 140 caracteres) explicando el tipo de comprobante detectado (ej. "Factura Cambiaria FEL Guatemala régimen general con IVA 12% incluido").`;
+15. notasExtraccion: frase breve y útil en español (máx. 140 caracteres) explicando el tipo de comprobante detectado (ej. "Factura Cambiaria FEL Guatemala régimen general con IVA 12% incluido").
+16. tipoDocumentoSugerido: código de documento Odoo FEL/SAT sugerido: elige estrictamente uno entre "FACT" (Factura normal FEL / ticket fiscal), "FCAM" (Factura Cambiaria), "FPEQ" (Factura Pequeño Contribuyente), "FESP" (Factura Especial), "FCAP" (Factura Cambiaria Pequeño Contribuyente), "RDON" (Recibo por Donación), "RECI" (Recibo), "DUCA", "FYDUCA", "FCE" (Factura del exterior / comprobante extranjero) u "OTROS" (otros comprobantes).
+17. indicadorImpuestoSugerido: indicador fiscal de impuesto Odoo sugerido según lo escaneado (elige estrictamente uno):
+   - "XF": Si el documento es de Pequeño Contribuyente (FPEQ/FCAP o dice "No genera derecho a crédito fiscal").
+   - "XE": Si es una factura/servicio del exterior o moneda extranjera sin IVA local (FCE / Airbnb / Uber exterior / aerolínea extranjera).
+   - "XA": Compra de BIENES locales gravados con IVA 12% (combustible, gasolina, alimentos/productos, supermercado, farmacia, repuestos, papelería, útiles, suministros, tienda).
+   - "XC": Prestación de SERVICIOS locales gravados con IVA 12% (hospedaje/hotel local, restaurante si factura servicio de alimentación, transporte/taxi local con FEL, mantenimiento/reparación, parqueo, correo/encomiendas, telefonía, honorarios, alquiler de vehículo).
+   - "XB": Compra de BIENES locales exentos 0% (recibos o bienes sin IVA local).
+   - "XO": Servicios locales exentos 0% (recibos de servicios sin IVA, peajes exentos).
+18. codigoGastoSugerido: código de gasto Odoo de 6 dígitos que mejor corresponde al concepto escaneado:
+   - "720060" (COMBUSTIBLES), "720013" (ALIMENTACION VIAJES), "720051" (ALIMENTACION), "720015" (ALOJAMIENTO/HOTELES), "720012" (TIQUETE INTERNACIONAL), "720014" (TIQUETE NACIONAL), "720024" (TAXIS Y BUSES), "720041" (ARRENDAMIENTO VEHICULOS), "720027" (PEAJES), "720009" (ARRENDAMIENTO PARQUEADERO), "720097" (GASTOS DE REPRESENTACION / atención clientes), "720003" (MANTENIMIENTO FLOTA Y EQUIPO TRANSPORTE), "720000" (MANTENIMIENTO CONSTRUCCIONES Y EDIFICIO), "720028" (PAPELERÍA Y UTILES), "720055" (SUMINISTROS OFICINA/PAPELERIA), "720044" (ELEMENTOS ASEO Y CAFETERIA), "720042" (GASTOS MEDICOS, MEDICAMENTOS Y VACUNAS), "720050" (CORREO / ENCOMIENDAS), "720017" (SERVICIO CORREO), "720019" (SERVICIO LAVANDERIA), "720085" (FLETES NACIONALES), "720132" (TELEFONIA MOVIL), "720135" (HONORARIOS PROFESIONALES), "720184" (DONACIONES), "720185" (IMPUESTO TURISMO), "720107" (LICENCIAS-TRAMITES / otros gastos).`;
 }
 
 const INVOICE_RESPONSE_SCHEMA = {
@@ -323,6 +333,21 @@ const INVOICE_RESPONSE_SCHEMA = {
       type: Type.STRING,
       description: 'Nota breve sobre tipo de documento, impuestos o moneda.',
     },
+    tipoDocumentoSugerido: {
+      type: Type.STRING,
+      description:
+        'Código de tipo de documento Odoo sugerido: FACT, FCAM, FPEQ, FESP, FCAP, RDON, RECI, DUCA, FYDUCA, FCE u OTROS.',
+    },
+    indicadorImpuestoSugerido: {
+      type: Type.STRING,
+      description:
+        'Código de indicador de impuesto Odoo sugerido: XA, XB, XC, XO, XE o XF.',
+    },
+    codigoGastoSugerido: {
+      type: Type.STRING,
+      description:
+        'Código numérico de cuenta/gasto Odoo de 6 dígitos (ej. 720060, 720013, 720015, 720024, 720027, 720012, 720097, 720107).',
+    },
   },
   required: [
     'fechaDoc',
@@ -340,6 +365,9 @@ const INVOICE_RESPONSE_SCHEMA = {
     'descripcionSugerida',
     'confianza',
     'notasExtraccion',
+    'tipoDocumentoSugerido',
+    'indicadorImpuestoSugerido',
+    'codigoGastoSugerido',
   ],
 };
 

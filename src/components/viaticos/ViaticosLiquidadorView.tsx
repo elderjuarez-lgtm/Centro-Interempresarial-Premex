@@ -33,11 +33,13 @@ import {
 import {
   EffectivePermissions,
   ModuleCompanyEntry,
+  OdooExpenseType,
   ViaticoCategory,
   ViaticoConsultor,
   ViaticoCurrency,
   ViaticoExpenseItem,
   ViaticoLiquidation,
+  ViaticoOdooCatalogs,
 } from '../../types';
 import {
   StoredReceiptMedia,
@@ -57,8 +59,20 @@ import {
   VIATICO_CURRENCIES,
   calculateTaxBreakdown,
   formatViaticoAmount,
+  roundExchangeRate,
   roundMoney,
 } from '../../utils/viaticos';
+import { normalizeCompanyKey } from '../../utils/permissions';
+import {
+  findMatchingCostCenterEntry,
+  mergeOdooCatalogsWithDefaults,
+  resolveOdooDocTypeByHint,
+  resolveOdooExpenseCodeByHint,
+  resolveOdooTaxIndicatorByHint,
+  suggestOdooDocTypeForItem,
+  suggestOdooExpenseCodeForItem,
+  suggestOdooTaxIndicatorForItem,
+} from '../../utils/viaticosOdooCatalogs';
 import { PremexBrandLogo } from '../ModuleIcons';
 
 interface ViaticosLiquidadorViewProps {
@@ -66,6 +80,7 @@ interface ViaticosLiquidadorViewProps {
   visibleLiquidaciones: ViaticoLiquidation[];
   availableConsultores: ViaticoConsultor[];
   moduleCompanies?: ModuleCompanyEntry[];
+  odooCatalogs?: ViaticoOdooCatalogs;
   isLockedToOwnConsultor: boolean;
   detectedFromEmailLabel: string | null;
   mediaMap: Record<string, StoredReceiptMedia>;
@@ -84,6 +99,7 @@ interface ViaticosLiquidadorViewProps {
     empresa?: string;
     centroCosto?: string;
     monedaBase?: ViaticoCurrency;
+    tipoCambioLiquidacion?: number;
   }) => void;
   resolvedCostCenter: string;
   onAddOrUpdateItem: (item: ViaticoExpenseItem, isEdit: boolean) => void;
@@ -126,6 +142,12 @@ interface ItemFormState {
   aplicaImpuestos: boolean;
   porcentajeImpuesto: string;
   montoImpuestoManual: string;
+  odooDocType: string;
+  odooProductId: string;
+  odooTaxIndicator: string;
+  odooExpenseType: OdooExpenseType | '';
+  odooCostCenterCode: string;
+  odooAnalyticDistribution: string;
   attachmentId?: string;
   attachmentName?: string;
   attachmentMimeType?: string;
@@ -146,7 +168,8 @@ const getTodayFormatted = (): string => {
 const createEmptyForm = (
   baseCurrency: ViaticoCurrency,
   defaultCliente = '',
-  defaultObjetivo = ''
+  defaultObjetivo = '',
+  docExchangeRate?: number | null
 ): ItemFormState => ({
   id: '',
   fechaDoc: getTodayFormatted(),
@@ -156,7 +179,7 @@ const createEmptyForm = (
   proveedor: '',
   moneda: baseCurrency,
   valorFactura: '',
-  tipoCambio: '1.00',
+  tipoCambio: docExchangeRate && docExchangeRate > 0 ? String(docExchangeRate) : '1.00',
   categoria: 'Alimentación',
   clienteContacto: defaultCliente,
   objetivoComercial: defaultObjetivo,
@@ -165,6 +188,12 @@ const createEmptyForm = (
   aplicaImpuestos: DEFAULT_TAX_RATE_BY_CURRENCY[baseCurrency] > 0,
   porcentajeImpuesto: String(DEFAULT_TAX_RATE_BY_CURRENCY[baseCurrency] || 0),
   montoImpuestoManual: '',
+  odooDocType: '',
+  odooProductId: '',
+  odooTaxIndicator: '',
+  odooExpenseType: '',
+  odooCostCenterCode: '',
+  odooAnalyticDistribution: '',
 });
 
 export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
@@ -172,6 +201,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   visibleLiquidaciones,
   availableConsultores,
   moduleCompanies = [],
+  odooCatalogs,
   isLockedToOwnConsultor,
   detectedFromEmailLabel,
   mediaMap,
@@ -195,9 +225,52 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   onOpenClosedArchive,
   zoomPercent = 100,
 }) => {
+  const catalogs = useMemo(
+    () => mergeOdooCatalogsWithDefaults(odooCatalogs),
+    [odooCatalogs]
+  );
+  const [showOdooDocFields, setShowOdooDocFields] = useState(false);
   const isZoomHigh = zoomPercent >= 120;
   const isZoomExtra = zoomPercent >= 135;
   const baseCurrency: ViaticoCurrency = liquidation?.monedaBase || 'Quetzales';
+  const docExchangeRate =
+    liquidation?.monedaBase === 'Dólares' &&
+    typeof liquidation.tipoCambioLiquidacion === 'number' &&
+    liquidation.tipoCambioLiquidacion > 0
+      ? liquidation.tipoCambioLiquidacion
+      : null;
+
+  const [docFxDraft, setDocFxDraft] = useState<string>(() =>
+    docExchangeRate ? String(docExchangeRate) : '1.00'
+  );
+
+  useEffect(() => {
+    if (liquidation?.monedaBase === 'Dólares') {
+      setDocFxDraft(
+        liquidation.tipoCambioLiquidacion && liquidation.tipoCambioLiquidacion > 0
+          ? String(liquidation.tipoCambioLiquidacion)
+          : '1.00'
+      );
+    }
+  }, [liquidation?.id, liquidation?.monedaBase, liquidation?.tipoCambioLiquidacion]);
+
+  const handleDocFxDraftChange = (raw: string) => {
+    setDocFxDraft(raw);
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      onUpdateHeader({ tipoCambioLiquidacion: roundExchangeRate(parsed) });
+    }
+  };
+
+  const handleDocFxBlur = () => {
+    const parsed = Number(docFxDraft);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setDocFxDraft(docExchangeRate ? String(docExchangeRate) : '1.00');
+    } else {
+      setDocFxDraft(String(roundExchangeRate(parsed)));
+    }
+  };
+
   const lastCliente = useMemo(() => {
     const items = liquidation?.items || [];
     for (let i = items.length - 1; i >= 0; i--) {
@@ -222,7 +295,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   const [isMobileHeaderExpanded, setIsMobileHeaderExpanded] = useState(false);
 
   const [form, setForm] = useState<ItemFormState>(() =>
-    createEmptyForm(baseCurrency, lastCliente, lastObjetivo)
+    createEmptyForm(baseCurrency, lastCliente, lastObjetivo, docExchangeRate)
   );
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [activeMediaPreview, setActiveMediaPreview] = useState<StoredReceiptMedia | null>(null);
@@ -255,7 +328,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     setUploadQueue([]);
     setAiStatusBanner(null);
     setFormError(null);
-    setForm(createEmptyForm(baseCurrency, lastCliente, lastObjetivo));
+    setForm(createEmptyForm(baseCurrency, lastCliente, lastObjetivo, docExchangeRate));
 
     if (liquidation) {
       setSwitcherScope((prev) => {
@@ -270,7 +343,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         prev !== 'ALL' && liquidation.monedaBase !== prev ? 'ALL' : prev
       );
     }
-  }, [liquidation, baseCurrency, lastCliente, lastObjetivo]);
+  }, [liquidation, baseCurrency, docExchangeRate, lastCliente, lastObjetivo]);
 
   // Sync default invoice currency if the user edits baseCurrency in the header while form is fresh
   useEffect(() => {
@@ -282,13 +355,30 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       return {
         ...prev,
         moneda: baseCurrency,
-        tipoCambio: '1.00',
+        tipoCambio: docExchangeRate ? String(docExchangeRate) : '1.00',
         aplicaImpuestos: defaultRate > 0,
         porcentajeImpuesto: String(defaultRate),
         montoImpuestoManual: '',
       };
     });
-  }, [baseCurrency, editingItemId]);
+  }, [baseCurrency, docExchangeRate, editingItemId]);
+
+  // Keep new-item exchange rate synchronized with document-level USD FX whenever set
+  useEffect(() => {
+    if (editingItemId) return;
+    if (docExchangeRate && docExchangeRate > 0) {
+      setForm((prev) => ({
+        ...prev,
+        tipoCambio: String(docExchangeRate),
+      }));
+    } else if (baseCurrency !== 'Dólares') {
+      setForm((prev) =>
+        prev.moneda === baseCurrency && prev.valorFactura.trim() === ''
+          ? { ...prev, tipoCambio: '1.00' }
+          : prev
+      );
+    }
+  }, [docExchangeRate, baseCurrency, editingItemId]);
 
   // Distinct weeks and currencies across visible liquidations
   const openLiquidaciones = useMemo(
@@ -452,6 +542,47 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           : DEFAULT_TAX_RATE_BY_CURRENCY[extracted.moneda] || 12
         : 0;
 
+      const suggestedDocType =
+        resolveOdooDocTypeByHint(extracted.tipoDocumentoSugerido, catalogs) ||
+        suggestOdooDocTypeForItem(
+          {
+            nit: extracted.nit || '',
+            serieDoc: extracted.serieDoc || '',
+            noDoc: extracted.noDoc || '',
+            aplicaImpuestos: extracted.aplicaImpuestos,
+            moneda: extracted.moneda,
+            proveedor: extracted.proveedor || '',
+            extractionNotes: extracted.notasExtraccion || '',
+          },
+          catalogs
+        );
+      const suggestedProduct =
+        resolveOdooExpenseCodeByHint(extracted.codigoGastoSugerido, catalogs) ||
+        suggestOdooExpenseCodeForItem(
+          {
+            categoria: extracted.categoriaSugerida || 'Alimentación',
+            descripcionGasto: extracted.descripcionSugerida || '',
+            proveedor: extracted.proveedor || '',
+            moneda: extracted.moneda,
+          },
+          undefined,
+          catalogs
+        );
+      const suggestedTax =
+        resolveOdooTaxIndicatorByHint(extracted.indicadorImpuestoSugerido, catalogs) ||
+        suggestOdooTaxIndicatorForItem(
+          {
+            aplicaImpuestos: extracted.aplicaImpuestos,
+            categoria: extracted.categoriaSugerida || 'Alimentación',
+            moneda: extracted.moneda,
+            extractionNotes: extracted.notasExtraccion || '',
+            descripcionGasto: extracted.descripcionSugerida || '',
+            proveedor: extracted.proveedor || '',
+          },
+          suggestedDocType,
+          catalogs
+        );
+
       setForm((prev) => ({
         ...prev,
         fechaDoc: extracted.fechaDoc || prev.fechaDoc || getTodayFormatted(),
@@ -462,7 +593,9 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         moneda: extracted.moneda,
         valorFactura: extracted.valorFactura > 0 ? String(extracted.valorFactura) : '',
         tipoCambio:
-          extracted.moneda === liquidation.monedaBase
+          docExchangeRate && docExchangeRate > 0
+            ? String(docExchangeRate)
+            : extracted.moneda === liquidation.monedaBase
             ? '1.00'
             : String(extracted.tipoCambioSugerido || 1),
         categoria: extracted.categoriaSugerida || prev.categoria,
@@ -475,6 +608,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           extracted.aplicaImpuestos && extracted.montoImpuesto > 0
             ? String(extracted.montoImpuesto)
             : '',
+        odooDocType: suggestedDocType,
+        odooProductId: suggestedProduct,
+        odooTaxIndicator: suggestedTax,
+        odooExpenseType: prev.odooExpenseType || catalogs.defaultExpenseType || 'Gasto',
         attachmentId: mediaRecord.id,
         attachmentName: mediaRecord.fileName,
         attachmentMimeType: mediaRecord.mimeType,
@@ -599,6 +736,47 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           ? extracted.porcentajeImpuesto
           : DEFAULT_TAX_RATE_BY_CURRENCY[extracted.moneda] || 12
         : 0;
+      const suggestedDocType =
+        resolveOdooDocTypeByHint(extracted.tipoDocumentoSugerido, catalogs) ||
+        suggestOdooDocTypeForItem(
+          {
+            nit: extracted.nit || '',
+            serieDoc: extracted.serieDoc || '',
+            noDoc: extracted.noDoc || '',
+            aplicaImpuestos: extracted.aplicaImpuestos,
+            moneda: extracted.moneda,
+            proveedor: extracted.proveedor || '',
+            extractionNotes: extracted.notasExtraccion || '',
+          },
+          catalogs
+        );
+      const suggestedProduct =
+        resolveOdooExpenseCodeByHint(extracted.codigoGastoSugerido, catalogs) ||
+        suggestOdooExpenseCodeForItem(
+          {
+            categoria: extracted.categoriaSugerida || 'Alimentación',
+            descripcionGasto: extracted.descripcionSugerida || '',
+            proveedor: extracted.proveedor || '',
+            moneda: extracted.moneda,
+          },
+          undefined,
+          catalogs
+        );
+      const suggestedTax =
+        resolveOdooTaxIndicatorByHint(extracted.indicadorImpuestoSugerido, catalogs) ||
+        suggestOdooTaxIndicatorForItem(
+          {
+            aplicaImpuestos: extracted.aplicaImpuestos,
+            categoria: extracted.categoriaSugerida || 'Alimentación',
+            moneda: extracted.moneda,
+            extractionNotes: extracted.notasExtraccion || '',
+            descripcionGasto: extracted.descripcionSugerida || '',
+            proveedor: extracted.proveedor || '',
+          },
+          suggestedDocType,
+          catalogs
+        );
+
       setForm((prev) => ({
         ...prev,
         fechaDoc: extracted.fechaDoc || prev.fechaDoc,
@@ -609,7 +787,9 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         moneda: extracted.moneda,
         valorFactura: extracted.valorFactura > 0 ? String(extracted.valorFactura) : prev.valorFactura,
         tipoCambio:
-          extracted.moneda === liquidation.monedaBase
+          docExchangeRate && docExchangeRate > 0
+            ? String(docExchangeRate)
+            : extracted.moneda === liquidation.monedaBase
             ? '1.00'
             : String(extracted.tipoCambioSugerido || prev.tipoCambio || 1),
         categoria: extracted.categoriaSugerida || prev.categoria,
@@ -620,6 +800,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           extracted.aplicaImpuestos && extracted.montoImpuesto > 0
             ? String(extracted.montoImpuesto)
             : '',
+        odooDocType: suggestedDocType,
+        odooProductId: suggestedProduct,
+        odooTaxIndicator: suggestedTax,
+        odooExpenseType: prev.odooExpenseType || catalogs.defaultExpenseType || 'Gasto',
         extractedByAi: true,
         extractionConfidence: extracted.confianza,
         extractionNotes: extracted.notasExtraccion,
@@ -643,7 +827,14 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     setForm((prev) => ({
       ...prev,
       moneda: nextCurrency,
-      tipoCambio: nextCurrency === baseCurrency ? '1.00' : prev.tipoCambio === '1.00' ? '7.90' : prev.tipoCambio,
+      tipoCambio:
+        docExchangeRate && docExchangeRate > 0
+          ? String(docExchangeRate)
+          : nextCurrency === baseCurrency
+          ? '1.00'
+          : prev.tipoCambio === '1.00'
+          ? '7.90'
+          : prev.tipoCambio,
       porcentajeImpuesto: prev.aplicaImpuestos ? String(nextDefaultRate) : prev.porcentajeImpuesto,
       montoImpuestoManual: '',
     }));
@@ -658,7 +849,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       createEmptyForm(
         baseCurrency,
         keepSuggestions ? lastCliente : '',
-        keepSuggestions ? lastObjetivo : ''
+        keepSuggestions ? lastObjetivo : '',
+        docExchangeRate
       )
     );
   };
@@ -686,6 +878,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       aplicaImpuestos: item.aplicaImpuestos,
       porcentajeImpuesto: String(item.porcentajeImpuesto),
       montoImpuestoManual: item.aplicaImpuestos ? String(item.montoImpuesto) : '',
+      odooDocType: item.odooDocType || '',
+      odooProductId: item.odooProductId || '',
+      odooTaxIndicator: item.odooTaxIndicator || '',
+      odooExpenseType: item.odooExpenseType || '',
+      odooCostCenterCode: item.odooCostCenterCode || '',
+      odooAnalyticDistribution: item.odooAnalyticDistribution || '',
       attachmentId: item.attachmentId,
       attachmentName: item.attachmentName,
       attachmentMimeType: item.attachmentMimeType,
@@ -694,6 +892,16 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       extractionConfidence: item.extractionConfidence,
       extractionNotes: item.extractionNotes,
     });
+    if (
+      item.odooDocType ||
+      item.odooProductId ||
+      item.odooTaxIndicator ||
+      item.odooExpenseType ||
+      item.odooCostCenterCode ||
+      item.odooAnalyticDistribution
+    ) {
+      setShowOdooDocFields(true);
+    }
     if (item.attachmentId && mediaMap[item.attachmentId]) {
       setActiveMediaPreview(mediaMap[item.attachmentId]);
     } else if (item.attachmentId && onLoadReceiptMedia) {
@@ -721,6 +929,18 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       return;
     }
 
+    const matchedDocCostCenter = form.odooCostCenterCode.trim()
+      ? findMatchingCostCenterEntry(
+          form.odooCostCenterCode,
+          form.odooAnalyticDistribution,
+          catalogs.costCenters
+        )
+      : null;
+
+    const existingItem = editingItemId
+      ? liquidation?.items.find((it) => it.id === editingItemId)
+      : undefined;
+
     const nextItem: ViaticoExpenseItem = {
       id: editingItemId || `viat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       fechaDoc: form.fechaDoc.trim() || getTodayFormatted(),
@@ -730,7 +950,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       proveedor: form.proveedor.trim(),
       moneda: form.moneda,
       valorFactura: roundMoney(numericValorFactura),
-      tipoCambio: roundMoney(numericTipoCambio),
+      tipoCambio: roundExchangeRate(numericTipoCambio),
       valorReintegrar: computedReintegrar,
       categoria: form.categoria,
       clienteContacto: form.clienteContacto.trim(),
@@ -741,6 +961,20 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       porcentajeImpuesto: form.aplicaImpuestos ? roundMoney(numericTaxRate) : 0,
       montoImpuesto: computedTax.montoImpuesto,
       valorSinImpuesto: computedTax.valorSinImpuesto,
+      odooDocType: form.odooDocType.trim() || undefined,
+      odooProductId: form.odooProductId.trim() || undefined,
+      odooTaxIndicator: form.odooTaxIndicator.trim() || undefined,
+      odooExpenseType: form.odooExpenseType || undefined,
+      odooCostCenterCode:
+        matchedDocCostCenter?.cuentaAnalitica ||
+        form.odooCostCenterCode.trim() ||
+        undefined,
+      odooAnalyticDistribution:
+        form.odooAnalyticDistribution.trim() ||
+        matchedDocCostCenter?.analyticDistribution ||
+        undefined,
+      registeredByEmail: existingItem?.registeredByEmail,
+      registeredByName: existingItem?.registeredByName,
       attachmentId: form.attachmentId,
       attachmentName: form.attachmentName,
       attachmentMimeType: form.attachmentMimeType,
@@ -761,7 +995,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         createEmptyForm(
           baseCurrency,
           nextItem.clienteContacto || lastCliente,
-          nextItem.objetivoComercial || lastObjetivo
+          nextItem.objetivoComercial || lastObjetivo,
+          docExchangeRate
         )
       );
       setActiveMediaPreview(null);
@@ -776,7 +1011,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       createEmptyForm(
         baseCurrency,
         nextItem.clienteContacto || lastCliente,
-        nextItem.objetivoComercial || lastObjetivo
+        nextItem.objetivoComercial || lastObjetivo,
+        docExchangeRate
       )
     );
   };
@@ -999,7 +1235,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 {liquidation.consultorNombre}
               </div>
               <div className="text-xs text-slate-500 break-words mt-0.5 tabular-nums">
-                Sem #{liquidation.semana || '-'} · {liquidation.monedaBase} · {liquidation.empresa} ·{' '}
+                Sem #{liquidation.semana || '-'} · {liquidation.monedaBase}
+                {docExchangeRate ? ` (T/C ${docExchangeRate})` : ''} · {liquidation.empresa} ·{' '}
                 {liquidation.items.length} fact.
               </div>
             </div>
@@ -1009,6 +1246,31 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               </div>
             </div>
           </div>
+
+          {liquidation.monedaBase === 'Dólares' && (
+            <div className="p-3 rounded-2xl bg-sky-50/75 border border-[#1E60A8]/25 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-[#132B63]">
+                  T/C Liquidación ($)
+                </div>
+                <div className="text-[11px] text-slate-600">
+                  Aplica a todo el documento
+                </div>
+              </div>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.0001"
+                min="0.0001"
+                value={docFxDraft}
+                disabled={isLocked}
+                onChange={(e) => handleDocFxDraftChange(e.target.value)}
+                onBlur={handleDocFxBlur}
+                aria-label="Tipo de cambio de liquidación en dólares"
+                className="w-32 min-h-[2.75rem] px-3 py-2 text-base font-mono font-bold text-right tabular-nums text-[#132B63] bg-white border border-[#1E60A8]/40 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
+              />
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             <button
@@ -1105,11 +1367,17 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   onChange={(e) => {
                     const chosen = availableConsultores.find((c) => c.id === e.target.value);
                     if (!chosen) return;
+                    const matchedComp =
+                      moduleCompanies.length > 0
+                        ? moduleCompanies.find(
+                            (c) => normalizeCompanyKey(c.nombre) === normalizeCompanyKey(chosen.empresa)
+                          ) || moduleCompanies[0]
+                        : null;
                     onUpdateHeader({
                       consultorId: chosen.id,
                       consultorNombre: chosen.nombreCompleto,
                       consultorEmail: chosen.email,
-                      empresa: chosen.empresa,
+                      empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
                       centroCosto: chosen.centroCosto || '',
                       monedaBase: chosen.monedaBase,
                     });
@@ -1460,6 +1728,32 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               </div>
             </div>
 
+            {liquidation.monedaBase === 'Dólares' && (
+              <div className="grid grid-cols-12 items-center gap-3">
+                <label className="col-span-3 text-xs font-extrabold tracking-wide text-[#132B63] uppercase">
+                  T/C LIQUIDACIÓN
+                </label>
+                <div className="col-span-4">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.0001"
+                    min="0.0001"
+                    value={docFxDraft}
+                    disabled={isLocked}
+                    onChange={(e) => handleDocFxDraftChange(e.target.value)}
+                    onBlur={handleDocFxBlur}
+                    placeholder="Ej. 7.75"
+                    aria-label="Tipo de cambio de liquidación en dólares"
+                    className="w-full px-2.5 py-1.5 text-sm font-mono font-bold text-[#132B63] text-right bg-sky-50/70 border border-[#1E60A8]/40 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 tabular-nums disabled:opacity-70"
+                  />
+                </div>
+                <div className="col-span-5 text-[11px] font-medium text-slate-500">
+                  Aplica a todo el documento
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-12 items-center gap-3">
               <label className="col-span-3 text-xs font-extrabold tracking-wide text-slate-900 uppercase">
                 NOMBRE:
@@ -1471,11 +1765,17 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   onChange={(e) => {
                     const chosen = availableConsultores.find((c) => c.id === e.target.value);
                     if (!chosen) return;
+                    const matchedComp =
+                      moduleCompanies.length > 0
+                        ? moduleCompanies.find(
+                            (c) => normalizeCompanyKey(c.nombre) === normalizeCompanyKey(chosen.empresa)
+                          ) || moduleCompanies[0]
+                        : null;
                     onUpdateHeader({
                       consultorId: chosen.id,
                       consultorNombre: chosen.nombreCompleto,
                       consultorEmail: chosen.email,
-                      empresa: chosen.empresa,
+                      empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
                       centroCosto: chosen.centroCosto || '',
                       monedaBase: chosen.monedaBase,
                     });
@@ -2007,7 +2307,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
                     <div>
                       <label className="block text-sm lg:text-[11px] font-bold lg:font-semibold text-slate-700 mb-1.5 lg:mb-1">
-                        Tipo Cambio
+                        Tipo Cambio{docExchangeRate ? ` (Doc: ${docExchangeRate})` : ''}
                       </label>
                       <input
                         type="number"
@@ -2291,6 +2591,156 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Sub-section C: Clasificación Contable Odoo por Documento */}
+              <div className="rounded-2xl lg:rounded-xl border border-slate-200 bg-slate-50/70 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowOdooDocFields((v) => !v)}
+                  className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-slate-100/80 transition-colors cursor-pointer"
+                >
+                  <div className="min-w-0">
+                    <span className="text-xs lg:text-[11px] font-extrabold uppercase tracking-wider text-[#132B63]">
+                      3. Clasificación Odoo (Documento)
+                    </span>
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {form.odooDocType || 'Auto (FEL/Recibo)'} ·{' '}
+                      {form.odooProductId || 'Auto según categoría'} ·{' '}
+                      {form.odooTaxIndicator || 'Auto impuesto'}
+                    </div>
+                  </div>
+                  {showOdooDocFields ? (
+                    <ChevronUp className="w-4 h-4 text-slate-500 shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
+                  )}
+                </button>
+
+                {showOdooDocFields && (
+                  <div className="p-3.5 border-t border-slate-200 bg-white grid grid-cols-1 lg:grid-cols-12 gap-3">
+                    <div className="lg:col-span-6">
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Tipo Documento (l10n_gt_edi_doc_type)
+                      </label>
+                      <select
+                        value={form.odooDocType}
+                        onChange={(e) =>
+                          setForm({ ...form, odooDocType: e.target.value })
+                        }
+                        className="w-full min-h-[42px] lg:min-h-0 px-2.5 py-1.5 text-sm lg:text-xs rounded-lg border border-slate-300 bg-white"
+                      >
+                        <option value="">Automático según comprobante</option>
+                        {catalogs.docTypes
+                          .filter((d) => d.activo !== false)
+                          .map((d) => (
+                            <option key={d.id} value={d.labelOdoo}>
+                              {d.labelOdoo}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div className="lg:col-span-6">
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Código de Gasto Odoo (product_id)
+                      </label>
+                      <select
+                        value={form.odooProductId}
+                        onChange={(e) =>
+                          setForm({ ...form, odooProductId: e.target.value })
+                        }
+                        className="w-full min-h-[42px] lg:min-h-0 px-2.5 py-1.5 text-sm lg:text-xs rounded-lg border border-slate-300 bg-white"
+                      >
+                        <option value="">Automático según categoría</option>
+                        {catalogs.expenseCodes
+                          .filter((c) => c.activo !== false)
+                          .map((c) => (
+                            <option key={c.id} value={c.labelOdoo}>
+                              {c.labelOdoo}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div className="lg:col-span-5">
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Indicador de Impuesto (tax_ids)
+                      </label>
+                      <select
+                        value={form.odooTaxIndicator}
+                        onChange={(e) =>
+                          setForm({ ...form, odooTaxIndicator: e.target.value })
+                        }
+                        className="w-full min-h-[42px] lg:min-h-0 px-2.5 py-1.5 text-sm lg:text-xs rounded-lg border border-slate-300 bg-white"
+                      >
+                        <option value="">Automático según documento e IVA</option>
+                        {catalogs.taxIndicators
+                          .filter((t) => t.activo !== false)
+                          .map((t) => (
+                            <option key={t.id} value={t.nombreImpuesto}>
+                              {t.nombreImpuesto}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div className="lg:col-span-3">
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Tipo Gasto (expense_type)
+                      </label>
+                      <select
+                        value={form.odooExpenseType}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            odooExpenseType: e.target.value as OdooExpenseType | '',
+                          })
+                        }
+                        className="w-full min-h-[42px] lg:min-h-0 px-2.5 py-1.5 text-sm lg:text-xs rounded-lg border border-slate-300 bg-white"
+                      >
+                        <option value="">
+                          Predeterminado ({catalogs.defaultExpenseType || 'Gasto'})
+                        </option>
+                        <option value="Gasto">Gasto</option>
+                        <option value="Tarjeta">Tarjeta</option>
+                      </select>
+                    </div>
+
+                    <div className="lg:col-span-4">
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Override C.C. Documento (Opcional)
+                      </label>
+                      <select
+                        value={form.odooCostCenterCode}
+                        onChange={(e) => {
+                          const ccVal = e.target.value;
+                          const matched = catalogs.costCenters.find(
+                            (cc) => cc.cuentaAnalitica === ccVal
+                          );
+                          setForm({
+                            ...form,
+                            odooCostCenterCode: ccVal,
+                            odooAnalyticDistribution:
+                              matched?.analyticDistribution || '',
+                          });
+                        }}
+                        className="w-full min-h-[42px] lg:min-h-0 px-2.5 py-1.5 text-sm lg:text-xs rounded-lg border border-slate-300 bg-white"
+                      >
+                        <option value="">
+                          Heredar de empleado ({resolvedCostCenter || 'sin asignar'})
+                        </option>
+                        {catalogs.costCenters
+                          .filter((cc) => cc.activo !== false)
+                          .map((cc) => (
+                            <option key={cc.id} value={cc.cuentaAnalitica}>
+                              {cc.cuentaAnalitica} ({cc.analyticDistribution})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Submit Actions */}

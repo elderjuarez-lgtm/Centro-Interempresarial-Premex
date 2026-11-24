@@ -3,7 +3,7 @@ import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
 import { ViaticoLiquidation } from '../types';
 import { StoredReceiptMedia } from '../services/viaticosMediaStore';
 import { readJpegExifOrientation } from '../services/viaticosInvoiceAi';
-import { formatViaticoAmount, roundMoney } from './viaticos';
+import { formatViaticoAmount, roundExchangeRate, roundMoney } from './viaticos';
 import { PREMEX_LOGO_SRC } from '../components/ModuleIcons';
 
 function sanitizeFileSlug(text: string): string {
@@ -153,7 +153,15 @@ export async function generateViaticosExcelBytes(
   ws.getCell('L2').alignment = { horizontal: 'right', vertical: 'middle' };
 
   ws.mergeCells('L3:N3');
-  ws.getCell('L3').value = `Moneda base: ${liquidation.monedaBase}`;
+  const fxSummaryLabel =
+    liquidation.monedaBase === 'Dólares' &&
+    liquidation.tipoCambioLiquidacion &&
+    liquidation.tipoCambioLiquidacion > 0
+      ? `Moneda base: ${liquidation.monedaBase} · T/C Liq: ${roundExchangeRate(
+          liquidation.tipoCambioLiquidacion
+        )}`
+      : `Moneda base: ${liquidation.monedaBase}`;
+  ws.getCell('L3').value = fxSummaryLabel;
   ws.getCell('L3').font = { name: 'Calibri', size: 9, color: { argb: 'FF475569' } };
   ws.getCell('L3').alignment = { horizontal: 'right', vertical: 'middle' };
 
@@ -220,7 +228,7 @@ export async function generateViaticosExcelBytes(
       item.proveedor,
       item.moneda,
       roundMoney(item.valorFactura),
-      roundMoney(item.tipoCambio),
+      roundExchangeRate(item.tipoCambio),
       roundMoney(item.valorReintegrar),
       item.categoria,
       item.clienteContacto,
@@ -240,8 +248,11 @@ export async function generateViaticosExcelBytes(
       };
       cell.border = thinGrid;
 
-      if (colIdx === 6 || colIdx === 7 || colIdx === 8) {
+      if (colIdx === 6 || colIdx === 8) {
         cell.numFmt = '#,##0.00';
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+      } else if (colIdx === 7) {
+        cell.numFmt = '#,##0.00##';
         cell.alignment = { horizontal: 'right', vertical: 'middle' };
       } else if (colIdx === 0 || colIdx === 5 || colIdx === 13) {
         cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
@@ -349,16 +360,18 @@ export async function generateViaticosExcelBytes(
       roundMoney(item.valorSinImpuesto),
       roundMoney(item.montoImpuesto),
       roundMoney(item.valorFactura),
-      roundMoney(item.tipoCambio),
+      roundExchangeRate(item.tipoCambio),
       roundMoney(item.valorReintegrar),
       item.categoria,
       resolvedCostCenter || 'Sin asignar',
       item.attachmentName || 'Sin archivo adjunto',
     ]);
-    [9, 10, 11, 12, 13].forEach((cIdx) => {
+    [9, 10, 11, 13].forEach((cIdx) => {
       row.getCell(cIdx).numFmt = '#,##0.00';
       row.getCell(cIdx).alignment = { horizontal: 'right', vertical: 'middle' };
     });
+    row.getCell(12).numFmt = '#,##0.00##';
+    row.getCell(12).alignment = { horizontal: 'right', vertical: 'middle' };
   });
 
   const buffer = await wb.xlsx.writeBuffer();
@@ -643,8 +656,16 @@ export async function generateViaticosReceiptsPdfBytes(
   });
 
   coverPage.drawText('MONEDA BASE:', { x: 430, y, size: 9, font: fontBold, color: slateMuted });
-  coverPage.drawText(truncateText(liquidation.monedaBase, 16), {
-    x: 508,
+  const pdfCurrencyLabel =
+    liquidation.monedaBase === 'Dólares' &&
+    liquidation.tipoCambioLiquidacion &&
+    liquidation.tipoCambioLiquidacion > 0
+      ? `${liquidation.monedaBase} (T/C ${roundExchangeRate(
+          liquidation.tipoCambioLiquidacion
+        )})`
+      : liquidation.monedaBase;
+  coverPage.drawText(truncateText(toAsciiSafe(pdfCurrencyLabel), 24), {
+    x: 500,
     y,
     size: 9,
     font: fontBold,

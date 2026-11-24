@@ -1,11 +1,13 @@
 import {
   EffectivePermissions,
+  UserPermissionRecord,
   ViaticoCategory,
   ViaticoConsultor,
   ViaticoCurrency,
   ViaticoEmailGroup,
   ViaticoExpenseItem,
   ViaticoLiquidation,
+  ViaticoOdooCatalogs,
   ViaticoOdooConfig,
 } from '../types';
 import { normalizeEmail } from './permissions';
@@ -54,6 +56,11 @@ export const DEFAULT_TAX_RATE_BY_CURRENCY: Record<ViaticoCurrency, number> = {
 export const roundMoney = (val: number): number => {
   if (!Number.isFinite(val)) return 0;
   return Math.round((val + Number.EPSILON) * 100) / 100;
+};
+
+export const roundExchangeRate = (val: number): number => {
+  if (!Number.isFinite(val)) return 1;
+  return Math.round((val + Number.EPSILON) * 10000) / 10000;
 };
 
 export const formatViaticoAmount = (
@@ -200,13 +207,16 @@ export const matchConsultorFromEmail = (
 
 export const resolveViaticosConsultantScope = (
   consultores: ViaticoConsultor[],
-  permissions: EffectivePermissions
+  permissions: EffectivePermissions,
+  odooCatalogs?: ViaticoOdooCatalogs,
+  permissionRecords?: UserPermissionRecord[]
 ): {
   matchedConsultor: ViaticoConsultor | null;
   availableConsultores: ViaticoConsultor[];
   isLockedToOwnConsultor: boolean;
   detectedFromEmailLabel: string | null;
 } => {
+  const cleanEmail = normalizeEmail(permissions.email || '');
   const viaticosScope = permissions.getModuleCompanyScope('viaticos');
   const viaticosAllowedCompanies = permissions.getAllowedCompaniesForModule('viaticos');
   const companyAllowedConsultores = consultores.filter(
@@ -216,19 +226,81 @@ export const resolveViaticosConsultantScope = (
       permissions.isCompanyAllowed(c.empresa, 'viaticos')
   );
 
+  // Enrich matched consultant from UserPermissionRecord / Odoo Employees DB
+  const permRec =
+    cleanEmail && Array.isArray(permissionRecords)
+      ? permissionRecords.find((p) => normalizeEmail(p.email) === cleanEmail)
+      : undefined;
+  const linkedOdooEmp = (() => {
+    if (!odooCatalogs?.employees?.length) return undefined;
+    const explicitOdooName = (
+      permissions.odooEmployeeName ||
+      permRec?.odooEmployeeName ||
+      ''
+    )
+      .trim()
+      .toUpperCase();
+    if (explicitOdooName) {
+      const byExact = odooCatalogs.employees.find(
+        (e) => e.nombreCompleto.trim().toUpperCase() === explicitOdooName
+      );
+      if (byExact) return byExact;
+    }
+    if (cleanEmail) {
+      const byEmail = odooCatalogs.employees.find(
+        (e) => normalizeEmail(e.email || '') === cleanEmail
+      );
+      if (byEmail) return byEmail;
+      const { firstName, lastName } = parseNameTokensFromEmail(cleanEmail);
+      if (firstName && lastName) {
+        return odooCatalogs.employees.find((e) => {
+          const words = normalizeTextToken(e.nombreCompleto).split(' ').filter(Boolean);
+          return words.includes(firstName) && words.includes(lastName);
+        });
+      }
+    }
+    return undefined;
+  })();
+
+  const enrichMatched = (c: ViaticoConsultor | null): ViaticoConsultor | null => {
+    if (!c) return null;
+    const resolvedEmpName =
+      c.odooEmployeeName ||
+      permissions.odooEmployeeName ||
+      permRec?.odooEmployeeName ||
+      linkedOdooEmp?.nombreCompleto;
+    const resolvedCC =
+      c.centroCosto ||
+      permissions.centroCosto ||
+      permRec?.centroCosto ||
+      linkedOdooEmp?.centroCosto;
+    const resolvedAnalytic =
+      c.odooAnalyticDistribution ||
+      permissions.odooAnalyticDistribution ||
+      permRec?.odooAnalyticDistribution ||
+      linkedOdooEmp?.analyticDistribution;
+    return {
+      ...c,
+      odooEmployeeName: resolvedEmpName,
+      centroCosto: resolvedCC,
+      odooAnalyticDistribution: resolvedAnalytic,
+      permissionId: c.permissionId || permRec?.id,
+    };
+  };
+
   if (permissions.isAdmin) {
-    const matched = matchConsultorFromEmail(permissions.email, consultores);
+    const matched = enrichMatched(matchConsultorFromEmail(permissions.email, consultores));
     return {
       matchedConsultor: matched,
       availableConsultores: consultores,
       isLockedToOwnConsultor: false,
       detectedFromEmailLabel: matched
-        ? `${matched.nombreCompleto} (Administrador · acceso total)`
+        ? `${matched.odooEmployeeName || matched.nombreCompleto} (Administrador · acceso total)`
         : null,
     };
   }
 
-  const matched = matchConsultorFromEmail(permissions.email, consultores);
+  const matched = enrichMatched(matchConsultorFromEmail(permissions.email, consultores));
 
   const isBroadReviewerProfile =
     permissions.isAdmin ||
@@ -237,32 +309,51 @@ export const resolveViaticosConsultantScope = (
     permissions.userType === 'auditor' ||
     permissions.canAccessViaticosPanel('contabilidad');
 
-  // Operador (Liquidador): scoped automatically to their own consultant profile detected via email
+  // Operador (Liquidador): scoped automatically to their own consultant profile detected via email + permissions + Odoo employee DB
   if (permissions.role === 'operador' && permissions.email && !isBroadReviewerProfile) {
     if (matched) {
       return {
         matchedConsultor: matched,
         availableConsultores: [matched],
         isLockedToOwnConsultor: true,
-        detectedFromEmailLabel: `${matched.nombreCompleto} (identificado desde ${permissions.email})`,
+        detectedFromEmailLabel: `${matched.odooEmployeeName || matched.nombreCompleto} (vinculado a ${permissions.email})`,
       };
     }
 
-    // Auto-build virtual consultant entry from `primerNombre.primerApellido@correo`
+    // Auto-build virtual consultant entry from Odoo Employee DB / Permisos / correo
     const derivedName =
-      permissions.displayName && !permissions.displayName.includes('@')
+      permissions.odooEmployeeName ||
+      permRec?.odooEmployeeName ||
+      linkedOdooEmp?.nombreCompleto ||
+      (permissions.displayName && !permissions.displayName.includes('@')
         ? permissions.displayName
-        : formatConsultorNameFromEmail(permissions.email);
+        : formatConsultorNameFromEmail(permissions.email));
     const derivedEmpresa =
       viaticosScope === 'selected' && viaticosAllowedCompanies[0]
         ? viaticosAllowedCompanies[0]
-        : 'Premex Corp';
+        : linkedOdooEmp?.empresa || 'Premex Corp';
     const virtualConsultor: ViaticoConsultor = {
       id: `cons-auto-${normalizeTextToken(permissions.email).replace(/\s+/g, '-')}`,
       nombreCompleto: derivedName,
-      email: normalizeEmail(permissions.email),
+      email: cleanEmail,
       empresa: derivedEmpresa,
       cargo: 'Consultor / Liquidador',
+      centroCosto:
+        permissions.centroCosto ||
+        permRec?.centroCosto ||
+        linkedOdooEmp?.centroCosto ||
+        '',
+      odooEmployeeName:
+        permissions.odooEmployeeName ||
+        permRec?.odooEmployeeName ||
+        linkedOdooEmp?.nombreCompleto ||
+        derivedName.toUpperCase(),
+      odooAnalyticDistribution:
+        permissions.odooAnalyticDistribution ||
+        permRec?.odooAnalyticDistribution ||
+        linkedOdooEmp?.analyticDistribution ||
+        '',
+      permissionId: permRec?.id,
       monedaBase: 'Quetzales',
       activo: true,
     };
@@ -270,7 +361,7 @@ export const resolveViaticosConsultantScope = (
       matchedConsultor: virtualConsultor,
       availableConsultores: [virtualConsultor],
       isLockedToOwnConsultor: true,
-      detectedFromEmailLabel: `${virtualConsultor.nombreCompleto} (detectado desde ${permissions.email})`,
+      detectedFromEmailLabel: `${virtualConsultor.odooEmployeeName || virtualConsultor.nombreCompleto} (detectado desde ${permissions.email})`,
     };
   }
 
@@ -280,7 +371,9 @@ export const resolveViaticosConsultantScope = (
     availableConsultores:
       viaticosScope === 'selected' ? companyAllowedConsultores : consultores,
     isLockedToOwnConsultor: false,
-    detectedFromEmailLabel: matched ? matched.nombreCompleto : null,
+    detectedFromEmailLabel: matched
+      ? matched.odooEmployeeName || matched.nombreCompleto
+      : null,
   };
 };
 
@@ -344,7 +437,9 @@ export const resolveLiquidationCostCenter = (
     ViaticoLiquidation,
     'centroCosto' | 'consultorId' | 'consultorEmail' | 'consultorNombre'
   >,
-  consultores: ViaticoConsultor[]
+  consultores: ViaticoConsultor[],
+  odooCatalogs?: ViaticoOdooCatalogs,
+  permissionRecords?: UserPermissionRecord[]
 ): string => {
   const direct = String(liquidation.centroCosto || '').trim();
   if (direct) return direct;
@@ -356,6 +451,17 @@ export const resolveLiquidationCostCenter = (
   if (cleanEmail) {
     const byEmail = consultores.find((c) => normalizeEmail(c.email) === cleanEmail);
     if (byEmail?.centroCosto?.trim()) return byEmail.centroCosto.trim();
+
+    if (permissionRecords?.length) {
+      const byPerm = permissionRecords.find((p) => normalizeEmail(p.email) === cleanEmail);
+      if (byPerm?.centroCosto?.trim()) return byPerm.centroCosto.trim();
+    }
+    if (odooCatalogs?.employees?.length) {
+      const byOdooEmail = odooCatalogs.employees.find(
+        (e) => normalizeEmail(e.email || '') === cleanEmail
+      );
+      if (byOdooEmail?.centroCosto?.trim()) return byOdooEmail.centroCosto.trim();
+    }
   }
 
   const normName = normalizeTextToken(liquidation.consultorNombre || '');
@@ -364,6 +470,13 @@ export const resolveLiquidationCostCenter = (
       (c) => normalizeTextToken(c.nombreCompleto) === normName
     );
     if (byName?.centroCosto?.trim()) return byName.centroCosto.trim();
+
+    if (odooCatalogs?.employees?.length) {
+      const byOdooName = odooCatalogs.employees.find(
+        (e) => normalizeTextToken(e.nombreCompleto) === normName
+      );
+      if (byOdooName?.centroCosto?.trim()) return byOdooName.centroCosto.trim();
+    }
   }
 
   return '';
@@ -502,7 +615,9 @@ export const INITIAL_VIATICO_CONSULTORES: ViaticoConsultor[] = [
     email: 'elder.juarez@premexcorp.com',
     empresa: 'Premex Corp',
     cargo: 'Consultor Financiero / Regional',
-    centroCosto: 'CC-101 Finanzas Regional',
+    centroCosto: 'GT10000601 CONTABILIDAD',
+    odooEmployeeName: 'ELDER YOVANI JUAREZ HERNANDEZ',
+    odooAnalyticDistribution: '{"520": 100.0}',
     monedaBase: 'Quetzales',
     activo: true,
   },
@@ -711,7 +826,9 @@ export const INITIAL_VIATICO_LIQUIDACIONES: ViaticoLiquidation[] = [
     consultorNombre: 'Elder Juarez Hernandez',
     consultorEmail: 'elder.juarez@premexcorp.com',
     empresa: 'Premex Corp',
-    centroCosto: 'CC-101 Finanzas Regional',
+    centroCosto: 'GT10000601 CONTABILIDAD',
+    odooEmployeeName: 'ELDER YOVANI JUAREZ HERNANDEZ',
+    odooAnalyticDistribution: '{"520": 100.0}',
     monedaBase: 'Quetzales',
     estado: 'borrador',
     items: SEED_PREMICOL_ITEMS,

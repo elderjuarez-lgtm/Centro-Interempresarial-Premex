@@ -4,17 +4,25 @@ import {
   ModuleCompanyEntry,
   ViaticoConsultor,
   ViaticoCurrency,
+  ViaticoOdooCatalogs,
 } from '../../types';
 import {
   CURRENCY_SYMBOLS,
   VIATICO_CURRENCIES,
   getCurrentIsoWeekNumber,
+  roundExchangeRate,
 } from '../../utils/viaticos';
+import { normalizeCompanyKey } from '../../utils/permissions';
+import {
+  findMatchingCostCenterEntry,
+  findMatchingOdooEmployee,
+} from '../../utils/viaticosOdooCatalogs';
 
 export interface NewLiquidationPayload {
   lineaLiquidacion: string;
   semana: string;
   monedaBase: ViaticoCurrency;
+  tipoCambioLiquidacion?: number;
   consultorId: string;
   empresa: string;
   centroCosto?: string;
@@ -28,6 +36,7 @@ interface ViaticosNewLiquidationModalProps {
   moduleCompanies: ModuleCompanyEntry[];
   isLockedToOwnConsultor: boolean;
   openLiquidacionesCount: number;
+  odooCatalogs?: ViaticoOdooCatalogs;
   onCreate: (payload: NewLiquidationPayload) => void;
 }
 
@@ -39,41 +48,83 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
   moduleCompanies,
   isLockedToOwnConsultor,
   openLiquidacionesCount,
+  odooCatalogs,
   onCreate,
 }) => {
   const [lineaLiquidacion, setLineaLiquidacion] = useState('');
   const [semana, setSemana] = useState(getCurrentIsoWeekNumber());
   const [monedaBase, setMonedaBase] = useState<ViaticoCurrency>('Quetzales');
+  const [tipoCambioLiquidacion, setTipoCambioLiquidacion] = useState('1.00');
   const [consultorId, setConsultorId] = useState('');
   const [empresa, setEmpresa] = useState('Premex Corp');
   const [centroCosto, setCentroCosto] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const pickPermittedCompany = (preferred?: string): string => {
+    if (moduleCompanies.length === 0) {
+      return (preferred || '').trim() || 'Premex Corp';
+    }
+    const prefKey = normalizeCompanyKey(preferred || '');
+    if (prefKey) {
+      const exact = moduleCompanies.find((c) => normalizeCompanyKey(c.nombre) === prefKey);
+      if (exact) return exact.nombre;
+    }
+    return moduleCompanies[0].nombre;
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     const initialConsultor = defaultConsultor || availableConsultores[0] || null;
+    const matchedEmp = odooCatalogs
+      ? findMatchingOdooEmployee({
+          email: initialConsultor?.email,
+          nombre: initialConsultor?.odooEmployeeName || initialConsultor?.nombreCompleto,
+          employees: odooCatalogs.employees,
+        })
+      : null;
     setLineaLiquidacion('');
     setSemana(getCurrentIsoWeekNumber());
-    setMonedaBase(initialConsultor?.monedaBase || 'Quetzales');
+    const initCurrency = initialConsultor?.monedaBase || 'Quetzales';
+    setMonedaBase(initCurrency);
+    setTipoCambioLiquidacion('1.00');
     setConsultorId(initialConsultor?.id || '');
-    setEmpresa(
-      initialConsultor?.empresa ||
-        moduleCompanies[0]?.nombre ||
-        'Premex Corp'
-    );
-    setCentroCosto(initialConsultor?.centroCosto || '');
+    setEmpresa(pickPermittedCompany(initialConsultor?.empresa || matchedEmp?.empresa));
+    setCentroCosto(initialConsultor?.centroCosto || matchedEmp?.centroCosto || '');
     setError(null);
-  }, [isOpen, defaultConsultor, availableConsultores, moduleCompanies]);
+  }, [isOpen, defaultConsultor, availableConsultores, moduleCompanies, odooCatalogs]);
 
   if (!isOpen) return null;
+
+  const selectedConsultorObj = availableConsultores.find((c) => c.id === consultorId) || null;
+  const matchedEmpPreview = odooCatalogs
+    ? findMatchingOdooEmployee({
+        email: selectedConsultorObj?.email,
+        nombre: selectedConsultorObj?.odooEmployeeName || selectedConsultorObj?.nombreCompleto,
+        employees: odooCatalogs.employees,
+      })
+    : null;
+  const matchedCostCenterPreview = odooCatalogs
+    ? findMatchingCostCenterEntry(
+        centroCosto,
+        selectedConsultorObj?.odooAnalyticDistribution || matchedEmpPreview?.analyticDistribution,
+        odooCatalogs.costCenters
+      )
+    : null;
 
   const handleConsultorChange = (nextId: string) => {
     setConsultorId(nextId);
     const chosen = availableConsultores.find((c) => c.id === nextId);
     if (chosen) {
-      setEmpresa(chosen.empresa || empresa);
+      const empMatch = odooCatalogs
+        ? findMatchingOdooEmployee({
+            email: chosen.email,
+            nombre: chosen.odooEmployeeName || chosen.nombreCompleto,
+            employees: odooCatalogs.employees,
+          })
+        : null;
+      setEmpresa(pickPermittedCompany(chosen.empresa || empMatch?.empresa || empresa));
       setMonedaBase(chosen.monedaBase || monedaBase);
-      setCentroCosto(chosen.centroCosto || '');
+      setCentroCosto(chosen.centroCosto || empMatch?.centroCosto || '');
     }
   };
 
@@ -92,10 +143,18 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
       return;
     }
 
+    const parsedFx = Number(tipoCambioLiquidacion);
+    if (monedaBase === 'Dólares' && (!Number.isFinite(parsedFx) || parsedFx <= 0)) {
+      setError('Ingresa un tipo de cambio válido mayor a 0 para la liquidación en Dólares.');
+      return;
+    }
+
     onCreate({
       lineaLiquidacion: cleanLinea,
       semana: cleanSemana,
       monedaBase,
+      tipoCambioLiquidacion:
+        monedaBase === 'Dólares' ? roundExchangeRate(parsedFx) : undefined,
       consultorId,
       empresa: empresa.trim() || 'Premex Corp',
       centroCosto: centroCosto.trim(),
@@ -194,7 +253,13 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
               </label>
               <select
                 value={monedaBase}
-                onChange={(e) => setMonedaBase(e.target.value as ViaticoCurrency)}
+                onChange={(e) => {
+                  const nextCur = e.target.value as ViaticoCurrency;
+                  setMonedaBase(nextCur);
+                  if (nextCur === 'Dólares' && (!Number(tipoCambioLiquidacion) || Number(tipoCambioLiquidacion) <= 0)) {
+                    setTipoCambioLiquidacion('1.00');
+                  }
+                }}
                 className="w-full min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
               >
                 {VIATICO_CURRENCIES.map((cur) => (
@@ -205,6 +270,30 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
               </select>
             </div>
           </div>
+
+          {monedaBase === 'Dólares' && (
+            <div className="p-3 rounded-xl bg-sky-50/70 border border-[#1E60A8]/25 space-y-1.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-[#132B63]">
+                  Tipo de Cambio de Liquidación ($) *
+                </label>
+                <span className="text-[11px] font-medium text-slate-600">
+                  Se aplicará a todo el documento
+                </span>
+              </div>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.0001"
+                min="0.0001"
+                required
+                value={tipoCambioLiquidacion}
+                onChange={(e) => setTipoCambioLiquidacion(e.target.value)}
+                placeholder="Ej. 7.75 o 1.00"
+                className="w-full min-h-[42px] sm:min-h-0 px-3 py-2 sm:py-1.5 text-base sm:text-xs font-mono font-bold text-right tabular-nums text-[#132B63] bg-white rounded-xl border border-[#1E60A8]/40 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+              />
+            </div>
+          )}
 
           {/* Consultor */}
           <div>
@@ -239,9 +328,6 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
                   onChange={(e) => setEmpresa(e.target.value)}
                   className="w-full min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                 >
-                  {!moduleCompanies.some((c) => c.nombre === empresa) && (
-                    <option value={empresa}>{empresa}</option>
-                  )}
                   {moduleCompanies.map((c) => (
                     <option key={c.id} value={c.nombre}>
                       {c.nombre}
@@ -266,11 +352,28 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
               </label>
               <input
                 type="text"
+                list="viaticos-new-liq-cc-list"
                 value={centroCosto}
                 onChange={(e) => setCentroCosto(e.target.value)}
-                placeholder="Cargado desde consultor"
+                placeholder="Cargado desde consultor / Odoo"
                 className="w-full min-h-[44px] sm:min-h-0 px-3.5 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-[#132B63] rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
               />
+              <datalist id="viaticos-new-liq-cc-list">
+                {(odooCatalogs?.costCenters || [])
+                  .filter((cc) => cc.activo !== false)
+                  .map((cc) => (
+                    <option key={cc.id} value={cc.cuentaAnalitica}>
+                      {cc.analyticDistribution}
+                    </option>
+                  ))}
+              </datalist>
+              {(matchedEmpPreview || matchedCostCenterPreview) && (
+                <div className="mt-1 text-[10px] font-mono text-slate-500 truncate">
+                  {matchedEmpPreview ? `Odoo: ${matchedEmpPreview.nombreCompleto}` : ''}
+                  {matchedEmpPreview && matchedCostCenterPreview ? ' · ' : ''}
+                  {matchedCostCenterPreview ? matchedCostCenterPreview.analyticDistribution : ''}
+                </div>
+              )}
             </div>
           </div>
 

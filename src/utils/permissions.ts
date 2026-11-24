@@ -26,6 +26,7 @@ export const ALL_FUNCTIONAL_MODULES: FunctionalModuleId[] = [
   'bancos',
   'viaticos',
   'actividades',
+  'clara',
   'anticipos',
   'cxc',
   'cxp',
@@ -36,6 +37,7 @@ export const ALL_SUITE_MODULES: SuiteModuleId[] = [
   'bancos',
   'viaticos',
   'actividades',
+  'clara',
   'anticipos',
   'cxc',
   'cxp',
@@ -46,6 +48,7 @@ const FUNCTIONAL_MODULE_SET = new Set<FunctionalModuleId>(ALL_FUNCTIONAL_MODULES
 
 export const ALL_VIATICOS_PANELS: ViaticosTab[] = [
   'liquidador',
+  'sociedades',
   'cerradas',
   'contabilidad',
   'historial',
@@ -66,6 +69,11 @@ export const VIATICOS_PANEL_METADATA: Record<
     label: 'Liquidadores (Activas)',
     shortLabel: 'Activas',
     description: 'Captura de facturas, escaneo IA y edición de planilla activa',
+  },
+  sociedades: {
+    label: 'Sociedad',
+    shortLabel: 'Sociedad',
+    description: 'Ver sociedades asignadas por permisos y agregar o quitar sociedades',
   },
   cerradas: {
     label: 'Liquidaciones Cerradas',
@@ -559,6 +567,9 @@ const buildPermissionsFromRecord = (
     companyScope,
     allowedCompanies,
     moduleCompanyAccess,
+    odooEmployeeName: record.odooEmployeeName,
+    centroCosto: record.centroCosto,
+    odooAnalyticDistribution: record.odooAnalyticDistribution,
     canAccessModule: (moduleId: SuiteModuleId) => {
       if (isAdmin) return true;
       if (!record.active) return false;
@@ -728,7 +739,7 @@ export const resolveEffectivePermissions = (params: {
     isReadOnly: true,
     canCloseMonth: false,
     canManageMasterData: false,
-    allowedModules: ['intercompany', 'bancos', 'viaticos', 'actividades'],
+    allowedModules: ['intercompany', 'bancos', 'viaticos', 'actividades', 'clara'],
     viaticosPanels: [...ALL_VIATICOS_PANELS],
     companyScope: 'all',
     allowedCompanies: [],
@@ -737,9 +748,14 @@ export const resolveEffectivePermissions = (params: {
       bancos: { scope: 'all', companies: [] },
       viaticos: { scope: 'all', companies: [] },
       actividades: { scope: 'all', companies: [] },
+      clara: { scope: 'all', companies: [] },
     },
     canAccessModule: (m) =>
-      m === 'intercompany' || m === 'bancos' || m === 'viaticos' || m === 'actividades',
+      m === 'intercompany' ||
+      m === 'bancos' ||
+      m === 'viaticos' ||
+      m === 'actividades' ||
+      m === 'clara',
     canAccessViaticosPanel: () => true,
     isCompanyAllowed: () => true,
     getModuleCompanyScope: () => 'all',

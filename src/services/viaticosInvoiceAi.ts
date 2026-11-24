@@ -21,6 +21,9 @@ export interface ExtractedInvoiceData {
   descripcionSugerida: string;
   confianza: 'alta' | 'media' | 'baja';
   notasExtraccion: string;
+  tipoDocumentoSugerido?: string;
+  indicadorImpuestoSugerido?: string;
+  codigoGastoSugerido?: string;
   modelUsed?: string;
 }
 
@@ -540,6 +543,15 @@ export async function extractInvoiceViaServer(params: {
     descripcionSugerida: String(raw.descripcionSugerida || '').trim(),
     confianza,
     notasExtraccion: String(raw.notasExtraccion || '').trim(),
+    tipoDocumentoSugerido: raw.tipoDocumentoSugerido
+      ? String(raw.tipoDocumentoSugerido).trim().toUpperCase()
+      : undefined,
+    indicadorImpuestoSugerido: raw.indicadorImpuestoSugerido
+      ? String(raw.indicadorImpuestoSugerido).trim().toUpperCase()
+      : undefined,
+    codigoGastoSugerido: raw.codigoGastoSugerido
+      ? String(raw.codigoGastoSugerido).trim()
+      : undefined,
     modelUsed: typeof payload?.modelUsed === 'string' ? payload.modelUsed : undefined,
   };
 }

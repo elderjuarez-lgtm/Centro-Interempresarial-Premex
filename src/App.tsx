@@ -76,6 +76,11 @@ import {
   resolveViaticosConsultantScope,
 } from './utils/viaticos';
 import {
+  loadLocalOdooCatalogs,
+  mergeOdooCatalogsWithDefaults,
+  saveLocalOdooCatalogs,
+} from './utils/viaticosOdooCatalogs';
+import {
   DEFAULT_START_PERIOD,
   INITIAL_ACTIVITY_SOCIETIES,
   INITIAL_ACTIVITY_RESPONSIBLES,
@@ -530,6 +535,7 @@ function loadInitialViaticosWorkspace(): ViaticosWorkspaceData {
     return DEFAULT_VIATICOS_DOC_ID;
   })();
 
+  const odooCatalogs = loadLocalOdooCatalogs();
   return {
     docId: savedDocId,
     consultores: consultores.length > 0 ? consultores : INITIAL_VIATICO_CONSULTORES,
@@ -538,6 +544,7 @@ function loadInitialViaticosWorkspace(): ViaticosWorkspaceData {
       Array.isArray(emailGroups) && emailGroups.length > 0
         ? emailGroups
         : INITIAL_VIATICO_EMAIL_GROUPS,
+    odooCatalogs,
     activeLiquidationId: savedActiveId,
     lastSavedAtIso: null,
     hasUnsavedChanges: false,
@@ -779,6 +786,7 @@ export default function App() {
     bancos: false,
     viaticos: false,
     actividades: false,
+    clara: false,
     anticipos: false,
     cxc: false,
     cxp: false,
@@ -790,6 +798,7 @@ export default function App() {
     bancos: { status: 'idle' },
     viaticos: { status: 'idle' },
     actividades: { status: 'idle' },
+    clara: { status: 'idle' },
     anticipos: { status: 'idle' },
     cxc: { status: 'idle' },
     cxp: { status: 'idle' },
@@ -999,9 +1008,13 @@ export default function App() {
     moduleId: FunctionalModuleId,
     nextCompanies: ModuleCompanyEntry[]
   ) => {
-    if (!realIsAdmin) {
+    const canManageViaticosSocieties =
+      moduleId === 'viaticos' &&
+      effectivePermissions.canOperate &&
+      effectivePermissions.canAccessViaticosPanel('sociedades');
+    if (!realIsAdmin && !canManageViaticosSocieties) {
       throw new Error(
-        'Solo los administradores pueden modificar las bases de datos de sociedades.'
+        'No tienes permisos para modificar el catálogo de sociedades.'
       );
     }
 
@@ -1361,6 +1374,11 @@ export default function App() {
         VIATICOS_STORAGE_KEYS.EMAIL_GROUPS,
         JSON.stringify(viaticosWorkspace.emailGroups || INITIAL_VIATICO_EMAIL_GROUPS)
       );
+      if (viaticosWorkspace.odooCatalogs) {
+        saveLocalOdooCatalogs(
+          mergeOdooCatalogsWithDefaults(viaticosWorkspace.odooCatalogs)
+        );
+      }
       localStorage.setItem(
         VIATICOS_STORAGE_KEYS.ACTIVE_ID,
         viaticosWorkspace.activeLiquidationId
@@ -1393,6 +1411,9 @@ export default function App() {
             savedDoc.emailGroups && savedDoc.emailGroups.length > 0
               ? savedDoc.emailGroups
               : prev.emailGroups || INITIAL_VIATICO_EMAIL_GROUPS,
+          odooCatalogs: savedDoc.odooCatalogs
+            ? mergeOdooCatalogsWithDefaults(savedDoc.odooCatalogs)
+            : prev.odooCatalogs || loadLocalOdooCatalogs(),
           activeLiquidationId:
             savedDoc.activeLiquidationId &&
             savedDoc.liquidaciones.some((l) => l.id === savedDoc.activeLiquidationId)
@@ -1699,6 +1720,7 @@ export default function App() {
         consultores: source.consultores,
         liquidaciones: source.liquidaciones,
         emailGroups: source.emailGroups || INITIAL_VIATICO_EMAIL_GROUPS,
+        odooCatalogs: source.odooCatalogs,
       });
       setViaticosWorkspace((prev) => {
         const hasNewerMutations = viaticosMutationSeqRef.current !== seqAtStart;
@@ -2229,6 +2251,7 @@ export default function App() {
       bancos: bancosList,
       viaticos: viaticosList,
       actividades: actividadesList,
+      clara: standaloneModuleCompanies.clara,
       anticipos: standaloneModuleCompanies.anticipos,
       cxc: standaloneModuleCompanies.cxc,
       cxp: standaloneModuleCompanies.cxp,
@@ -2256,6 +2279,7 @@ export default function App() {
       bancos: standaloneDbSyncStatus.bancos,
       viaticos: standaloneDbSyncStatus.viaticos,
       actividades: standaloneDbSyncStatus.actividades,
+      clara: standaloneDbSyncStatus.clara,
       anticipos: standaloneDbSyncStatus.anticipos,
       cxc: standaloneDbSyncStatus.cxc,
       cxp: standaloneDbSyncStatus.cxp,
@@ -2925,6 +2949,7 @@ export default function App() {
             onStartPreviewAs={handleStartPreviewAs}
             lastCloudSyncIso={lastPermSyncIso}
             hasPendingCloudSync={hasPendingPermSync}
+            odooCatalogs={viaticosWorkspace.odooCatalogs}
           />
         </div>
       </div>
@@ -2983,6 +3008,13 @@ export default function App() {
             onSwitchModule={handleSwitchModule}
             permissions={effectivePermissions}
             moduleCompanies={moduleCompanyDatabases.viaticos}
+            onSaveModuleCompanies={(nextCompanies) =>
+              handleSaveModuleCompanies('viaticos', nextCompanies)
+            }
+            permissionRecords={permissionRecords}
+            onUpsertPermissionRecord={
+              realIsAdmin ? handleUpsertPermissionRecord : undefined
+            }
           />
         </div>
       </div>

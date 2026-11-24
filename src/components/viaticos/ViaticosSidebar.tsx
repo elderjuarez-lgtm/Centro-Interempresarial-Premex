@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   UserCheck,
   Mail,
+  Building2,
 } from 'lucide-react';
 import { ActiveModuleId, EffectivePermissions, ViaticosTab } from '../../types';
 import { PremexBrandLogo, ViaticosModuleLogo } from '../ModuleIcons';
@@ -27,6 +28,7 @@ interface ViaticosSidebarProps {
   closedLiquidacionesCount: number;
   accountingLiquidacionesCount: number;
   liquidacionesCount: number;
+  sociedadesCount?: number;
   emailGroupsCount?: number;
   consultorScopeLabel: string;
 }
@@ -42,6 +44,7 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
   closedLiquidacionesCount,
   accountingLiquidacionesCount,
   liquidacionesCount,
+  sociedadesCount,
   emailGroupsCount,
   consultorScopeLabel,
 }) => {
@@ -58,6 +61,13 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
       description: 'Abiertas, facturas y planilla',
       icon: FileText,
       counter: String(openLiquidacionesCount),
+    },
+    {
+      id: 'sociedades',
+      label: 'Sociedad',
+      description: 'Sociedades asignadas y catálogo',
+      icon: Building2,
+      counter: typeof sociedadesCount === 'number' ? String(sociedadesCount) : undefined,
     },
     {
       id: 'cerradas',

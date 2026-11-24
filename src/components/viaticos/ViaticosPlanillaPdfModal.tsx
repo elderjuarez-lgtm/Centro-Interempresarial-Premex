@@ -274,6 +274,15 @@ function buildPrintableHtmlDocument(
     <div class="meta-right">
       <div class="corp">${escapeHtml(liquidation.empresa)}</div>
       <div>Moneda base: <strong>${escapeHtml(liquidation.monedaBase)}</strong></div>
+      ${
+        liquidation.monedaBase === 'Dólares' &&
+        liquidation.tipoCambioLiquidacion &&
+        liquidation.tipoCambioLiquidacion > 0
+          ? `<div>T/C Liquidación: <strong>${escapeHtml(
+              String(liquidation.tipoCambioLiquidacion)
+            )}</strong></div>`
+          : ''
+      }
       <div>Estado: ${escapeHtml(statusText)}</div>
       <div>Fecha impresión: ${escapeHtml(new Date().toLocaleDateString('es-GT'))}</div>
     </div>

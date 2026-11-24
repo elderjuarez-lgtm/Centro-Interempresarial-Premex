@@ -146,6 +146,8 @@ export const ViaticosHeader: React.FC<ViaticosHeaderProps> = ({
                 ? activeLiquidation
                   ? `${activeLiquidation.lineaLiquidacion || 'Sin título'} · Sem #${activeLiquidation.semana || '-'}`
                   : 'Panel de Liquidadores'
+                : activeTab === 'sociedades'
+                ? 'Sociedades Asignadas'
                 : activeTab === 'cerradas'
                 ? 'Liquidaciones Cerradas'
                 : activeTab === 'contabilidad'

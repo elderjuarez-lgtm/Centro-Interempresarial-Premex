@@ -30,6 +30,9 @@ export interface LauncherLiveMetrics {
   activitiesCompletedCount: number;
   activitiesPendingCount: number;
   activitiesPeriod: string;
+  claraTransactionsCount?: number;
+  claraPendingWmCount?: number;
+  claraPendingVendorsCount?: number;
   configuredUsersCount?: number;
 }
 
@@ -336,6 +339,26 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
             {metrics.activitiesPendingCount}
           </strong>{' '}
           pend. · {metrics.activitiesPeriod}
+        </span>
+      );
+    }
+
+    if (mod.id === 'clara') {
+      const pendingWm = metrics.claraPendingWmCount ?? 0;
+      return (
+        <span className="text-xs text-slate-600 tabular-nums">
+          <strong className="font-semibold text-slate-900">
+            {metrics.claraTransactionsCount ?? 0}
+          </strong>{' '}
+          gastos ·{' '}
+          <strong
+            className={`font-semibold ${
+              pendingWm > 0 ? 'text-amber-700' : 'text-emerald-700'
+            }`}
+          >
+            {pendingWm}
+          </strong>{' '}
+          pend. WM · {metrics.claraPendingVendorsCount ?? 0} terc.
         </span>
       );
     }

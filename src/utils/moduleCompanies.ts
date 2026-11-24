@@ -10,6 +10,7 @@ export const STANDALONE_COMPANY_DB_MODULES: StandaloneCompanyDbModuleId[] = [
   'bancos',
   'viaticos',
   'actividades',
+  'clara',
   'anticipos',
   'cxc',
   'cxp',
@@ -60,6 +61,15 @@ export const MODULE_COMPANY_DB_META: Record<
     firestorePath: 'module_company_directories/actividades',
     description:
       'Sociedades de la matriz de actividades contables y cierres (PREMEX, ADIQUIM, NUTREO, ALURA, ASIMETRIX, PRIZMA, MESAGE).',
+    defaultCurrency: 'COP',
+  },
+  clara: {
+    name: 'Gestión TC Clara',
+    shortName: 'TC Clara',
+    status: 'Activo',
+    firestorePath: 'module_company_directories/clara',
+    description:
+      'Sociedades pagadoras con tarjetas corporativas Clara para cruce con WorkManager, creación de terceros y envío a SAP / Odoo.',
     defaultCurrency: 'COP',
   },
   anticipos: {
@@ -179,6 +189,12 @@ export const INITIAL_STANDALONE_MODULE_COMPANIES: Record<
     { id: 'act-soc-asimetrix', nombre: 'ASIMETRIX', codigo: 'ASIMETRIX', pais: 'Colombia', moneda: 'COP', activo: true },
     { id: 'act-soc-prizma', nombre: 'PRIZMA', codigo: 'PRIZMA', pais: 'Colombia', moneda: 'COP', activo: true },
     { id: 'act-soc-mesage', nombre: 'MESAGE', codigo: 'MESAGE', pais: 'Colombia', moneda: 'COP', activo: true },
+  ],
+  clara: [
+    { id: 'clr-soc-premex', nombre: 'PREMEX', codigo: '1000', nit: '890900148-1', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'clr-soc-adiquim', nombre: 'ADIQUIM', codigo: '2000', nit: '800150280-0', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'clr-soc-nutreo', nombre: 'NUTREO', codigo: 'ODOO-NUT', nit: '900412980-4', pais: 'Colombia', moneda: 'COP', activo: true },
+    { id: 'clr-soc-premexcorp', nombre: 'Premex Corp', codigo: 'ODOO-CORP', nit: 'US-84-219043', pais: 'Estados Unidos', moneda: 'USD', activo: true },
   ],
   anticipos: [
     {

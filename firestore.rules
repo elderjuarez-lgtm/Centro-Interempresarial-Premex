@@ -318,7 +318,7 @@ service cloud.firestore {
           'createdAt',
           'updatedAt'
         ]) &&
-        data.moduleId is string && data.moduleId in ['bancos', 'viaticos', 'actividades', 'anticipos', 'cxc', 'cxp'] &&
+        data.moduleId is string && data.moduleId in ['bancos', 'viaticos', 'actividades', 'clara', 'anticipos', 'cxc', 'cxp'] &&
         data.companies is list && data.companies.size() <= 300 &&
         (data.companies.size() == 0 || data.companies[0] is map) &&
         data.companiesCount is int && data.companiesCount >= 0 && data.companiesCount <= 300 &&
@@ -415,6 +415,9 @@ service cloud.firestore {
           'moduleCompanyAccess',
           'active',
           'notes',
+          'odooEmployeeName',
+          'centroCosto',
+          'odooAnalyticDistribution',
           'updatedBy',
           'createdAt',
           'updatedAt'
@@ -424,11 +427,11 @@ service cloud.firestore {
         data.role is string && data.role in ['admin', 'operador', 'consulta'] &&
         (!('userType' in data) || (data.userType is string && data.userType in ['administrador', 'liquidador', 'contabilidad', 'autorizador', 'auditor', 'personalizado'])) &&
         data.allowedModules is list && data.allowedModules.size() <= 10 &&
-        data.allowedModules.hasOnly(['intercompany', 'bancos', 'viaticos', 'actividades', 'anticipos', 'cxc', 'cxp', 'ajustes']) &&
+        data.allowedModules.hasOnly(['intercompany', 'bancos', 'viaticos', 'actividades', 'clara', 'anticipos', 'cxc', 'cxp', 'ajustes']) &&
         (!('viaticosPanels' in data) || (
           data.viaticosPanels is list &&
           data.viaticosPanels.size() <= 10 &&
-          data.viaticosPanels.hasOnly(['liquidador', 'cerradas', 'contabilidad', 'historial', 'correos'])
+          data.viaticosPanels.hasOnly(['liquidador', 'sociedades', 'cerradas', 'contabilidad', 'historial', 'correos'])
         )) &&
         data.companyScope is string && data.companyScope in ['all', 'selected'] &&
         data.allowedCompanies is list && data.allowedCompanies.size() <= 300 &&
@@ -436,10 +439,13 @@ service cloud.firestore {
         (!('moduleCompanyAccess' in data) || (
           data.moduleCompanyAccess is map &&
           data.moduleCompanyAccess.size() <= 10 &&
-          data.moduleCompanyAccess.keys().hasOnly(['intercompany', 'bancos', 'viaticos', 'actividades', 'anticipos', 'cxc', 'cxp'])
+          data.moduleCompanyAccess.keys().hasOnly(['intercompany', 'bancos', 'viaticos', 'actividades', 'clara', 'anticipos', 'cxc', 'cxp'])
         )) &&
         data.active is bool &&
         (!('notes' in data) || (data.notes is string && data.notes.size() <= 300)) &&
+        (!('odooEmployeeName' in data) || (data.odooEmployeeName is string && data.odooEmployeeName.size() <= 140)) &&
+        (!('centroCosto' in data) || (data.centroCosto is string && data.centroCosto.size() <= 140)) &&
+        (!('odooAnalyticDistribution' in data) || (data.odooAnalyticDistribution is string && data.odooAnalyticDistribution.size() <= 120)) &&
         data.updatedBy is string && isValidId(data.updatedBy) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -506,6 +512,7 @@ service cloud.firestore {
           'consultores',
           'liquidaciones',
           'emailGroups',
+          'odooCatalogs',
           'consultoresCount',
           'liquidacionesCount',
           'createdAt',
@@ -523,6 +530,10 @@ service cloud.firestore {
           data.emailGroups is list &&
           data.emailGroups.size() <= 100 &&
           (data.emailGroups.size() == 0 || data.emailGroups[0] is map)
+        )) &&
+        (!('odooCatalogs' in data) || (
+          data.odooCatalogs is map &&
+          data.odooCatalogs.size() <= 16
         )) &&
         data.consultoresCount is int && data.consultoresCount >= 0 && data.consultoresCount <= 200 &&
         data.liquidacionesCount is int && data.liquidacionesCount >= 0 && data.liquidacionesCount <= 500 &&
@@ -575,6 +586,62 @@ service cloud.firestore {
         data.size is int && data.size >= 0 && data.size <= 20000000 &&
         data.dataUrl is string && data.dataUrl.size() >= 1 && data.dataUrl.size() <= 800000 &&
         data.createdAtIso is string && data.createdAtIso.size() >= 1 && data.createdAtIso.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidClaraWorkspace(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'title',
+          'selectedPeriod',
+          'transactions',
+          'workManagerInvoices',
+          'vendors',
+          'costCenterRules',
+          'connectorConfig',
+          'batchLogs',
+          'transactionsCount',
+          'invoicesCount',
+          'vendorsCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId',
+          'ownerName',
+          'title',
+          'selectedPeriod',
+          'transactions',
+          'workManagerInvoices',
+          'vendors',
+          'costCenterRules',
+          'connectorConfig',
+          'batchLogs',
+          'transactionsCount',
+          'invoicesCount',
+          'vendorsCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.ownerId is string && isValidId(data.ownerId) &&
+        (!('ownerName' in data) || (data.ownerName is string && data.ownerName.size() <= 120)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        data.selectedPeriod is string && data.selectedPeriod.size() >= 2 && data.selectedPeriod.size() <= 20 &&
+        data.transactions is list && data.transactions.size() <= 2500 &&
+        (data.transactions.size() == 0 || data.transactions[0] is map) &&
+        data.workManagerInvoices is list && data.workManagerInvoices.size() <= 2500 &&
+        (data.workManagerInvoices.size() == 0 || data.workManagerInvoices[0] is map) &&
+        data.vendors is list && data.vendors.size() <= 1000 &&
+        (data.vendors.size() == 0 || data.vendors[0] is map) &&
+        data.costCenterRules is list && data.costCenterRules.size() <= 500 &&
+        (data.costCenterRules.size() == 0 || data.costCenterRules[0] is map) &&
+        data.connectorConfig is map && data.connectorConfig.size() <= 30 &&
+        data.batchLogs is list && data.batchLogs.size() <= 200 &&
+        (data.batchLogs.size() == 0 || data.batchLogs[0] is map) &&
+        data.transactionsCount is int && data.transactionsCount >= 0 && data.transactionsCount <= 2500 &&
+        data.invoicesCount is int && data.invoicesCount >= 0 && data.invoicesCount <= 2500 &&
+        data.vendorsCount is int && data.vendorsCount >= 0 && data.vendorsCount <= 1000 &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -694,7 +761,7 @@ service cloud.firestore {
       // Independent per-module company catalogs (contains no personal PII); readable by verified authorized users
       allow get: if isVerifiedUser() &&
         isValidId(moduleId) &&
-        moduleId in ['bancos', 'viaticos', 'actividades', 'anticipos', 'cxc', 'cxp'] &&
+        moduleId in ['bancos', 'viaticos', 'actividades', 'clara', 'anticipos', 'cxc', 'cxp'] &&
         canReadCompanyCatalogs();
 
       allow list: if false;
@@ -702,7 +769,7 @@ service cloud.firestore {
       // Managed by verified Administrators, first-time bootstrapper, or authorized module operators
       allow create: if isVerifiedUser() &&
         isValidId(moduleId) &&
-        moduleId in ['bancos', 'viaticos', 'actividades', 'anticipos', 'cxc', 'cxp'] &&
+        moduleId in ['bancos', 'viaticos', 'actividades', 'clara', 'anticipos', 'cxc', 'cxp'] &&
         isValidModuleCompanyDirectory(incoming()) &&
         incoming().moduleId == moduleId &&
         incoming().updatedBy == request.auth.uid &&
@@ -712,7 +779,7 @@ service cloud.firestore {
 
       allow update: if isVerifiedUser() &&
         isValidId(moduleId) &&
-        moduleId in ['bancos', 'viaticos', 'actividades', 'anticipos', 'cxc', 'cxp'] &&
+        moduleId in ['bancos', 'viaticos', 'actividades', 'clara', 'anticipos', 'cxc', 'cxp'] &&
         isValidModuleCompanyDirectory(incoming()) &&
         incoming().moduleId == existing().moduleId &&
         incoming().createdAt == existing().createdAt &&
@@ -829,6 +896,9 @@ service cloud.firestore {
           'moduleCompanyAccess',
           'active',
           'notes',
+          'odooEmployeeName',
+          'centroCosto',
+          'odooAnalyticDistribution',
           'updatedBy',
           'updatedAt'
         ]) &&
@@ -928,6 +998,7 @@ service cloud.firestore {
           'consultores',
           'liquidaciones',
           'emailGroups',
+          'odooCatalogs',
           'consultoresCount',
           'liquidacionesCount',
           'updatedAt'
@@ -1033,6 +1104,54 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() &&
         isValidId(workspaceId) &&
         (isAdmin() || (existing().ownerId == request.auth.uid && canOperateModule('actividades')));
+    }
+
+    match /clara_workspaces/{claraId} {
+      // Strictly isolated to verified users authorized for Gestión TC Clara
+      allow get: if isVerifiedUser() &&
+        isValidId(claraId) &&
+        canReadModule('clara');
+
+      // Verified users can list only workspaces they created
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+
+      // Verified admins or active clara operators can create workspaces
+      allow create: if isVerifiedUser() &&
+        isValidId(claraId) &&
+        isValidClaraWorkspace(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        canOperateModule('clara');
+
+      // Verified admins or active clara operators can collaboratively update allowed workspace fields
+      allow update: if isVerifiedUser() &&
+        isValidId(claraId) &&
+        isValidClaraWorkspace(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'ownerName',
+          'title',
+          'selectedPeriod',
+          'transactions',
+          'workManagerInvoices',
+          'vendors',
+          'costCenterRules',
+          'connectorConfig',
+          'batchLogs',
+          'transactionsCount',
+          'invoicesCount',
+          'vendorsCount',
+          'updatedAt'
+        ]) &&
+        (isAdmin() || canOperateModule('clara'));
+
+      // Only verified admins or owners who can operate clara can delete
+      allow delete: if isVerifiedUser() &&
+        isValidId(claraId) &&
+        (isAdmin() || (existing().ownerId == request.auth.uid && canOperateModule('clara')));
     }
   }
 }

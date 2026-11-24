@@ -1,11 +1,15 @@
 import ExcelJS from 'exceljs';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
+  OdooDistributionMode,
+  OdooExpenseType,
+  UserPermissionRecord,
   ViaticoCategory,
   ViaticoConsultor,
   ViaticoCurrency,
   ViaticoLiquidation,
   ViaticoLiquidationStatus,
+  ViaticoOdooCatalogs,
   ViaticoOdooConfig,
 } from '../types';
 import {
@@ -13,6 +17,60 @@ import {
   resolveLiquidationCostCenter,
   roundMoney,
 } from './viaticos';
+import {
+  buildDefaultPaymentReference,
+  findMatchingCostCenterEntry,
+  mergeOdooCatalogsWithDefaults,
+  resolveDistributionTaxIndicator,
+  resolveEmployeeAndCostCenterForLiquidation,
+  resolveExpenseTypeForItem,
+  resolveSplitCostCentersList,
+  suggestOdooDocTypeForItem,
+  suggestOdooExpenseCodeForItem,
+  suggestOdooTaxIndicatorForItem,
+  VIATICO_CURRENCY_TO_ISO,
+} from './viaticosOdooCatalogs';
+
+export interface OdooExpenseUploadRow {
+  rowKey: string;
+  liquidationId: string;
+  itemId: string;
+  semana: string;
+  empresa: string;
+  consultorEmail: string;
+  costCenterLabel: string;
+  registeredByEmail?: string;
+  registeredByName?: string;
+  // Distribution metadata & generated sub-row markers
+  isGeneratedSubRow?: boolean;
+  parentRowKey?: string;
+  generatedReason?: string;
+  splitIndex?: number;
+  splitTotal?: number;
+  originalTotalAmountCurrency?: number;
+  odooDistributionOptionId?: string;
+  odooDistributionMode?: OdooDistributionMode;
+  odooDistributionValue?: number;
+  odooSplitCount?: number;
+  odooSplitCostCentersText?: string;
+  odooSplitCostCenters?: string[];
+  // Exact 15 Plantilla_Gastos_GT_S-44 Sheet 1 Odoo columns:
+  name: string;
+  product_id: string;
+  total_amount_currency: number;
+  currency_id: string;
+  tax_ids: string;
+  employee_id: string;
+  expense_type: OdooExpenseType;
+  date: string; // YYYY-MM-DD
+  Partner_id: string;
+  Journal: string;
+  vendor_ref: string;
+  serial_number: string;
+  payment_reference: string;
+  l10n_gt_edi_doc_type: string;
+  analytic_distribution: string;
+}
 
 export interface OdooConsolidatedExpenseRow {
   rowKey: string;
@@ -91,6 +149,7 @@ export interface OdooCostCenterSummaryRow {
 }
 
 export interface OdooAccountingDataset {
+  hrExpenseRows: OdooExpenseUploadRow[];
   expenseRows: OdooConsolidatedExpenseRow[];
   journalLines: OdooJournalLine[];
   costCenterSummary: OdooCostCenterSummaryRow[];
@@ -180,8 +239,12 @@ function resolveAccountingDateIso(
 export function buildOdooAccountingDataset(
   liquidaciones: ViaticoLiquidation[],
   consultores: ViaticoConsultor[],
-  config: ViaticoOdooConfig
+  config: ViaticoOdooConfig,
+  catalogs?: ViaticoOdooCatalogs,
+  permissionRecords?: UserPermissionRecord[]
 ): OdooAccountingDataset {
+  const resolvedCatalogs = mergeOdooCatalogsWithDefaults(catalogs);
+  const hrExpenseRows: OdooExpenseUploadRow[] = [];
   const expenseRows: OdooConsolidatedExpenseRow[] = [];
   const journalLines: OdooJournalLine[] = [];
 
@@ -245,7 +308,19 @@ export function buildOdooAccountingDataset(
   liquidaciones.forEach((liq, liqIndex) => {
     if (!liq.items || liq.items.length === 0) return;
 
-    const resolvedCC = resolveLiquidationCostCenter(liq, consultores);
+    const resolvedMeta = resolveEmployeeAndCostCenterForLiquidation({
+      liquidation: liq,
+      consultores,
+      catalogs: resolvedCatalogs,
+      permissionRecords,
+    });
+    const fallbackCC = resolveLiquidationCostCenter(
+      liq,
+      consultores,
+      resolvedCatalogs,
+      permissionRecords
+    );
+    const resolvedCC = resolvedMeta.costCenterLabel || fallbackCC;
     const displayCC = resolvedCC || 'Sin Centro de Costo';
 
     if (!resolvedCC) {
@@ -318,6 +393,178 @@ export function buildOdooAccountingDataset(
       const itemAccountingDate =
         config.criterioFechaContable === 'fecha_factura' ? fechaDocIso : moveDate;
 
+      const itemProductId = suggestOdooExpenseCodeForItem(item, config, resolvedCatalogs);
+      const itemDocType = suggestOdooDocTypeForItem(item, resolvedCatalogs);
+      const itemTaxIndicator = suggestOdooTaxIndicatorForItem(
+        item,
+        itemDocType,
+        resolvedCatalogs
+      );
+      const itemMatchedCC = item.odooCostCenterCode || item.odooAnalyticDistribution
+        ? findMatchingCostCenterEntry(
+            item.odooCostCenterCode || resolvedCC,
+            item.odooAnalyticDistribution || resolvedMeta.analyticDistribution,
+            resolvedCatalogs.costCenters
+          )
+        : resolvedMeta.matchedCostCenter;
+      const itemCostCenterLabel =
+        item.odooCostCenterCode || itemMatchedCC?.cuentaAnalitica || resolvedCC;
+      const itemAnalyticJson =
+        item.odooAnalyticDistribution ||
+        itemMatchedCC?.analyticDistribution ||
+        resolvedMeta.analyticDistribution ||
+        '';
+      const itemExpenseType = resolveExpenseTypeForItem(item, resolvedCatalogs);
+      const itemJournal =
+        item.odooJournal || resolvedCatalogs.defaultJournalName || 'PROV. CAJAS CHICAS';
+      const itemPaymentRef =
+        item.odooPaymentReference || buildDefaultPaymentReference(liq);
+      const itemName =
+        [item.descripcionGasto, item.proveedor].filter(Boolean).join(' - ').slice(0, 180) ||
+        item.categoria;
+
+      const baseRowKey = `${liq.id}__${item.id || itemIdx}`;
+      const origAmount = roundMoney(item.valorFactura);
+      const currencyIso = VIATICO_CURRENCY_TO_ISO[item.moneda] || 'GTQ';
+      const distOpt = item.odooDistributionOptionId
+        ? resolvedCatalogs.expenseDistributions.find(
+            (d) => d.id === item.odooDistributionOptionId
+          )
+        : undefined;
+
+      const commonRowFields = {
+        liquidationId: liq.id,
+        itemId: item.id,
+        semana: liq.semana || '-',
+        empresa: liq.empresa,
+        consultorEmail: liq.consultorEmail,
+        registeredByEmail: item.registeredByEmail,
+        registeredByName: item.registeredByName,
+        currency_id: currencyIso,
+        employee_id: resolvedMeta.employeeName,
+        expense_type: itemExpenseType,
+        date: fechaDocIso,
+        Partner_id: item.nit || '',
+        Journal: itemJournal,
+        vendor_ref: item.noDoc || '',
+        serial_number: item.serieDoc || '',
+        payment_reference: itemPaymentRef,
+        l10n_gt_edi_doc_type: itemDocType,
+        originalTotalAmountCurrency: origAmount,
+        odooDistributionOptionId: distOpt?.id || item.odooDistributionOptionId,
+        odooDistributionMode: distOpt?.mode,
+        odooDistributionValue: item.odooDistributionValue,
+        odooSplitCount: item.odooSplitCount,
+        odooSplitCostCentersText: item.odooSplitCostCentersText,
+        odooSplitCostCenters: item.odooSplitCostCenters,
+      };
+
+      if (distOpt && distOpt.mode === 'extra_charge') {
+        const extraVal = roundMoney(
+          Math.max(0, Math.min(origAmount, Number(item.odooDistributionValue) || 0))
+        );
+        const mainAmount =
+          extraVal > 0 ? roundMoney(Math.max(0, origAmount - extraVal)) : origAmount;
+
+        hrExpenseRows.push({
+          ...commonRowFields,
+          rowKey: baseRowKey,
+          costCenterLabel: itemCostCenterLabel,
+          name: itemName,
+          product_id: itemProductId,
+          total_amount_currency: mainAmount,
+          tax_ids: itemTaxIndicator,
+          analytic_distribution: itemAnalyticJson,
+        });
+
+        if (extraVal > 0) {
+          const extraTax = resolveDistributionTaxIndicator(
+            distOpt.naturaleza,
+            resolvedCatalogs,
+            distOpt.taxIndicatorName
+          );
+          const taxTag = distOpt.naturaleza === 'servicio' ? 'XO' : 'XB';
+          hrExpenseRows.push({
+            ...commonRowFields,
+            rowKey: `${baseRowKey}__dist_${distOpt.codigo}`,
+            isGeneratedSubRow: true,
+            parentRowKey: baseRowKey,
+            generatedReason: `Adicional ${distOpt.nombre} · ${taxTag}`,
+            costCenterLabel: itemCostCenterLabel,
+            name: `${itemName} - ${distOpt.nombre}`.slice(0, 180),
+            product_id: distOpt.expenseCodeLabel || itemProductId,
+            total_amount_currency: extraVal,
+            tax_ids: extraTax,
+            analytic_distribution: itemAnalyticJson,
+          });
+        }
+      } else if (distOpt && distOpt.mode === 'multi_ceco') {
+        const splitCount = Math.max(
+          1,
+          Math.min(30, Math.floor(Number(item.odooSplitCount) || 1))
+        );
+        if (splitCount >= 2) {
+          const splitCCs = resolveSplitCostCentersList(
+            item,
+            resolvedCatalogs.costCenters
+          );
+          const totalCents = Math.round(origAmount * 100);
+          const baseCent = Math.floor(totalCents / splitCount);
+          const remainder = totalCents - baseCent * splitCount;
+
+          for (let sIdx = 0; sIdx < splitCount; sIdx++) {
+            const sliceCents = baseCent + (sIdx < remainder ? 1 : 0);
+            const sliceAmount = roundMoney(sliceCents / 100);
+            const targetCC = splitCCs[sIdx];
+            const sliceAnalytic = targetCC?.analyticDistribution || itemAnalyticJson;
+            const sliceCCLabel = targetCC?.cuentaAnalitica || itemCostCenterLabel;
+
+            hrExpenseRows.push({
+              ...commonRowFields,
+              rowKey: sIdx === 0 ? baseRowKey : `${baseRowKey}__split_${sIdx + 1}`,
+              isGeneratedSubRow: sIdx > 0,
+              parentRowKey: sIdx > 0 ? baseRowKey : undefined,
+              generatedReason:
+                sIdx > 0
+                  ? `División ${sIdx + 1}/${splitCount}${
+                      targetCC ? ` · ${targetCC.codigo}` : ''
+                    }`
+                  : undefined,
+              splitIndex: sIdx + 1,
+              splitTotal: splitCount,
+              costCenterLabel: sliceCCLabel,
+              name: itemName,
+              product_id: itemProductId,
+              total_amount_currency: sliceAmount,
+              tax_ids: itemTaxIndicator,
+              analytic_distribution: sliceAnalytic,
+            });
+          }
+        } else {
+          hrExpenseRows.push({
+            ...commonRowFields,
+            rowKey: baseRowKey,
+            costCenterLabel: itemCostCenterLabel,
+            name: itemName,
+            product_id: itemProductId,
+            total_amount_currency: origAmount,
+            tax_ids: itemTaxIndicator,
+            analytic_distribution: itemAnalyticJson,
+          });
+        }
+      } else {
+        hrExpenseRows.push({
+          ...commonRowFields,
+          rowKey: baseRowKey,
+          costCenterLabel: itemCostCenterLabel,
+          name: itemName,
+          product_id: itemProductId,
+          total_amount_currency: origAmount,
+          tax_ids: itemTaxIndicator,
+          analytic_distribution: itemAnalyticJson,
+        });
+      }
+
       const row: OdooConsolidatedExpenseRow = {
         rowKey: `${liq.id}__${item.id || itemIdx}`,
         liquidationId: liq.id,
@@ -328,7 +575,7 @@ export function buildOdooAccountingDataset(
         consultorId: liq.consultorId,
         consultorNombre: liq.consultorNombre,
         consultorEmail: liq.consultorEmail,
-        centroCosto: resolvedCC,
+        centroCosto: itemCostCenterLabel,
         monedaBase: liq.monedaBase,
         fechaContableIso: itemAccountingDate,
         fechaDoc: item.fechaDoc || '',
@@ -341,7 +588,7 @@ export function buildOdooAccountingDataset(
         categoria: item.categoria,
         cuentaGastoCodigo: catAccount.accountCode,
         cuentaGastoNombre: catAccount.accountName,
-        etiquetaImpuestoOdoo: item.aplicaImpuestos ? config.etiquetaImpuesto : '',
+        etiquetaImpuestoOdoo: itemTaxIndicator || (item.aplicaImpuestos ? config.etiquetaImpuesto : ''),
         aplicaImpuestos: item.aplicaImpuestos,
         porcentajeImpuesto: item.aplicaImpuestos ? item.porcentajeImpuesto : 0,
         monedaFactura: item.moneda,
@@ -505,6 +752,7 @@ export function buildOdooAccountingDataset(
   }));
 
   return {
+    hrExpenseRows,
     expenseRows,
     journalLines,
     costCenterSummary,
@@ -514,10 +762,11 @@ export function buildOdooAccountingDataset(
 }
 
 /**
- * Exports a 3-worksheet Excel (.xlsx) accounting workbook ready for Odoo import:
- * 1) Carga_Odoo_Asientos (official Odoo account.move multi-line import columns)
- * 2) Detalle_Consolidado_Facturas (flat multi-liquidador invoice table with Cost Center)
- * 3) Resumen_Centro_Costo (aggregated totals by Cost Center & currency)
+ * Exports a 4-worksheet Excel (.xlsx) accounting workbook ready for Odoo import:
+ * 1) Carga_Odoo_Gastos (Exact 15 columns of Plantilla_Gastos_GT_S-44 Sheet 1 for Odoo hr.expense)
+ * 2) Carga_Odoo_Asientos (official Odoo account.move multi-line import columns)
+ * 3) Detalle_Consolidado_Facturas (flat multi-liquidador invoice table with Cost Center)
+ * 4) Resumen_Centro_Costo (aggregated totals by Cost Center & currency)
  */
 export async function exportViaticosOdooExcel(
   dataset: OdooAccountingDataset,
@@ -544,7 +793,60 @@ export async function exportViaticosOdooExcel(
   };
 
   // ============================================================================
-  // SHEET 1: Carga_Odoo_Asientos (account.move import structure)
+  // SHEET 1: Carga_Odoo_Gastos (Exact Plantilla Gastos GT S-44 15-Column Format)
+  // ============================================================================
+  const wsExpense = wb.addWorksheet('Carga_Odoo_Gastos', {
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+  });
+
+  wsExpense.columns = [
+    { header: 'name', width: 34 },
+    { header: 'product_id', width: 32 },
+    { header: 'total_amount_currency', width: 20 },
+    { header: 'currency_id', width: 12 },
+    { header: 'tax_ids', width: 42 },
+    { header: 'employee_id', width: 32 },
+    { header: 'expense_type', width: 14 },
+    { header: 'date', width: 13 },
+    { header: 'Partner_id', width: 16 },
+    { header: 'Journal', width: 22 },
+    { header: 'vendor_ref', width: 18 },
+    { header: 'serial_number', width: 16 },
+    { header: 'payment_reference', width: 34 },
+    { header: 'l10n_gt_edi_doc_type', width: 34 },
+    { header: 'analytic_distribution', width: 22 },
+  ];
+  headerStyle(wsExpense.getRow(1));
+
+  dataset.hrExpenseRows.forEach((row) => {
+    const r = wsExpense.addRow([
+      row.name,
+      row.product_id,
+      roundMoney(row.total_amount_currency),
+      row.currency_id,
+      row.tax_ids,
+      row.employee_id,
+      row.expense_type,
+      row.date,
+      row.Partner_id,
+      row.Journal,
+      row.vendor_ref,
+      row.serial_number,
+      row.payment_reference,
+      row.l10n_gt_edi_doc_type,
+      row.analytic_distribution,
+    ]);
+    r.height = 20;
+    const amtCell = r.getCell(3);
+    amtCell.numFmt = '#,##0.00';
+    amtCell.alignment = { horizontal: 'right', vertical: 'middle' };
+    r.eachCell((cell) => {
+      cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF0F172A' } };
+    });
+  });
+
+  // ============================================================================
+  // SHEET 2: Carga_Odoo_Asientos (account.move import structure)
   // ============================================================================
   const wsMove = wb.addWorksheet('Carga_Odoo_Asientos', {
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
@@ -799,12 +1101,50 @@ function escapeCsvField(val: string | number | boolean | null | undefined): stri
  */
 export function exportViaticosOdooCsv(
   dataset: OdooAccountingDataset,
-  mode: 'asientos' | 'facturas',
+  mode: 'gastos' | 'asientos' | 'facturas',
   batchLabel = 'Consolidado'
 ): string {
   const rows: (string | number)[][] = [];
 
-  if (mode === 'asientos') {
+  if (mode === 'gastos') {
+    rows.push([
+      'name',
+      'product_id',
+      'total_amount_currency',
+      'currency_id',
+      'tax_ids',
+      'employee_id',
+      'expense_type',
+      'date',
+      'Partner_id',
+      'Journal',
+      'vendor_ref',
+      'serial_number',
+      'payment_reference',
+      'l10n_gt_edi_doc_type',
+      'analytic_distribution',
+    ]);
+
+    dataset.hrExpenseRows.forEach((row) => {
+      rows.push([
+        row.name,
+        row.product_id,
+        row.total_amount_currency.toFixed(2),
+        row.currency_id,
+        row.tax_ids,
+        row.employee_id,
+        row.expense_type,
+        row.date,
+        row.Partner_id,
+        row.Journal,
+        row.vendor_ref,
+        row.serial_number,
+        row.payment_reference,
+        row.l10n_gt_edi_doc_type,
+        row.analytic_distribution,
+      ]);
+    });
+  } else if (mode === 'asientos') {
     rows.push([
       'id',
       'ref',
@@ -901,7 +1241,12 @@ export function exportViaticosOdooCsv(
     .join('\r\n');
   // UTF-8 BOM guarantees accents (ñ, á, é, ó) render cleanly in Excel and Odoo
   const blob = new Blob(['\uFEFF', csvBody], { type: 'text/csv;charset=utf-8;' });
-  const suffix = mode === 'asientos' ? 'Odoo_Asientos' : 'Odoo_Facturas';
+  const suffix =
+    mode === 'gastos'
+      ? 'Carga_Odoo_Gastos'
+      : mode === 'asientos'
+      ? 'Odoo_Asientos'
+      : 'Odoo_Facturas';
   const filename = `${suffix}_${sanitizeSlug(batchLabel)}_${todayIso()}.csv`;
   triggerBlobDownload(blob, filename);
   return filename;

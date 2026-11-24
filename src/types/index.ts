@@ -159,6 +159,7 @@ export type ActiveModuleId =
   | 'bancos'
   | 'viaticos'
   | 'actividades'
+  | 'clara'
   | 'ajustes';
 
 export type FunctionalModuleId =
@@ -166,6 +167,7 @@ export type FunctionalModuleId =
   | 'bancos'
   | 'viaticos'
   | 'actividades'
+  | 'clara'
   | 'anticipos'
   | 'cxc'
   | 'cxp';
@@ -215,6 +217,12 @@ export interface UserPermissionRecord {
   allowedModules: SuiteModuleId[];
   /** Opciones/paneles laterales permitidos dentro de Liquidación de Viáticos */
   viaticosPanels?: ViaticosTab[];
+  /** Empleado Odoo vinculado al usuario (para prellenar carga contable de viáticos) */
+  odooEmployeeName?: string;
+  /** Centro de costo asignado al empleado/usuario */
+  centroCosto?: string;
+  /** Centro de costo interno Odoo (ej. {"529": 100.0}) */
+  odooAnalyticDistribution?: string;
   /** Legacy/fallback global company scope (derived automatically from moduleCompanyAccess) */
   companyScope: CompanyAccessScope;
   /** Legacy/fallback flattened company names */
@@ -247,6 +255,9 @@ export interface EffectivePermissions {
   canManageMasterData: boolean;
   allowedModules: SuiteModuleId[];
   viaticosPanels: ViaticosTab[];
+  odooEmployeeName?: string;
+  centroCosto?: string;
+  odooAnalyticDistribution?: string;
   companyScope: CompanyAccessScope;
   allowedCompanies: string[];
   moduleCompanyAccess: ModuleCompanyScopeMap;
@@ -528,7 +539,13 @@ export interface BankClosedReconciliation {
 // Liquidación de Viáticos Types
 // ============================================================================
 
-export type ViaticosTab = 'liquidador' | 'cerradas' | 'contabilidad' | 'historial' | 'correos';
+export type ViaticosTab =
+  | 'liquidador'
+  | 'sociedades'
+  | 'cerradas'
+  | 'contabilidad'
+  | 'historial'
+  | 'correos';
 
 export type ViaticoEmailGroupType = 'dirigido' | 'copia';
 
@@ -569,6 +586,108 @@ export type ViaticoCategory =
 
 export type ViaticoLiquidationStatus = 'borrador' | 'cerrada' | 'enviada';
 
+export type OdooExpenseType = 'Gasto' | 'Tarjeta';
+
+export interface OdooDocTypeEntry {
+  id: string;
+  codigo: string; // e.g. 'FCAM', 'FACT', 'RECI'
+  nombre: string; // e.g. 'Factura Cambiaria'
+  labelOdoo: string; // e.g. 'FCAM - Factura Cambiaria'
+  activo: boolean;
+  isCustom?: boolean;
+  updatedByEmail?: string;
+  updatedByName?: string;
+  updatedAtIso?: string;
+}
+
+export interface OdooEmployeeEntry {
+  id: string;
+  nombreCompleto: string; // Uppercase Odoo employee name (employee_id)
+  email?: string; // Linked corporate email
+  permissionDocId?: string; // Linked UserPermissionRecord id
+  centroCosto?: string; // Assigned cost center code e.g. 'GT10000601 CONTABILIDAD'
+  analyticDistribution?: string; // Linked Odoo analytic_distribution e.g. '{"520": 100.0}'
+  empresa?: string;
+  activo: boolean;
+  isCustom?: boolean;
+  updatedByEmail?: string;
+  updatedByName?: string;
+  updatedAtIso?: string;
+}
+
+export interface OdooExpenseCodeEntry {
+  id: string;
+  codigo: string; // e.g. '720107'
+  nombre: string; // e.g. 'LICENCIAS-TRAMITES'
+  labelOdoo: string; // e.g. '720107 LICENCIAS-TRAMITES'
+  categoriaVinculada?: ViaticoCategory;
+  activo: boolean;
+  isCustom?: boolean;
+  updatedByEmail?: string;
+  updatedByName?: string;
+  updatedAtIso?: string;
+}
+
+export interface OdooCostCenterEntry {
+  id: string;
+  codigo: string; // e.g. 'GT10000601'
+  cuentaAnalitica: string; // e.g. 'GT10000601 CONTABILIDAD'
+  odooAnalyticId: string; // e.g. '520'
+  analyticDistribution: string; // e.g. '{"520": 100.0}'
+  activo: boolean;
+  isCustom?: boolean;
+  updatedByEmail?: string;
+  updatedByName?: string;
+  updatedAtIso?: string;
+}
+
+export interface OdooTaxIndicatorEntry {
+  id: string;
+  codigo: string; // e.g. 'XA'
+  nombreImpuesto: string; // e.g. 'XA - Iva CR Fiscal Compras Gravadas Locales 12%'
+  validezFiscal: string;
+  etiquetaFactura: string;
+  tipoImpuesto: string;
+  porcentaje: number;
+  activo: boolean;
+  isCustom?: boolean;
+  updatedByEmail?: string;
+  updatedByName?: string;
+  updatedAtIso?: string;
+}
+
+export type OdooDistributionMode = 'extra_charge' | 'multi_ceco';
+export type OdooDistributionNature = 'bien' | 'servicio';
+
+export interface OdooExpenseDistributionEntry {
+  id: string;
+  codigo: string; // e.g. 'IDP', 'INTECAP', 'PROPINA', 'VARIOS_CECOS'
+  nombre: string; // e.g. 'IDP', 'Intecap', 'Propina', 'Varios cecos'
+  mode: OdooDistributionMode;
+  naturaleza: OdooDistributionNature; // 'bien' -> XB, 'servicio' -> XO
+  expenseCodeLabel: string; // Linked Odoo product_id (e.g. '720166 IDP IMPUESTO DISTRIBUCION PETROLEO')
+  taxIndicatorName: string; // Linked Odoo tax_ids (e.g. 'XB - ...' or 'XO - ...')
+  activo: boolean;
+  isCustom?: boolean;
+  updatedByEmail?: string;
+  updatedByName?: string;
+  updatedAtIso?: string;
+}
+
+export interface ViaticoOdooCatalogs {
+  defaultJournalName: string;
+  defaultExpenseType: OdooExpenseType;
+  docTypes: OdooDocTypeEntry[];
+  employees: OdooEmployeeEntry[];
+  expenseCodes: OdooExpenseCodeEntry[];
+  costCenters: OdooCostCenterEntry[];
+  taxIndicators: OdooTaxIndicatorEntry[];
+  expenseDistributions: OdooExpenseDistributionEntry[];
+  updatedByEmail?: string;
+  updatedByName?: string;
+  updatedAtIso?: string;
+}
+
 export interface ViaticoConsultor {
   id: string;
   nombreCompleto: string;
@@ -576,6 +695,9 @@ export interface ViaticoConsultor {
   empresa: string;
   cargo?: string;
   centroCosto?: string;
+  odooEmployeeName?: string;
+  odooAnalyticDistribution?: string;
+  permissionId?: string;
   monedaBase: ViaticoCurrency;
   activo: boolean;
 }
@@ -601,6 +723,24 @@ export interface ViaticoExpenseItem {
   porcentajeImpuesto: number;
   montoImpuesto: number;
   valorSinImpuesto: number;
+  // Odoo hr.expense Sheet-1 bindings & operating user audit trail
+  odooProductId?: string; // e.g. '720107 LICENCIAS-TRAMITES'
+  odooDocType?: string; // e.g. 'RECI - Recibo'
+  odooTaxIndicator?: string; // e.g. 'XA - Iva CR Fiscal Compras Gravadas Locales 12%'
+  odooCostCenterCode?: string; // e.g. 'GT10000601 CONTABILIDAD'
+  odooAnalyticDistribution?: string; // e.g. '{"529": 100.0}'
+  odooExpenseType?: OdooExpenseType; // 'Gasto' | 'Tarjeta'
+  odooJournal?: string; // e.g. 'PROV. CAJAS CHICAS'
+  odooPaymentReference?: string; // e.g. 'LIQ. GTS S-44 ...'
+  // Distribución de gastos (IDP, Intecap, Propina, Varios cecos, etc.)
+  odooDistributionOptionId?: string;
+  odooDistributionValue?: number;
+  odooSplitCount?: number;
+  odooSplitCostCentersText?: string;
+  odooSplitCostCenters?: string[];
+  registeredByEmail?: string;
+  registeredByName?: string;
+  updatedAtIso?: string;
   // Lightweight receipt reference (bytes stored in IndexedDB, never in Firestore)
   attachmentId?: string;
   attachmentName?: string;
@@ -620,7 +760,11 @@ export interface ViaticoLiquidation {
   consultorEmail: string;
   empresa: string;
   centroCosto?: string;
+  odooEmployeeName?: string;
+  odooAnalyticDistribution?: string;
   monedaBase: ViaticoCurrency;
+  /** Tipo de cambio de liquidación aplicable a todo el documento cuando monedaBase === 'Dólares' */
+  tipoCambioLiquidacion?: number;
   estado: ViaticoLiquidationStatus;
   items: ViaticoExpenseItem[];
   totalLiquidacion: number;
@@ -659,6 +803,7 @@ export interface ViaticosWorkspaceData {
   consultores: ViaticoConsultor[];
   liquidaciones: ViaticoLiquidation[];
   emailGroups?: ViaticoEmailGroup[];
+  odooCatalogs?: ViaticoOdooCatalogs;
   activeLiquidationId: string;
   lastSavedAtIso: string | null;
   hasUnsavedChanges: boolean;
@@ -769,3 +914,154 @@ export interface ActivitiesWorkspaceData {
   lastSavedAtIso: string | null;
   hasUnsavedChanges: boolean;
 }
+
+// ============================================================================
+// Gestión TC Clara (Clara -> WorkManager -> Terceros -> SAP & Odoo)
+// ============================================================================
+
+export type ClaraTab =
+  | 'bandeja'
+  | 'workmanager'
+  | 'terceros'
+  | 'contabilizacion'
+  | 'conectores';
+
+export type ClaraErpTarget = 'SAP' | 'Odoo' | 'Por definir';
+
+export type ClaraExpenseOrigin = 'nacional' | 'exterior';
+
+export type ClaraWorkManagerStatus =
+  | 'pendiente_factura'
+  | 'validada'
+  | 'exenta_exterior'
+  | 'diferencia_valor';
+
+export type ClaraVendorSyncStatus =
+  | 'pendiente_crear'
+  | 'creado_sap'
+  | 'creado_odoo'
+  | 'sincronizado_ambos';
+
+export type ClaraAccountingStatus =
+  | 'borrador'
+  | 'listo_erp'
+  | 'exportado'
+  | 'contabilizado';
+
+export interface ClaraTransaction {
+  id: string;
+  claraTxId?: string;
+  fecha: string; // YYYY-MM-DD
+  sociedad: string;
+  tarjetahabiente: string;
+  tarjetaUltimos4?: string;
+  comercio: string;
+  nitComercio?: string;
+  pais?: string;
+  moneda: string;
+  valor: number;
+  centroCosto: string;
+  observacion: string;
+  categoria?: string;
+  estadoClara: 'Autorizada' | 'Pendiente' | 'Reembolso' | 'Rechazada';
+  origenGasto: ClaraExpenseOrigin;
+  motivoExterior?: string;
+  workManagerStatus: ClaraWorkManagerStatus;
+  workManagerInvoiceId?: string;
+  workManagerNumeroFactura?: string;
+  terceroId?: string;
+  terceroNit?: string;
+  terceroNombre?: string;
+  erpDestino: ClaraErpTarget;
+  cuentaContable?: string;
+  indicadorImpuesto?: string;
+  estadoContable: ClaraAccountingStatus;
+  loteExportacionId?: string;
+  origenRegistro: 'demo' | 'archivo_clara' | 'manual' | 'api_clara';
+  notasRevision?: string;
+}
+
+export interface ClaraWorkManagerInvoice {
+  id: string;
+  numeroFactura: string;
+  cufe?: string;
+  fechaEmision: string; // YYYY-MM-DD
+  nitEmisor: string;
+  razonSocialEmisor: string;
+  sociedadReceptora: string;
+  moneda: string;
+  subtotal: number;
+  impuesto: number;
+  total: number;
+  estadoDian: 'Recibida' | 'Aprobada' | 'Con Reclamo' | 'Pendiente';
+  vinculadaClaraTxId?: string;
+  origenCarga: 'demo' | 'archivo_wm' | 'manual' | 'api_wm';
+}
+
+export interface ClaraVendor {
+  id: string;
+  nitTaxId: string;
+  razonSocial: string;
+  aliasComerciosClara: string[];
+  pais: string;
+  esExterior: boolean;
+  tipoPersona: 'Jurídica' | 'Natural' | 'Extranjero';
+  regimenFiscal: string;
+  emailContacto?: string;
+  erpObjetivo: 'SAP' | 'Odoo' | 'Ambos';
+  codigoTerceroSap?: string;
+  partnerIdOdoo?: string;
+  cuentaGastoDefault?: string;
+  estadoCreacion: ClaraVendorSyncStatus;
+  notas?: string;
+}
+
+export interface ClaraCostCenterRule {
+  id: string;
+  sociedad: string;
+  centroCostoClara: string;
+  erpDestino: 'SAP' | 'Odoo';
+  codigoCentroCostoErp: string;
+  cuentaAnaliticaOdoo?: string;
+  cuentaContableDefault?: string;
+  diarioOdoo?: string;
+  sociedadSap?: string;
+  activa: boolean;
+}
+
+export interface ClaraConnectorConfig {
+  claraMode: 'archivo' | 'api_pendiente';
+  workManagerMode: 'archivo' | 'api_pendiente';
+  sapMode: 'archivo_lote' | 'odata_rfc_pendiente';
+  odooMode: 'archivo_lote' | 'jsonrpc_pendiente';
+  toleranciaCruceMonto: number;
+  diasVentanaCruce: number;
+  detectarExteriorAutomatico: boolean;
+  notaViaticosFutura?: string;
+}
+
+export interface ClaraBatchExportLog {
+  id: string;
+  createdAtIso: string;
+  createdBy: string;
+  erp: 'SAP' | 'Odoo';
+  tipo: 'gastos' | 'terceros';
+  cantidadRegistros: number;
+  totalMonto: number;
+  moneda: string;
+  archivoNombre: string;
+}
+
+export interface ClaraWorkspaceData {
+  docId: string;
+  selectedPeriod: string; // 'ALL' | 'YYYY-MM'
+  transactions: ClaraTransaction[];
+  workManagerInvoices: ClaraWorkManagerInvoice[];
+  vendors: ClaraVendor[];
+  costCenterRules: ClaraCostCenterRule[];
+  connectorConfig: ClaraConnectorConfig;
+  batchLogs: ClaraBatchExportLog[];
+  lastSavedAtIso: string | null;
+  hasUnsavedChanges: boolean;
+}
+

@@ -329,6 +329,43 @@ export const ActividadesModuleLogo: React.FC<ModuleIconProps> = ({ className = '
   </svg>
 );
 
+/**
+ * 9. Gestión TC Clara (SAP & Odoo)
+ * Bespoke Indigo-Violet & Premex Navy corporate card + dual ERP sync bridge emblem.
+ */
+export const ClaraModuleLogo: React.FC<ModuleIconProps> = ({ className = 'w-14 h-14' }) => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden="true">
+    <defs>
+      <linearGradient id="clr_bg" x1="4" y1="4" x2="60" y2="60" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#6366F1" />
+        <stop offset="48%" stopColor="#3B82F6" />
+        <stop offset="100%" stopColor="#132B63" />
+      </linearGradient>
+      <linearGradient id="clr_shine" x1="8" y1="6" x2="52" y2="48" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#C7D2FE" stopOpacity="0.35" />
+        <stop offset="100%" stopColor="#132B63" stopOpacity="0" />
+      </linearGradient>
+    </defs>
+    <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#clr_bg)" />
+    <path d="M2 18C2 9.163 9.163 2 18 2H46C38 20 24 38 2 46V18Z" fill="url(#clr_shine)" />
+    {/* Corporate Card */}
+    <rect x="12" y="16" width="36" height="24" rx="4.5" fill="#FFFFFF" fillOpacity="0.96" />
+    <rect x="12" y="22" width="36" height="4.5" fill="#132B63" fillOpacity="0.88" />
+    <rect x="16.5" y="29.5" width="7" height="5" rx="1.2" fill="#818CF8" />
+    <rect x="26" y="31" width="14" height="2.4" rx="1.2" fill="#CBD5E1" />
+    {/* Dual ERP Sync Seal */}
+    <circle cx="46" cy="43" r="10.5" fill="#0C214D" />
+    <circle cx="46" cy="43" r="8.5" fill="#A5B4FC" />
+    <path
+      d="M42.2 43.2L44.8 45.8L50 40.3"
+      stroke="#1E1B4B"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 export const ModuleEmblem: React.FC<{ moduleId: SuiteModuleId; className?: string }> = ({
   moduleId,
   className = 'w-14 h-14',
@@ -342,6 +379,8 @@ export const ModuleEmblem: React.FC<{ moduleId: SuiteModuleId; className?: strin
       return <ViaticosModuleLogo className={className} />;
     case 'actividades':
       return <ActividadesModuleLogo className={className} />;
+    case 'clara':
+      return <ClaraModuleLogo className={className} />;
     case 'anticipos':
       return <AnticiposModuleLogo className={className} />;
     case 'cxc':

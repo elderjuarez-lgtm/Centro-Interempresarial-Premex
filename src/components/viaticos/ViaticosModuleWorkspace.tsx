@@ -18,11 +18,13 @@ import {
   ActiveModuleId,
   EffectivePermissions,
   ModuleCompanyEntry,
+  UserPermissionRecord,
   ViaticoConsultor,
   ViaticoCurrency,
   ViaticoEmailGroup,
   ViaticoExpenseItem,
   ViaticoLiquidation,
+  ViaticoOdooCatalogs,
   ViaticosTab,
   ViaticosWorkspaceData,
 } from '../../types';
@@ -40,9 +42,21 @@ import {
   recalculateLiquidationTotals,
   resolveLiquidationCostCenter,
   resolveViaticosConsultantScope,
+  roundExchangeRate,
   roundMoney,
 } from '../../utils/viaticos';
-import { ALL_VIATICOS_PANELS, normalizeEmail } from '../../utils/permissions';
+import {
+  findMatchingCostCenterEntry,
+  mergeOdooCatalogsWithDefaults,
+  resolveEmployeeAndCostCenterForLiquidation,
+  resolveOperatingUserPermissionsStamp,
+  saveLocalOdooCatalogs,
+} from '../../utils/viaticosOdooCatalogs';
+import {
+  ALL_VIATICOS_PANELS,
+  normalizeCompanyKey,
+  normalizeEmail,
+} from '../../utils/permissions';
 import {
   exportViaticosExcel,
   exportViaticosReceiptsPdf,
@@ -50,6 +64,7 @@ import {
 import { ViaticosSidebar } from './ViaticosSidebar';
 import { ViaticosHeader } from './ViaticosHeader';
 import { ViaticosLiquidadorView } from './ViaticosLiquidadorView';
+import { ViaticosSociedadesView } from './ViaticosSociedadesView';
 import { ViaticosHistorialView } from './ViaticosHistorialView';
 import { ViaticosContabilidadView } from './ViaticosContabilidadView';
 import { ViaticosEmailDirectoryView } from './ViaticosEmailDirectoryView';
@@ -77,6 +92,9 @@ interface ViaticosModuleWorkspaceProps {
   onSwitchModule: (moduleId: ActiveModuleId) => void;
   permissions: EffectivePermissions;
   moduleCompanies?: ModuleCompanyEntry[];
+  onSaveModuleCompanies?: (nextCompanies: ModuleCompanyEntry[]) => Promise<void>;
+  permissionRecords?: UserPermissionRecord[];
+  onUpsertPermissionRecord?: (record: UserPermissionRecord) => Promise<void>;
 }
 
 export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = ({
@@ -92,6 +110,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   onSwitchModule,
   permissions,
   moduleCompanies = [],
+  onSaveModuleCompanies,
+  permissionRecords = [],
+  onUpsertPermissionRecord,
 }) => {
   const allowedPanels = useMemo(
     () =>
@@ -176,10 +197,21 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     };
   }, []);
 
-  // Resolve consultant identity automatically from corporate email (primerNombre.primerApellido) & RBAC
+  const resolvedOdooCatalogs = useMemo(
+    () => mergeOdooCatalogsWithDefaults(data.odooCatalogs),
+    [data.odooCatalogs]
+  );
+
+  // Resolve consultant identity automatically from corporate email (primerNombre.primerApellido), Permissions DB & Odoo Catalog
   const scope = useMemo(
-    () => resolveViaticosConsultantScope(data.consultores, permissions),
-    [data.consultores, permissions]
+    () =>
+      resolveViaticosConsultantScope(
+        data.consultores,
+        permissions,
+        resolvedOdooCatalogs,
+        permissionRecords
+      ),
+    [data.consultores, permissions, resolvedOdooCatalogs, permissionRecords]
   );
 
   const visibleModuleCompanies = useMemo(() => {
@@ -427,6 +459,27 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       scope.availableConsultores[0] ||
       data.consultores[0];
     const nowIso = new Date().toISOString();
+    const resolvedEmp = resolveEmployeeAndCostCenterForLiquidation({
+      liquidation: {
+        centroCosto: payload.centroCosto || chosenConsultor?.centroCosto || '',
+        consultorId: chosenConsultor?.id || 'cons-default',
+        consultorEmail: chosenConsultor?.email || permissions.email || '',
+        consultorNombre: chosenConsultor?.nombreCompleto || 'Consultor Premex',
+      },
+      consultores: data.consultores,
+      catalogs: resolvedOdooCatalogs,
+      permissionRecords,
+    });
+    const permittedEmpresa = (() => {
+      if (visibleModuleCompanies.length === 0) {
+        return payload.empresa || chosenConsultor?.empresa || 'Premex Corp';
+      }
+      const candKey = normalizeCompanyKey(payload.empresa || chosenConsultor?.empresa || '');
+      const matched = candKey
+        ? visibleModuleCompanies.find((c) => normalizeCompanyKey(c.nombre) === candKey)
+        : undefined;
+      return matched ? matched.nombre : visibleModuleCompanies[0].nombre;
+    })();
     const newLiq: ViaticoLiquidation = {
       id: `liq-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
       lineaLiquidacion: payload.lineaLiquidacion,
@@ -434,10 +487,25 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       consultorId: chosenConsultor?.id || 'cons-default',
       consultorNombre: chosenConsultor?.nombreCompleto || 'Consultor Premex',
       consultorEmail: chosenConsultor?.email || permissions.email || '',
-      empresa: payload.empresa || chosenConsultor?.empresa || 'Premex Corp',
+      empresa: permittedEmpresa,
       centroCosto:
-        (payload.centroCosto || '').trim() || chosenConsultor?.centroCosto || '',
+        (payload.centroCosto || '').trim() ||
+        resolvedEmp.costCenterLabel ||
+        chosenConsultor?.centroCosto ||
+        '',
+      odooEmployeeName:
+        chosenConsultor?.odooEmployeeName || resolvedEmp.employeeName || '',
+      odooAnalyticDistribution:
+        chosenConsultor?.odooAnalyticDistribution ||
+        resolvedEmp.analyticDistribution ||
+        '',
       monedaBase: payload.monedaBase,
+      tipoCambioLiquidacion:
+        payload.monedaBase === 'Dólares' &&
+        typeof payload.tipoCambioLiquidacion === 'number' &&
+        payload.tipoCambioLiquidacion > 0
+          ? roundExchangeRate(payload.tipoCambioLiquidacion)
+          : undefined,
       estado: 'borrador',
       items: [],
       totalLiquidacion: 0,
@@ -483,6 +551,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     empresa?: string;
     centroCosto?: string;
     monedaBase?: ViaticoCurrency;
+    tipoCambioLiquidacion?: number;
   }) => {
     if (!activeLiquidation || !permissions.canOperate) return;
     const targetLiqId = activeLiquidation.id;
@@ -491,9 +560,34 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         const nextList = prev.liquidaciones.map((l) => {
           if (l.id !== targetLiqId) return l;
           const nextBaseCurrency = patch.monedaBase || l.monedaBase;
-          const updatedItems = patch.monedaBase
+          let nextDocFx: number | undefined = l.tipoCambioLiquidacion;
+
+          if (nextBaseCurrency !== 'Dólares') {
+            nextDocFx = undefined;
+          } else if (patch.tipoCambioLiquidacion !== undefined) {
+            nextDocFx =
+              Number.isFinite(patch.tipoCambioLiquidacion) && patch.tipoCambioLiquidacion > 0
+                ? roundExchangeRate(patch.tipoCambioLiquidacion)
+                : undefined;
+          } else if (
+            patch.monedaBase === 'Dólares' &&
+            l.monedaBase !== 'Dólares' &&
+            (!nextDocFx || nextDocFx <= 0)
+          ) {
+            nextDocFx = 1;
+          }
+
+          const shouldRecalcItems =
+            patch.monedaBase !== undefined || patch.tipoCambioLiquidacion !== undefined;
+
+          const updatedItems = shouldRecalcItems
             ? l.items.map((it) => {
-                const fx = it.moneda === nextBaseCurrency ? 1 : it.tipoCambio;
+                const fx =
+                  nextBaseCurrency === 'Dólares' && nextDocFx && nextDocFx > 0
+                    ? nextDocFx
+                    : it.moneda === nextBaseCurrency
+                    ? 1
+                    : it.tipoCambio;
                 return {
                   ...it,
                   tipoCambio: fx,
@@ -501,13 +595,36 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
                 };
               })
             : l.items;
-          return recalculateLiquidationTotals({
+
+          let nextEmpresa = patch.empresa !== undefined ? patch.empresa : l.empresa;
+          if (patch.empresa !== undefined && visibleModuleCompanies.length > 0) {
+            const matchedComp = visibleModuleCompanies.find(
+              (c) => normalizeCompanyKey(c.nombre) === normalizeCompanyKey(patch.empresa!)
+            );
+            if (matchedComp) {
+              nextEmpresa = matchedComp.nombre;
+            } else if (patch.consultorId) {
+              // When switching consultant, keep a permitted society
+              const existingMatch = visibleModuleCompanies.find(
+                (c) => normalizeCompanyKey(c.nombre) === normalizeCompanyKey(l.empresa)
+              );
+              nextEmpresa = existingMatch ? existingMatch.nombre : visibleModuleCompanies[0].nombre;
+            }
+          }
+
+          const nextLiq: ViaticoLiquidation = {
             ...l,
             ...patch,
+            empresa: nextEmpresa,
             monedaBase: nextBaseCurrency,
+            tipoCambioLiquidacion: nextDocFx,
             items: updatedItems,
             updatedAtIso: new Date().toISOString(),
-          });
+          };
+          if (nextDocFx === undefined) {
+            delete nextLiq.tipoCambioLiquidacion;
+          }
+          return recalculateLiquidationTotals(nextLiq);
         });
         return { ...prev, liquidaciones: nextList };
       },
@@ -521,12 +638,23 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   const handleAddOrUpdateItem = (item: ViaticoExpenseItem, isEdit: boolean) => {
     if (!activeLiquidation || !permissions.canOperate) return;
     const targetLiqId = activeLiquidation.id;
-    if (currentUser && item.attachmentId) {
-      const localMedia = mediaMapRef.current[item.attachmentId];
+    const stamp = resolveOperatingUserPermissionsStamp(
+      permissions,
+      currentUser?.email || undefined,
+      currentUser?.displayName || undefined
+    );
+    const stampedItem: ViaticoExpenseItem = {
+      ...item,
+      registeredByEmail: item.registeredByEmail || stamp.email,
+      registeredByName: item.registeredByName || stamp.name,
+      updatedAtIso: stamp.atIso,
+    };
+    if (currentUser && stampedItem.attachmentId) {
+      const localMedia = mediaMapRef.current[stampedItem.attachmentId];
       if (localMedia && !localMedia.cloudSynced) {
         void uploadReceiptMediaToCloud(localMedia).then((res) => {
           if (res.cloudSynced) {
-            setMediaMap((prev) => ({ ...prev, [item.attachmentId!]: res.media }));
+            setMediaMap((prev) => ({ ...prev, [stampedItem.attachmentId!]: res.media }));
           }
         });
       }
@@ -535,8 +663,8 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       showToast(
         'info',
         isEdit
-          ? `Actualizando factura de ${item.proveedor} en la nube...`
-          : `Guardando factura de ${item.proveedor} en la nube...`
+          ? `Actualizando factura de ${stampedItem.proveedor} en la nube...`
+          : `Guardando factura de ${stampedItem.proveedor} en la nube...`
       );
     }
     mutateAndAutoSync(
@@ -544,24 +672,26 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         const nextList = prev.liquidaciones.map((l) => {
           if (l.id !== targetLiqId) return l;
           const nextItems = isEdit
-            ? l.items.map((existing) => (existing.id === item.id ? item : existing))
-            : [...l.items, item];
+            ? l.items.map((existing) =>
+                existing.id === stampedItem.id ? stampedItem : existing
+              )
+            : [...l.items, stampedItem];
           return recalculateLiquidationTotals({
             ...l,
             items: nextItems,
-            updatedAtIso: new Date().toISOString(),
+            updatedAtIso: stamp.atIso,
           });
         });
         return { ...prev, liquidaciones: nextList };
       },
       {
         successMessage: isEdit
-          ? `Factura de ${item.proveedor} actualizada y sincronizada en la nube.`
-          : `Factura de ${item.proveedor} agregada y sincronizada en la nube automáticamente.`,
+          ? `Factura de ${stampedItem.proveedor} actualizada y sincronizada en la nube.`
+          : `Factura de ${stampedItem.proveedor} agregada y sincronizada en la nube automáticamente.`,
         offlineMessage: isEdit
-          ? `Factura de ${item.proveedor} actualizada localmente (inicia sesión para sincronizar en la nube).`
-          : `Factura de ${item.proveedor} agregada localmente (inicia sesión para sincronizar en la nube).`,
-        errorPrefix: `Factura de ${item.proveedor} guardada localmente, pero no se pudo subir a la nube`,
+          ? `Factura de ${stampedItem.proveedor} actualizada localmente (inicia sesión para sincronizar en la nube).`
+          : `Factura de ${stampedItem.proveedor} agregada localmente (inicia sesión para sincronizar en la nube).`,
+        errorPrefix: `Factura de ${stampedItem.proveedor} guardada localmente, pero no se pudo subir a la nube`,
       }
     );
   };
@@ -755,10 +885,27 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     consultorEmail: string;
     empresa: string;
     centroCosto: string;
+    odooAnalyticDistribution?: string;
+    odooEmployeeName?: string;
   }) => {
     if (!permissions.canOperate) return;
     const cleanEmail = normalizeEmail(params.consultorEmail);
     const cleanCC = params.centroCosto.trim();
+    const matchedCC = findMatchingCostCenterEntry(
+      cleanCC,
+      params.odooAnalyticDistribution,
+      resolvedOdooCatalogs.costCenters
+    );
+    const finalCC = matchedCC?.cuentaAnalitica || cleanCC;
+    const finalAnalytic =
+      (params.odooAnalyticDistribution || '').trim() ||
+      matchedCC?.analyticDistribution ||
+      '';
+    const stamp = resolveOperatingUserPermissionsStamp(
+      permissions,
+      currentUser?.email || undefined,
+      currentUser?.displayName || undefined
+    );
 
     mutateAndAutoSync(
       (prev) => {
@@ -771,7 +918,17 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         let nextConsultores: ViaticoConsultor[];
         if (existingIdx >= 0) {
           nextConsultores = prev.consultores.map((c, idx) =>
-            idx === existingIdx ? { ...c, centroCosto: cleanCC } : c
+            idx === existingIdx
+              ? {
+                  ...c,
+                  centroCosto: finalCC,
+                  odooAnalyticDistribution:
+                    finalAnalytic || c.odooAnalyticDistribution,
+                  odooEmployeeName:
+                    params.odooEmployeeName?.trim().toUpperCase() ||
+                    c.odooEmployeeName,
+                }
+              : c
           );
         } else {
           nextConsultores = [
@@ -782,7 +939,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               email: cleanEmail,
               empresa: params.empresa || 'Premex Corp',
               cargo: 'Consultor / Liquidador',
-              centroCosto: cleanCC,
+              centroCosto: finalCC,
+              odooAnalyticDistribution: finalAnalytic,
+              odooEmployeeName: params.odooEmployeeName?.trim().toUpperCase(),
               monedaBase: 'Quetzales',
               activo: true,
             },
@@ -794,18 +953,154 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
             l.consultorId === params.consultorId ||
             (cleanEmail && normalizeEmail(l.consultorEmail) === cleanEmail) ||
             l.consultorNombre === params.consultorNombre;
-          return matches ? { ...l, centroCosto: cleanCC } : l;
+          return matches
+            ? {
+                ...l,
+                centroCosto: finalCC,
+                odooAnalyticDistribution:
+                  finalAnalytic || l.odooAnalyticDistribution,
+                odooEmployeeName:
+                  params.odooEmployeeName?.trim().toUpperCase() ||
+                  l.odooEmployeeName,
+              }
+            : l;
         });
+
+        const baseCatalogs = mergeOdooCatalogsWithDefaults(prev.odooCatalogs);
+        const updatedEmployees = baseCatalogs.employees.map((emp) => {
+          const empEmail = normalizeEmail(emp.email || '');
+          const sameEmail = cleanEmail && empEmail && empEmail === cleanEmail;
+          const sameName =
+            emp.nombreCompleto.toUpperCase() ===
+              params.consultorNombre.trim().toUpperCase() ||
+            (params.odooEmployeeName &&
+              emp.nombreCompleto.toUpperCase() ===
+                params.odooEmployeeName.trim().toUpperCase());
+          if (!sameEmail && !sameName) return emp;
+          return {
+            ...emp,
+            email: cleanEmail || emp.email,
+            centroCosto: finalCC,
+            analyticDistribution: finalAnalytic || emp.analyticDistribution,
+            updatedByEmail: stamp.email,
+            updatedByName: stamp.name,
+            updatedAtIso: stamp.atIso,
+          };
+        });
+        const nextCatalogs: ViaticoOdooCatalogs = {
+          ...baseCatalogs,
+          employees: updatedEmployees,
+          updatedByEmail: stamp.email,
+          updatedByName: stamp.name,
+          updatedAtIso: stamp.atIso,
+        };
+        saveLocalOdooCatalogs(nextCatalogs);
 
         return {
           ...prev,
           consultores: nextConsultores,
           liquidaciones: nextLiquidaciones,
+          odooCatalogs: nextCatalogs,
         };
       },
       {
-        successMessage: `Centro de Costo "${cleanCC}" asignado a ${params.consultorNombre} y sincronizado en la nube.`,
-        offlineMessage: `Centro de Costo "${cleanCC}" asignado localmente a ${params.consultorNombre}.`,
+        successMessage: `Centro de Costo "${finalCC}" asignado a ${params.consultorNombre} y sincronizado en la nube.`,
+        offlineMessage: `Centro de Costo "${finalCC}" asignado localmente a ${params.consultorNombre}.`,
+      }
+    );
+  };
+
+  const handleSaveOdooCatalogs = (
+    nextCatalogsInput: ViaticoOdooCatalogs,
+    toastMessage?: string
+  ) => {
+    if (!permissions.canOperate) return;
+    const stamp = resolveOperatingUserPermissionsStamp(
+      permissions,
+      currentUser?.email || undefined,
+      currentUser?.displayName || undefined
+    );
+    const merged = mergeOdooCatalogsWithDefaults({
+      ...nextCatalogsInput,
+      updatedByEmail: stamp.email,
+      updatedByName: stamp.name,
+      updatedAtIso: stamp.atIso,
+    });
+    saveLocalOdooCatalogs(merged);
+
+    mutateAndAutoSync(
+      (prev) => {
+        // Propagate linked email / cost center updates from Odoo Employees DB to consultores
+        const nextConsultores = prev.consultores.map((c) => {
+          const cleanEmail = normalizeEmail(c.email);
+          const matched = merged.employees.find(
+            (emp) =>
+              (cleanEmail && emp.email && normalizeEmail(emp.email) === cleanEmail) ||
+              (c.odooEmployeeName &&
+                emp.nombreCompleto.toUpperCase() === c.odooEmployeeName.trim().toUpperCase())
+          );
+          if (!matched) return c;
+          return {
+            ...c,
+            odooEmployeeName: matched.nombreCompleto,
+            centroCosto: matched.centroCosto || c.centroCosto,
+            odooAnalyticDistribution:
+              matched.analyticDistribution || c.odooAnalyticDistribution,
+          };
+        });
+        return {
+          ...prev,
+          consultores: nextConsultores,
+          odooCatalogs: merged,
+        };
+      },
+      {
+        successMessage:
+          toastMessage ||
+          'Base de datos Odoo actualizada y sincronizada en la nube.',
+        offlineMessage:
+          toastMessage ||
+          'Base de datos Odoo guardada localmente.',
+      }
+    );
+  };
+
+  const handleUpdateExpenseItemOdoo = (
+    liquidationId: string,
+    itemId: string,
+    patch: Partial<ViaticoExpenseItem>
+  ) => {
+    if (!permissions.canOperate) return;
+    const stamp = resolveOperatingUserPermissionsStamp(
+      permissions,
+      currentUser?.email || undefined,
+      currentUser?.displayName || undefined
+    );
+    mutateAndAutoSync(
+      (prev) => ({
+        ...prev,
+        liquidaciones: prev.liquidaciones.map((l) => {
+          if (l.id !== liquidationId) return l;
+          return recalculateLiquidationTotals({
+            ...l,
+            items: l.items.map((it) =>
+              it.id === itemId
+                ? {
+                    ...it,
+                    ...patch,
+                    registeredByEmail: it.registeredByEmail || stamp.email,
+                    registeredByName: it.registeredByName || stamp.name,
+                    updatedAtIso: stamp.atIso,
+                  }
+                : it
+            ),
+            updatedAtIso: stamp.atIso,
+          });
+        }),
+      }),
+      {
+        debounceMs: 500,
+        errorPrefix: 'Clasificación Odoo guardada localmente, pero falló la sincronización',
       }
     );
   };
@@ -845,7 +1140,12 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     if (!liq || liq.items.length === 0) return;
     setIsDownloadingExcel(true);
     try {
-      const cc = resolveLiquidationCostCenter(liq, data.consultores);
+      const cc = resolveLiquidationCostCenter(
+        liq,
+        data.consultores,
+        resolvedOdooCatalogs,
+        permissionRecords
+      );
       const filename = await exportViaticosExcel(liq, cc);
       showToast('success', `Excel descargado: ${filename}`);
     } catch (err: any) {
@@ -899,6 +1199,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         closedLiquidacionesCount={closedLiquidacionesCount}
         accountingLiquidacionesCount={accountingLiquidaciones.length}
         liquidacionesCount={visibleLiquidaciones.length}
+        sociedadesCount={visibleModuleCompanies.length}
         emailGroupsCount={(data.emailGroups || []).filter((g) => g.activo !== false).length}
         consultorScopeLabel={sidebarScopeLabel}
       />
@@ -1042,6 +1343,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               visibleLiquidaciones={visibleLiquidaciones}
               availableConsultores={scope.availableConsultores}
               moduleCompanies={visibleModuleCompanies}
+              odooCatalogs={resolvedOdooCatalogs}
               isLockedToOwnConsultor={scope.isLockedToOwnConsultor}
               detectedFromEmailLabel={scope.detectedFromEmailLabel}
               mediaMap={mediaMap}
@@ -1056,7 +1358,12 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               onUpdateHeader={handleUpdateHeader}
               resolvedCostCenter={
                 activeLiquidation
-                  ? resolveLiquidationCostCenter(activeLiquidation, data.consultores)
+                  ? resolveLiquidationCostCenter(
+                      activeLiquidation,
+                      data.consultores,
+                      resolvedOdooCatalogs,
+                      permissionRecords
+                    )
                   : ''
               }
               onAddOrUpdateItem={handleAddOrUpdateItem}
@@ -1085,10 +1392,22 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               }}
               zoomPercent={zoomPercent}
             />
+          ) : activeTab === 'sociedades' ? (
+            <ViaticosSociedadesView
+              visibleCompanies={visibleModuleCompanies}
+              allCatalogCompanies={moduleCompanies}
+              permissions={permissions}
+              onSaveModuleCompanies={onSaveModuleCompanies}
+              onNotify={showToast}
+            />
           ) : activeTab === 'contabilidad' ? (
             <ViaticosContabilidadView
               liquidaciones={accountingLiquidaciones}
               consultores={data.consultores}
+              odooCatalogs={resolvedOdooCatalogs}
+              permissionRecords={permissionRecords}
+              currentUserEmail={currentUser?.email || permissions.email || ''}
+              currentUserName={currentUser?.displayName || permissions.displayName || ''}
               permissions={permissions}
               mediaMap={mediaMap}
               loadingMediaIds={loadingMediaIds}
@@ -1102,6 +1421,9 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
                 void handleQuickDownloadPdf(liq);
               }}
               onAssignConsultorCostCenter={handleAssignConsultorCostCenter}
+              onSaveOdooCatalogs={handleSaveOdooCatalogs}
+              onUpdateExpenseItemOdoo={handleUpdateExpenseItemOdoo}
+              onUpsertPermissionRecord={onUpsertPermissionRecord}
               onNotify={showToast}
             />
           ) : activeTab === 'correos' ? (
@@ -1116,6 +1438,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               liquidaciones={visibleLiquidaciones}
               consultores={scope.availableConsultores}
               moduleCompanies={visibleModuleCompanies}
+              odooCatalogs={resolvedOdooCatalogs}
               activeLiquidationId={activeLiquidation?.id || ''}
               permissions={permissions}
               isLockedToOwnConsultor={scope.isLockedToOwnConsultor}
@@ -1157,6 +1480,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         availableConsultores={scope.availableConsultores}
         defaultConsultor={scope.matchedConsultor || scope.availableConsultores[0] || null}
         moduleCompanies={visibleModuleCompanies}
+        odooCatalogs={resolvedOdooCatalogs}
         isLockedToOwnConsultor={scope.isLockedToOwnConsultor}
         openLiquidacionesCount={openLiquidacionesCount}
         onCreate={handleCreateNewLiquidation}
@@ -1169,7 +1493,12 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         liquidation={planillaPreviewLiquidation}
         costCenter={
           planillaPreviewLiquidation
-            ? resolveLiquidationCostCenter(planillaPreviewLiquidation, data.consultores)
+            ? resolveLiquidationCostCenter(
+                planillaPreviewLiquidation,
+                data.consultores,
+                resolvedOdooCatalogs,
+                permissionRecords
+              )
             : ''
         }
         onDownloadExcel={(liq) => handleQuickDownloadExcel(liq)}
@@ -1201,7 +1530,12 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         liquidation={modalLiquidation}
         costCenter={
           modalLiquidation
-            ? resolveLiquidationCostCenter(modalLiquidation, data.consultores)
+            ? resolveLiquidationCostCenter(
+                modalLiquidation,
+                data.consultores,
+                resolvedOdooCatalogs,
+                permissionRecords
+              )
             : ''
         }
         mediaMap={mediaMap}
@@ -1238,6 +1572,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         const mobileNavItems = (
           [
             { id: 'liquidador' as ViaticosTab, label: 'Activas', icon: FileText },
+            { id: 'sociedades' as ViaticosTab, label: 'Sociedad', icon: Building2 },
             { id: 'cerradas' as ViaticosTab, label: 'Cerradas', icon: Archive },
             { id: 'contabilidad' as ViaticosTab, label: 'Contab.', icon: Calculator },
             { id: 'historial' as ViaticosTab, label: 'Historial', icon: FolderClock },
@@ -1254,6 +1589,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               3: 'grid-cols-3',
               4: 'grid-cols-4',
               5: 'grid-cols-5',
+              6: 'grid-cols-6',
             } as Record<number, string>
           )[mobileNavItems.length] || 'grid-cols-4';
 

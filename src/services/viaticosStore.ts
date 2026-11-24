@@ -18,13 +18,27 @@ import {
 } from './auth';
 import { handleFirestoreError, OperationType } from './reconciliationStore';
 import {
+  OdooCostCenterEntry,
+  OdooDocTypeEntry,
+  OdooEmployeeEntry,
+  OdooExpenseCodeEntry,
+  OdooTaxIndicatorEntry,
   ViaticoConsultor,
   ViaticoEmailGroup,
   ViaticoEmailMember,
   ViaticoExpenseItem,
   ViaticoLiquidation,
+  ViaticoOdooCatalogs,
 } from '../types';
-import { recalculateLiquidationTotals, roundMoney } from '../utils/viaticos';
+import {
+  recalculateLiquidationTotals,
+  roundExchangeRate,
+  roundMoney,
+} from '../utils/viaticos';
+import {
+  formatAnalyticDistributionJson,
+  mergeOdooCatalogsWithDefaults,
+} from '../utils/viaticosOdooCatalogs';
 
 export const DEFAULT_VIATICOS_DOC_ID = 'premex-viaticos-principal';
 
@@ -37,6 +51,7 @@ export interface SavedViaticosWorkspaceDoc {
   consultores: ViaticoConsultor[];
   liquidaciones: ViaticoLiquidation[];
   emailGroups?: ViaticoEmailGroup[];
+  odooCatalogs?: ViaticoOdooCatalogs;
   updatedAtIso?: string;
 }
 
@@ -77,16 +92,24 @@ const sanitizeEmailGroup = (g: ViaticoEmailGroup, idx: number): ViaticoEmailGrou
   return clean;
 };
 
-const sanitizeConsultor = (c: ViaticoConsultor): ViaticoConsultor => ({
-  id: String(c.id || `cons-${Date.now()}`).slice(0, 120),
-  nombreCompleto: String(c.nombreCompleto || 'Consultor').trim().slice(0, 140),
-  email: String(c.email || '').trim().toLowerCase().slice(0, 160),
-  empresa: String(c.empresa || 'Premex Corp').trim().slice(0, 140),
-  cargo: c.cargo ? String(c.cargo).trim().slice(0, 120) : '',
-  centroCosto: c.centroCosto ? String(c.centroCosto).trim().slice(0, 120) : '',
-  monedaBase: c.monedaBase || 'Quetzales',
-  activo: c.activo !== false,
-});
+const sanitizeConsultor = (c: ViaticoConsultor): ViaticoConsultor => {
+  const clean: ViaticoConsultor = {
+    id: String(c.id || `cons-${Date.now()}`).slice(0, 120),
+    nombreCompleto: String(c.nombreCompleto || 'Consultor').trim().slice(0, 140),
+    email: String(c.email || '').trim().toLowerCase().slice(0, 160),
+    empresa: String(c.empresa || 'Premex Corp').trim().slice(0, 140),
+    cargo: c.cargo ? String(c.cargo).trim().slice(0, 120) : '',
+    centroCosto: c.centroCosto ? String(c.centroCosto).trim().slice(0, 120) : '',
+    monedaBase: c.monedaBase || 'Quetzales',
+    activo: c.activo !== false,
+  };
+  if (c.odooEmployeeName) clean.odooEmployeeName = String(c.odooEmployeeName).trim().toUpperCase().slice(0, 140);
+  if (c.odooAnalyticDistribution) {
+    clean.odooAnalyticDistribution = formatAnalyticDistributionJson(String(c.odooAnalyticDistribution)).slice(0, 120);
+  }
+  if (c.permissionId) clean.permissionId = String(c.permissionId).trim().slice(0, 120);
+  return clean;
+};
 
 const sanitizeExpenseItem = (i: ViaticoExpenseItem): ViaticoExpenseItem => {
   const clean: ViaticoExpenseItem = {
@@ -99,7 +122,7 @@ const sanitizeExpenseItem = (i: ViaticoExpenseItem): ViaticoExpenseItem => {
     moneda: i.moneda || 'Quetzales',
     valorFactura: roundMoney(Number(i.valorFactura) || 0),
     tipoCambio: Number.isFinite(Number(i.tipoCambio)) && Number(i.tipoCambio) > 0
-      ? roundMoney(Number(i.tipoCambio))
+      ? roundExchangeRate(Number(i.tipoCambio))
       : 1,
     valorReintegrar: roundMoney(Number(i.valorReintegrar) || 0),
     categoria: i.categoria || 'Otros Gastos',
@@ -113,6 +136,22 @@ const sanitizeExpenseItem = (i: ViaticoExpenseItem): ViaticoExpenseItem => {
     valorSinImpuesto: roundMoney(Number(i.valorSinImpuesto) || 0),
   };
 
+  if (i.odooProductId) clean.odooProductId = String(i.odooProductId).trim().slice(0, 160);
+  if (i.odooDocType) clean.odooDocType = String(i.odooDocType).trim().slice(0, 160);
+  if (i.odooTaxIndicator) clean.odooTaxIndicator = String(i.odooTaxIndicator).trim().slice(0, 180);
+  if (i.odooCostCenterCode) clean.odooCostCenterCode = String(i.odooCostCenterCode).trim().slice(0, 140);
+  if (i.odooAnalyticDistribution) {
+    clean.odooAnalyticDistribution = formatAnalyticDistributionJson(String(i.odooAnalyticDistribution)).slice(0, 120);
+  }
+  if (i.odooExpenseType === 'Gasto' || i.odooExpenseType === 'Tarjeta') {
+    clean.odooExpenseType = i.odooExpenseType;
+  }
+  if (i.odooJournal) clean.odooJournal = String(i.odooJournal).trim().slice(0, 120);
+  if (i.odooPaymentReference) clean.odooPaymentReference = String(i.odooPaymentReference).trim().slice(0, 180);
+  if (i.registeredByEmail) clean.registeredByEmail = String(i.registeredByEmail).trim().toLowerCase().slice(0, 160);
+  if (i.registeredByName) clean.registeredByName = String(i.registeredByName).trim().slice(0, 140);
+  if (i.updatedAtIso) clean.updatedAtIso = String(i.updatedAtIso).trim().slice(0, 60);
+
   if (i.attachmentId) clean.attachmentId = String(i.attachmentId).slice(0, 120);
   if (i.attachmentName) clean.attachmentName = String(i.attachmentName).slice(0, 160);
   if (i.attachmentMimeType) clean.attachmentMimeType = String(i.attachmentMimeType).slice(0, 80);
@@ -121,6 +160,94 @@ const sanitizeExpenseItem = (i: ViaticoExpenseItem): ViaticoExpenseItem => {
   if (i.extractionConfidence) clean.extractionConfidence = i.extractionConfidence;
   if (i.extractionNotes) clean.extractionNotes = String(i.extractionNotes).slice(0, 250);
   return clean;
+};
+
+const sanitizeOdooCatalogs = (raw: unknown): ViaticoOdooCatalogs | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const src = raw as Partial<ViaticoOdooCatalogs>;
+  const merged = mergeOdooCatalogsWithDefaults({
+    defaultJournalName: src.defaultJournalName
+      ? String(src.defaultJournalName).trim().slice(0, 120)
+      : undefined,
+    defaultExpenseType: src.defaultExpenseType === 'Tarjeta' ? 'Tarjeta' : 'Gasto',
+    docTypes: Array.isArray(src.docTypes)
+      ? src.docTypes.slice(0, 150).map((d: OdooDocTypeEntry, idx) => ({
+          id: String(d?.id || `doct-${idx}`).slice(0, 100),
+          codigo: String(d?.codigo || '').trim().toUpperCase().slice(0, 30),
+          nombre: String(d?.nombre || '').trim().slice(0, 140),
+          labelOdoo: String(d?.labelOdoo || '').trim().slice(0, 160),
+          activo: d?.activo !== false,
+          ...(d?.isCustom ? { isCustom: true } : {}),
+          ...(d?.updatedByEmail ? { updatedByEmail: String(d.updatedByEmail).trim().toLowerCase().slice(0, 160) } : {}),
+          ...(d?.updatedByName ? { updatedByName: String(d.updatedByName).trim().slice(0, 140) } : {}),
+          ...(d?.updatedAtIso ? { updatedAtIso: String(d.updatedAtIso).slice(0, 60) } : {}),
+        }))
+      : undefined,
+    employees: Array.isArray(src.employees)
+      ? src.employees.slice(0, 300).map((e: OdooEmployeeEntry, idx) => ({
+          id: String(e?.id || `emp-${idx}`).slice(0, 100),
+          nombreCompleto: String(e?.nombreCompleto || '').trim().toUpperCase().slice(0, 160),
+          ...(e?.email ? { email: String(e.email).trim().toLowerCase().slice(0, 160) } : {}),
+          ...(e?.permissionDocId ? { permissionDocId: String(e.permissionDocId).slice(0, 140) } : {}),
+          ...(e?.centroCosto ? { centroCosto: String(e.centroCosto).trim().slice(0, 140) } : {}),
+          ...(e?.analyticDistribution ? { analyticDistribution: formatAnalyticDistributionJson(String(e.analyticDistribution)).slice(0, 120) } : {}),
+          ...(e?.empresa ? { empresa: String(e.empresa).trim().slice(0, 140) } : {}),
+          activo: e?.activo !== false,
+          ...(e?.isCustom ? { isCustom: true } : {}),
+          ...(e?.updatedByEmail ? { updatedByEmail: String(e.updatedByEmail).trim().toLowerCase().slice(0, 160) } : {}),
+          ...(e?.updatedByName ? { updatedByName: String(e.updatedByName).trim().slice(0, 140) } : {}),
+          ...(e?.updatedAtIso ? { updatedAtIso: String(e.updatedAtIso).slice(0, 60) } : {}),
+        }))
+      : undefined,
+    expenseCodes: Array.isArray(src.expenseCodes)
+      ? src.expenseCodes.slice(0, 250).map((c: OdooExpenseCodeEntry, idx) => ({
+          id: String(c?.id || `exp-${idx}`).slice(0, 100),
+          codigo: String(c?.codigo || '').trim().slice(0, 40),
+          nombre: String(c?.nombre || '').trim().toUpperCase().slice(0, 140),
+          labelOdoo: String(c?.labelOdoo || '').trim().slice(0, 180),
+          ...(c?.categoriaVinculada ? { categoriaVinculada: c.categoriaVinculada } : {}),
+          activo: c?.activo !== false,
+          ...(c?.isCustom ? { isCustom: true } : {}),
+          ...(c?.updatedByEmail ? { updatedByEmail: String(c.updatedByEmail).trim().toLowerCase().slice(0, 160) } : {}),
+          ...(c?.updatedByName ? { updatedByName: String(c.updatedByName).trim().slice(0, 140) } : {}),
+          ...(c?.updatedAtIso ? { updatedAtIso: String(c.updatedAtIso).slice(0, 60) } : {}),
+        }))
+      : undefined,
+    costCenters: Array.isArray(src.costCenters)
+      ? src.costCenters.slice(0, 300).map((cc: OdooCostCenterEntry, idx) => ({
+          id: String(cc?.id || `cc-${idx}`).slice(0, 100),
+          codigo: String(cc?.codigo || '').trim().toUpperCase().slice(0, 60),
+          cuentaAnalitica: String(cc?.cuentaAnalitica || '').trim().toUpperCase().slice(0, 160),
+          odooAnalyticId: String(cc?.odooAnalyticId || '').trim().slice(0, 40),
+          analyticDistribution: formatAnalyticDistributionJson(String(cc?.analyticDistribution || cc?.odooAnalyticId || '')).slice(0, 120),
+          activo: cc?.activo !== false,
+          ...(cc?.isCustom ? { isCustom: true } : {}),
+          ...(cc?.updatedByEmail ? { updatedByEmail: String(cc.updatedByEmail).trim().toLowerCase().slice(0, 160) } : {}),
+          ...(cc?.updatedByName ? { updatedByName: String(cc.updatedByName).trim().slice(0, 140) } : {}),
+          ...(cc?.updatedAtIso ? { updatedAtIso: String(cc.updatedAtIso).slice(0, 60) } : {}),
+        }))
+      : undefined,
+    taxIndicators: Array.isArray(src.taxIndicators)
+      ? src.taxIndicators.slice(0, 80).map((t: OdooTaxIndicatorEntry, idx) => ({
+          id: String(t?.id || `tax-${idx}`).slice(0, 100),
+          codigo: String(t?.codigo || '').trim().toUpperCase().slice(0, 30),
+          nombreImpuesto: String(t?.nombreImpuesto || '').trim().slice(0, 180),
+          validezFiscal: String(t?.validezFiscal || '').trim().slice(0, 80),
+          etiquetaFactura: String(t?.etiquetaFactura || '').trim().slice(0, 60),
+          tipoImpuesto: String(t?.tipoImpuesto || 'Compras').trim().slice(0, 60),
+          porcentaje: roundMoney(Number(t?.porcentaje) || 0),
+          activo: t?.activo !== false,
+          ...(t?.isCustom ? { isCustom: true } : {}),
+          ...(t?.updatedByEmail ? { updatedByEmail: String(t.updatedByEmail).trim().toLowerCase().slice(0, 160) } : {}),
+          ...(t?.updatedByName ? { updatedByName: String(t.updatedByName).trim().slice(0, 140) } : {}),
+          ...(t?.updatedAtIso ? { updatedAtIso: String(t.updatedAtIso).slice(0, 60) } : {}),
+        }))
+      : undefined,
+    updatedByEmail: src.updatedByEmail ? String(src.updatedByEmail).trim().toLowerCase().slice(0, 160) : undefined,
+    updatedByName: src.updatedByName ? String(src.updatedByName).trim().slice(0, 140) : undefined,
+    updatedAtIso: src.updatedAtIso ? String(src.updatedAtIso).slice(0, 60) : undefined,
+  });
+  return merged;
 };
 
 const sanitizeLiquidation = (l: ViaticoLiquidation): ViaticoLiquidation => {
@@ -150,7 +277,18 @@ const sanitizeLiquidation = (l: ViaticoLiquidation): ViaticoLiquidation => {
     updatedAtIso: String(l.updatedAtIso || new Date().toISOString()).slice(0, 60),
   };
 
+  if (
+    l.monedaBase === 'Dólares' &&
+    Number.isFinite(Number(l.tipoCambioLiquidacion)) &&
+    Number(l.tipoCambioLiquidacion) > 0
+  ) {
+    base.tipoCambioLiquidacion = roundExchangeRate(Number(l.tipoCambioLiquidacion));
+  }
   if (l.centroCosto) base.centroCosto = String(l.centroCosto).trim().slice(0, 120);
+  if (l.odooEmployeeName) base.odooEmployeeName = String(l.odooEmployeeName).trim().toUpperCase().slice(0, 140);
+  if (l.odooAnalyticDistribution) {
+    base.odooAnalyticDistribution = formatAnalyticDistributionJson(String(l.odooAnalyticDistribution)).slice(0, 120);
+  }
   if (l.closedAtIso) base.closedAtIso = String(l.closedAtIso).slice(0, 60);
   if (l.closedBy) base.closedBy = String(l.closedBy).slice(0, 160);
   if (l.sentAtIso) base.sentAtIso = String(l.sentAtIso).slice(0, 60);
@@ -245,6 +383,7 @@ const fetchAuthViaticosViaRest = async (
           sanitizeEmailGroup(g, idx)
         )
       : undefined,
+    odooCatalogs: sanitizeOdooCatalogs(fields.odooCatalogs),
     updatedAtIso: fields.updatedAt ? String(fields.updatedAt) : undefined,
   };
 };
@@ -293,6 +432,7 @@ export const subscribeToViaticosWorkspace = (
               sanitizeEmailGroup(g, idx)
             )
           : undefined,
+        odooCatalogs: sanitizeOdooCatalogs(data.odooCatalogs),
         updatedAtIso:
           data.updatedAt instanceof Timestamp
             ? data.updatedAt.toDate().toISOString()
@@ -322,6 +462,7 @@ export const saveViaticosWorkspaceToCloud = async (params: {
   consultores: ViaticoConsultor[];
   liquidaciones: ViaticoLiquidation[];
   emailGroups?: ViaticoEmailGroup[];
+  odooCatalogs?: ViaticoOdooCatalogs;
 }): Promise<{ id: string; updatedAtIso: string }> => {
   const user = auth.currentUser;
   if (!user) {
@@ -340,13 +481,14 @@ export const saveViaticosWorkspaceToCloud = async (params: {
   const cleanEmailGroups = (params.emailGroups || [])
     .slice(0, 100)
     .map((g, idx) => sanitizeEmailGroup(g, idx));
+  const cleanOdooCatalogs = sanitizeOdooCatalogs(params.odooCatalogs);
   const safeTitle = String(params.title || 'Liquidación de Viáticos Premex')
     .trim()
     .slice(0, 150);
   const ownerName = String(user.displayName || user.email || 'Usuario').slice(0, 120);
   const activeLiqId = String(params.activeLiquidationId || '').slice(0, 128);
 
-  const updateFields = {
+  const updateFields: Record<string, unknown> = {
     ownerName,
     title: safeTitle,
     activeLiquidationId: activeLiqId,
@@ -356,6 +498,9 @@ export const saveViaticosWorkspaceToCloud = async (params: {
     consultoresCount: cleanConsultores.length,
     liquidacionesCount: cleanLiquidaciones.length,
   };
+  if (cleanOdooCatalogs) {
+    updateFields.odooCatalogs = cleanOdooCatalogs;
+  }
 
   try {
     const ref = doc(db, 'viaticos_workspaces', docId);
@@ -416,6 +561,7 @@ export const saveViaticosWorkspaceToCloud = async (params: {
             'consultores',
             'liquidaciones',
             'emailGroups',
+            ...(cleanOdooCatalogs ? ['odooCatalogs'] : []),
             'consultoresCount',
             'liquidacionesCount',
           ],
