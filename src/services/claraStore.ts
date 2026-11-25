@@ -52,6 +52,26 @@ const VALID_WM_STATUSES = new Set<ClaraWorkManagerStatus>([
   'exenta_exterior',
   'diferencia_valor',
 ]);
+const VALID_WM_RADICACION_STATUSES = new Set([
+  'radicada',
+  'no_radicada',
+  'inconsistencia',
+  'pendiente',
+  'exenta_exterior',
+]);
+const VALID_CUADRE_STATUSES = new Set([
+  'cuadra_ok',
+  'diferencia_monto',
+  'error_aritmetico',
+  'sin_soporte',
+]);
+const VALID_SAP_DISPATCH_STATUSES = new Set([
+  'pendiente',
+  'en_paquete',
+  'enviado_agente',
+  'contabilizado',
+  'error',
+]);
 const VALID_VENDOR_STATUSES = new Set<ClaraVendorSyncStatus>([
   'pendiente_crear',
   'creado_sap',
@@ -60,6 +80,12 @@ const VALID_VENDOR_STATUSES = new Set<ClaraVendorSyncStatus>([
 ]);
 
 const isOfflineError = (err: unknown): boolean => isRecoverableFirestoreSdkError(err);
+
+const sanitizeOptionalMoney = (val: unknown): number | undefined => {
+  if (val === undefined || val === null || val === '') return undefined;
+  const n = Number(val);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : undefined;
+};
 
 const sanitizeTransaction = (raw: ClaraTransaction, idx = 0): ClaraTransaction => ({
   id: String(raw.id || `clara-tx-${idx}`).slice(0, 120),
@@ -93,12 +119,63 @@ const sanitizeTransaction = (raw: ClaraTransaction, idx = 0): ClaraTransaction =
   workManagerNumeroFactura: raw.workManagerNumeroFactura
     ? String(raw.workManagerNumeroFactura).slice(0, 100)
     : undefined,
+  wmRadicacionStatus:
+    raw.wmRadicacionStatus && VALID_WM_RADICACION_STATUSES.has(raw.wmRadicacionStatus)
+      ? raw.wmRadicacionStatus
+      : undefined,
+  wmRadicacionNumero: raw.wmRadicacionNumero
+    ? String(raw.wmRadicacionNumero).slice(0, 100)
+    : undefined,
+  wmRadicacionFecha: raw.wmRadicacionFecha
+    ? String(raw.wmRadicacionFecha).slice(0, 30)
+    : undefined,
+  wmMensajeValidacion: raw.wmMensajeValidacion
+    ? String(raw.wmMensajeValidacion).slice(0, 240)
+    : undefined,
+  facturaNumero: raw.facturaNumero ? String(raw.facturaNumero).slice(0, 100) : undefined,
+  facturaSerie: raw.facturaSerie ? String(raw.facturaSerie).slice(0, 40) : undefined,
+  facturaCufe: raw.facturaCufe ? String(raw.facturaCufe).slice(0, 180) : undefined,
+  facturaFecha: raw.facturaFecha ? String(raw.facturaFecha).slice(0, 20) : undefined,
+  facturaNit: raw.facturaNit ? String(raw.facturaNit).slice(0, 60) : undefined,
+  facturaProveedor: raw.facturaProveedor
+    ? String(raw.facturaProveedor).slice(0, 160)
+    : undefined,
+  facturaMoneda: raw.facturaMoneda ? String(raw.facturaMoneda).slice(0, 12) : undefined,
+  facturaSubtotal: sanitizeOptionalMoney(raw.facturaSubtotal),
+  facturaImpuesto: sanitizeOptionalMoney(raw.facturaImpuesto),
+  facturaPorcentajeImpuesto: sanitizeOptionalMoney(raw.facturaPorcentajeImpuesto),
+  facturaTotal: sanitizeOptionalMoney(raw.facturaTotal),
+  facturaConfianzaIa:
+    raw.facturaConfianzaIa === 'alta' ||
+    raw.facturaConfianzaIa === 'media' ||
+    raw.facturaConfianzaIa === 'baja'
+      ? raw.facturaConfianzaIa
+      : undefined,
+  facturaArchivoNombre: raw.facturaArchivoNombre
+    ? String(raw.facturaArchivoNombre).slice(0, 160)
+    : undefined,
+  facturaCuadreEstado:
+    raw.facturaCuadreEstado && VALID_CUADRE_STATUSES.has(raw.facturaCuadreEstado)
+      ? raw.facturaCuadreEstado
+      : undefined,
+  facturaCuadreNota: raw.facturaCuadreNota
+    ? String(raw.facturaCuadreNota).slice(0, 240)
+    : undefined,
   terceroId: raw.terceroId ? String(raw.terceroId).slice(0, 120) : undefined,
   terceroNit: raw.terceroNit ? String(raw.terceroNit).slice(0, 60) : undefined,
   terceroNombre: raw.terceroNombre ? String(raw.terceroNombre).slice(0, 160) : undefined,
   erpDestino: VALID_ERP_TARGETS.has(raw.erpDestino) ? raw.erpDestino : 'Por definir',
   cuentaContable: raw.cuentaContable ? String(raw.cuentaContable).slice(0, 60) : '',
   indicadorImpuesto: raw.indicadorImpuesto ? String(raw.indicadorImpuesto).slice(0, 60) : '',
+  sapSociedad: raw.sapSociedad ? String(raw.sapSociedad).slice(0, 30) : undefined,
+  sapClaseDoc: raw.sapClaseDoc ? String(raw.sapClaseDoc).slice(0, 12) : undefined,
+  sapCentroCosto: raw.sapCentroCosto ? String(raw.sapCentroCosto).slice(0, 80) : undefined,
+  sapDocContable: raw.sapDocContable ? String(raw.sapDocContable).slice(0, 80) : undefined,
+  sapDespachoEstado:
+    raw.sapDespachoEstado && VALID_SAP_DISPATCH_STATUSES.has(raw.sapDespachoEstado)
+      ? raw.sapDespachoEstado
+      : undefined,
+  sapMensaje: raw.sapMensaje ? String(raw.sapMensaje).slice(0, 240) : undefined,
   estadoContable:
     raw.estadoContable === 'listo_erp' ||
     raw.estadoContable === 'exportado' ||
@@ -218,18 +295,44 @@ const sanitizeConnectorConfig = (
   notaViaticosFutura: String(
     raw?.notaViaticosFutura || INITIAL_CLARA_CONNECTOR_CONFIG.notaViaticosFutura || ''
   ).slice(0, 400),
+  claraUrl: String(raw?.claraUrl || 'https://colombia.clara.com/auth/login').slice(0, 200),
+  workManagerUrl: String(
+    raw?.workManagerUrl || 'https://pan.iluma.bio:8037/Account/Login'
+  ).slice(0, 200),
+  agentUrl: String(raw?.agentUrl || 'http://127.0.0.1:4780').slice(0, 160),
+  executionMode:
+    raw?.executionMode === 'agente_local' || raw?.executionMode === 'sap_bot'
+      ? raw.executionMode
+      : 'hibrido_web',
+  sapSociedadDefault: String(raw?.sapSociedadDefault || '1000').slice(0, 20),
+  sapClaseDocDefault: String(raw?.sapClaseDocDefault || 'KR').slice(0, 12),
+  lastServerProbeIso: raw?.lastServerProbeIso ? String(raw.lastServerProbeIso).slice(0, 60) : '',
+  lastServerProbeSummary: raw?.lastServerProbeSummary
+    ? String(raw.lastServerProbeSummary).slice(0, 260)
+    : '',
 });
 
 const sanitizeBatchLog = (raw: ClaraBatchExportLog, idx = 0): ClaraBatchExportLog => ({
   id: String(raw.id || `batch-${idx}`).slice(0, 120),
   createdAtIso: String(raw.createdAtIso || new Date().toISOString()).slice(0, 60),
   createdBy: String(raw.createdBy || 'Usuario').slice(0, 120),
-  erp: raw.erp === 'Odoo' ? 'Odoo' : 'SAP',
-  tipo: raw.tipo === 'terceros' ? 'terceros' : 'gastos',
+  erp:
+    raw.erp === 'Odoo' || raw.erp === 'Clara' || raw.erp === 'WorkManager'
+      ? raw.erp
+      : 'SAP',
+  tipo:
+    raw.tipo === 'terceros' ||
+    raw.tipo === 'rpa_clara' ||
+    raw.tipo === 'rpa_wm' ||
+    raw.tipo === 'sap_bot'
+      ? raw.tipo
+      : 'gastos',
   cantidadRegistros: Math.max(0, Math.round(Number(raw.cantidadRegistros) || 0)),
   totalMonto: Number.isFinite(Number(raw.totalMonto)) ? Number(raw.totalMonto) : 0,
   moneda: String(raw.moneda || 'COP').slice(0, 12),
   archivoNombre: String(raw.archivoNombre || '').slice(0, 180),
+  estado: raw.estado === 'alerta' || raw.estado === 'error' ? raw.estado : 'ok',
+  detalle: raw.detalle ? String(raw.detalle).slice(0, 300) : '',
 });
 
 const toFirestoreValue = (val: unknown): unknown => {

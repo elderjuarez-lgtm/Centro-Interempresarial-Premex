@@ -302,6 +302,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   const [switcherScope, setSwitcherScope] = useState<'open' | 'closed' | 'all'>('all');
   const [switcherWeekFilter, setSwitcherWeekFilter] = useState<string>('ALL');
   const [switcherCurrencyFilter, setSwitcherCurrencyFilter] = useState<'ALL' | ViaticoCurrency>('ALL');
+  const [isDesktopSwitcherFiltersOpen, setIsDesktopSwitcherFiltersOpen] = useState(false);
+  const [isDesktopHeaderEditing, setIsDesktopHeaderEditing] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [isMobileHeaderExpanded, setIsMobileHeaderExpanded] = useState(false);
 
@@ -1482,13 +1484,111 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         </div>
       </section>
 
-      {/* 1B. DESKTOP CABECERA OFICIAL PREMEX + SELECTOR POR SEMANA / MONEDA / ABIERTAS (>= lg) */}
-      <section className="hidden lg:block bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
-        {/* Top Switcher Bar: Status Scope + Week Filter + Currency Filter + Active Selector */}
-        <div className="px-5 py-3 bg-slate-50/90 border-b border-slate-200/80 space-y-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2.5">
-            <div className="flex flex-wrap items-center gap-2 min-w-0">
-              {/* Status Scope Segmented Filter */}
+      {/* 1B. DESKTOP COMPACT SWITCHER + LIQUIDATION METADATA BAR (>= lg) */}
+      <section className="hidden lg:block bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        {/* Top Switcher Bar */}
+        <div className="px-5 py-2.5 bg-slate-50/80 border-b border-slate-200/80 space-y-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <select
+                value={liquidation.id}
+                aria-label="Seleccionar liquidación activa"
+                onChange={(e) => onSelectLiquidation(e.target.value)}
+                className="text-xs font-semibold text-[#132B63] bg-white border border-slate-200 rounded-xl px-3 py-1.5 max-w-[340px] focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 cursor-pointer"
+              >
+                {!filteredSwitcherLiquidaciones.some((l) => l.id === liquidation.id) && (
+                  <option value={liquidation.id}>
+                    Sem #{liquidation.semana || '-'} · {CURRENCY_SYMBOLS[liquidation.monedaBase]} · {liquidation.lineaLiquidacion} ({liquidation.estado === 'borrador' ? 'Abierta' : liquidation.estado === 'cerrada' ? 'Cerrada' : 'Enviada'})
+                  </option>
+                )}
+                {filteredSwitcherLiquidaciones.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    Sem #{l.semana || '-'} · {CURRENCY_SYMBOLS[l.monedaBase]} · {l.lineaLiquidacion} — {l.consultorNombre} (
+                    {l.estado === 'borrador' ? 'Abierta' : l.estado === 'cerrada' ? 'Cerrada' : 'Enviada'})
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => setIsDesktopSwitcherFiltersOpen((v) => !v)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer whitespace-nowrap ${
+                  isDesktopSwitcherFiltersOpen || hasActiveSwitcherFilters
+                    ? 'bg-[#132B63]/5 text-[#132B63] border-[#132B63]/25'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-[#1E60A8]" />
+                <span>Filtros</span>
+                {hasActiveSwitcherFilters && (
+                  <span className="font-mono text-[10px] font-bold text-[#1E60A8]">•</span>
+                )}
+                {isDesktopSwitcherFiltersOpen ? (
+                  <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                )}
+              </button>
+
+              {hasActiveSwitcherFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSwitcherScope('all');
+                    setSwitcherWeekFilter('ALL');
+                    setSwitcherCurrencyFilter('ALL');
+                  }}
+                  className="text-[11px] font-semibold text-[#1E60A8] hover:text-[#132B63] px-1.5 py-1 cursor-pointer whitespace-nowrap"
+                >
+                  Limpiar
+                </button>
+              )}
+            </div>
+
+            {/* Right: Quick Action Shortcuts & Summary */}
+            <div className="flex items-center gap-2 text-xs text-slate-600 tabular-nums shrink-0">
+              {closedLiquidaciones.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onOpenClosedArchive}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                  title="Ir a la consulta de liquidaciones cerradas"
+                >
+                  <Archive className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Cerradas ({closedLiquidaciones.length})</span>
+                </button>
+              )}
+
+              {permissions.canOperate && (
+                <button
+                  type="button"
+                  onClick={onCreateNewLiquidation}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[#132B63] bg-white hover:bg-sky-50 border border-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                  title="Iniciar otra liquidación (semana / moneda) manteniendo abiertas las actuales"
+                >
+                  <Plus className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Iniciar otra</span>
+                </button>
+              )}
+
+              <span className="text-slate-300">|</span>
+              <span>
+                <strong className="font-semibold text-slate-900">{liquidation.items.length}</strong> fact.
+              </span>
+              <span className="text-slate-300">·</span>
+              <span>
+                <strong className="font-semibold text-slate-900">{attachedCount}</strong> sop.
+              </span>
+              <span className="text-slate-300">·</span>
+              <span className="font-mono font-bold text-[#132B63]">
+                {formatViaticoAmount(liquidation.totalLiquidacion, liquidation.monedaBase, true)}
+              </span>
+            </div>
+          </div>
+
+          {/* Collapsible Switcher Filters Drawer */}
+          {isDesktopSwitcherFiltersOpen && (
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200/70">
               <div className="inline-flex items-center bg-slate-200/70 p-0.5 rounded-xl border border-slate-200">
                 <button
                   type="button"
@@ -1543,8 +1643,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 </button>
               </div>
 
-              {/* Week Filter */}
-              <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 py-1">
+              <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1">
                 <Calendar className="w-3.5 h-3.5 text-[#1E60A8]" />
                 <select
                   value={switcherWeekFilter}
@@ -1567,8 +1666,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 </select>
               </div>
 
-              {/* Currency Filter */}
-              <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 py-1">
+              <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1">
                 <Coins className="w-3.5 h-3.5 text-[#1E60A8]" />
                 <select
                   value={switcherCurrencyFilter}
@@ -1590,87 +1688,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   ))}
                 </select>
               </div>
-
-              {/* Active Liquidation Selector Dropdown */}
-              <select
-                value={liquidation.id}
-                aria-label="Seleccionar liquidación activa"
-                onChange={(e) => onSelectLiquidation(e.target.value)}
-                className="text-xs font-semibold text-[#132B63] bg-white border border-slate-300 rounded-xl px-3 py-1.5 max-w-[340px] focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-              >
-                {!filteredSwitcherLiquidaciones.some((l) => l.id === liquidation.id) && (
-                  <option value={liquidation.id}>
-                    Sem #{liquidation.semana || '-'} · {CURRENCY_SYMBOLS[liquidation.monedaBase]} · {liquidation.lineaLiquidacion} ({liquidation.estado === 'borrador' ? 'Abierta' : liquidation.estado === 'cerrada' ? 'Cerrada' : 'Enviada'})
-                  </option>
-                )}
-                {filteredSwitcherLiquidaciones.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    Sem #{l.semana || '-'} · {CURRENCY_SYMBOLS[l.monedaBase]} · {l.lineaLiquidacion} — {l.consultorNombre} (
-                    {l.estado === 'borrador' ? 'Abierta' : l.estado === 'cerrada' ? 'Cerrada' : 'Enviada'})
-                  </option>
-                ))}
-              </select>
-
-              {hasActiveSwitcherFilters && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSwitcherScope('all');
-                    setSwitcherWeekFilter('ALL');
-                    setSwitcherCurrencyFilter('ALL');
-                  }}
-                  className="text-[11px] font-semibold text-[#1E60A8] hover:text-[#132B63] px-1.5 py-1 cursor-pointer whitespace-nowrap"
-                >
-                  Limpiar filtros
-                </button>
-              )}
             </div>
+          )}
 
-            {/* Right: Quick Action Shortcuts & Summary */}
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 tabular-nums">
-              {closedLiquidaciones.length > 0 && (
-                <button
-                  type="button"
-                  onClick={onOpenClosedArchive}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-                  title="Ir a la consulta de liquidaciones cerradas"
-                >
-                  <Archive className="w-3.5 h-3.5 text-[#1E60A8]" />
-                  <span>Cerradas ({closedLiquidaciones.length})</span>
-                </button>
-              )}
-
-              {permissions.canOperate && (
-                <button
-                  type="button"
-                  onClick={onCreateNewLiquidation}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-                  title="Iniciar otra liquidación (semana / moneda) manteniendo abiertas las actuales"
-                >
-                  <Plus className="w-3.5 h-3.5 text-[#1E60A8]" />
-                  <span>Iniciar otra</span>
-                </button>
-              )}
-
-              <span className="text-slate-300">|</span>
-              <span>
-                <strong className="font-semibold text-slate-900">{liquidation.items.length}</strong>{' '}
-                fact.
-              </span>
-              <span className="text-slate-300">·</span>
-              <span>
-                <strong className="font-semibold text-slate-900">{attachedCount}</strong> sop.
-              </span>
-              <span className="text-slate-300">·</span>
-              <span className="font-mono font-bold text-[#132B63]">
-                {formatViaticoAmount(liquidation.totalLiquidacion, liquidation.monedaBase, true)}
-              </span>
-            </div>
-          </div>
-
-          {/* Row 2: Quick-Switch Tabs for Concurrent Open Liquidations */}
-          {switcherScope !== 'closed' && openTabsList.length > 0 && (
-            <div className="flex items-center gap-1.5 overflow-x-auto touch-scroll-x pb-0.5 pt-1 border-t border-slate-200/70">
+          {/* Quick-Switch Tabs only when there is more than 1 open liquidation */}
+          {switcherScope !== 'closed' && openTabsList.length > 1 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto touch-scroll-x pb-0.5 pt-1.5 border-t border-slate-200/70">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">
                 Abiertas:
               </span>
@@ -1687,11 +1710,6 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         : 'bg-white text-slate-700 border-slate-200 hover:border-[#1E60A8] hover:text-[#132B63]'
                     }`}
                   >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isSelected ? 'bg-amber-300' : 'bg-amber-500'
-                      }`}
-                    />
                     <span className="font-mono font-bold tabular-nums">
                       S{openLiq.semana || '-'}
                     </span>
@@ -1719,162 +1737,198 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           )}
         </div>
 
-        {/* Premex Form Header Content */}
-        <div className="p-6 grid grid-cols-12 gap-6 items-center">
-          {/* Left: LIQUIDACIÓN / SEMANA # / NOMBRE: */}
-          <div className="col-span-7 space-y-3">
-            <div className="grid grid-cols-12 items-center gap-3">
-              <label className="col-span-3 text-xs font-extrabold tracking-wide text-slate-900 uppercase">
-                LIQUIDACIÓN
-              </label>
-              <div className="col-span-9">
-                <input
-                  type="text"
-                  value={liquidation.lineaLiquidacion}
-                  disabled={isLocked}
-                  onChange={(e) => onUpdateHeader({ lineaLiquidacion: e.target.value })}
-                  placeholder="Ej. Visita Premicol SA de CV"
-                  className="w-full px-2.5 py-1.5 text-sm font-semibold text-slate-900 bg-transparent border-b-2 border-slate-300 focus:border-[#1E60A8] focus:outline-hidden disabled:text-slate-600 disabled:border-slate-200"
-                />
-              </div>
+        {/* Compact Summary Metadata Strip + Toggleable Form Editor */}
+        <div className="px-5 py-3 flex items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Liquidación:</span>
+              <span className="font-bold text-slate-900 truncate max-w-[220px]">
+                {liquidation.lineaLiquidacion || 'Sin título'}
+              </span>
             </div>
 
-            <div className="grid grid-cols-12 items-center gap-3">
-              <label className="col-span-3 text-xs font-extrabold tracking-wide text-slate-900 uppercase">
-                SEMANA #
-              </label>
-              <div className="col-span-4">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={liquidation.semana}
-                  disabled={isLocked}
-                  onChange={(e) => onUpdateHeader({ semana: e.target.value })}
-                  placeholder="Ej. 31"
-                  className="w-full px-2.5 py-1.5 text-sm font-semibold text-slate-900 text-center bg-transparent border-b-2 border-slate-300 focus:border-[#1E60A8] focus:outline-hidden tabular-nums disabled:text-slate-600 disabled:border-slate-200"
-                />
-              </div>
-
-              <div className="col-span-5 flex items-center gap-2">
-                <label className="text-[11px] font-bold text-slate-500 uppercase shrink-0">
-                  Moneda:
-                </label>
-                <select
-                  value={liquidation.monedaBase}
-                  disabled={isLocked}
-                  onChange={(e) =>
-                    onUpdateHeader({ monedaBase: e.target.value as ViaticoCurrency })
-                  }
-                  className="flex-1 text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:opacity-70"
-                >
-                  {VIATICO_CURRENCIES.map((cur) => (
-                    <option key={cur} value={cur}>
-                      {cur}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="flex items-center gap-1.5 tabular-nums">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Semana:</span>
+              <span className="font-bold text-slate-900 font-mono">#{liquidation.semana || '-'}</span>
             </div>
 
-            {liquidation.monedaBase === 'Dólares' && (
-              <div className="grid grid-cols-12 items-center gap-3">
-                <label className="col-span-3 text-xs font-extrabold tracking-wide text-[#132B63] uppercase">
-                  T/C LIQUIDACIÓN
-                </label>
-                <div className="col-span-4">
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.0001"
-                    min="0.0001"
-                    value={docFxDraft}
-                    disabled={isLocked}
-                    onChange={(e) => handleDocFxDraftChange(e.target.value)}
-                    onBlur={handleDocFxBlur}
-                    placeholder="Ej. 7.75"
-                    aria-label="Tipo de cambio de liquidación en dólares"
-                    className="w-full px-2.5 py-1.5 text-sm font-mono font-bold text-[#132B63] text-right bg-sky-50/70 border border-[#1E60A8]/40 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 tabular-nums disabled:opacity-70"
-                  />
-                </div>
-                <div className="col-span-5 text-[11px] font-medium text-slate-500">
-                  Aplica a todo el documento
-                </div>
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Nombre:</span>
+              <span className="font-semibold text-slate-800 truncate max-w-[190px]">
+                {liquidation.consultorNombre}
+              </span>
+            </div>
 
-            <div className="grid grid-cols-12 items-center gap-3">
-              <label className="col-span-3 text-xs font-extrabold tracking-wide text-slate-900 uppercase">
-                NOMBRE:
-              </label>
-              <div className="col-span-9">
-                <select
-                  value={liquidation.consultorId}
-                  disabled={isLocked || (isLockedToOwnConsultor && availableConsultores.length <= 1)}
-                  onChange={(e) => {
-                    const chosen = availableConsultores.find((c) => c.id === e.target.value);
-                    if (!chosen) return;
-                    const matchedComp =
-                      moduleCompanies.length > 0
-                        ? moduleCompanies.find(
-                            (c) => normalizeCompanyKey(c.nombre) === normalizeCompanyKey(chosen.empresa)
-                          ) || moduleCompanies[0]
-                        : null;
-                    onUpdateHeader({
-                      consultorId: chosen.id,
-                      consultorNombre: chosen.nombreCompleto,
-                      consultorEmail: chosen.email,
-                      empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
-                      centroCosto: chosen.centroCosto || '',
-                      odooEmployeeName: chosen.odooEmployeeName || '',
-                      odooAnalyticDistribution: chosen.odooAnalyticDistribution || '',
-                      monedaBase: chosen.monedaBase,
-                    });
-                  }}
-                  className="w-full px-2.5 py-1.5 text-sm font-semibold text-slate-900 bg-transparent border-b-2 border-slate-300 focus:border-[#1E60A8] focus:outline-hidden disabled:text-slate-700 disabled:border-slate-200 disabled:bg-slate-50/60"
-                >
-                  {!availableConsultores.some((c) => c.id === liquidation.consultorId) && (
-                    <option value={liquidation.consultorId}>
-                      {liquidation.consultorNombre}
-                    </option>
-                  )}
-                  {availableConsultores.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombreCompleto} — {c.empresa}
-                    </option>
-                  ))}
-                </select>
-                {detectedFromEmailLabel && (
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    {isLockedToOwnConsultor
-                      ? `Liquidador bloqueado por correo: ${detectedFromEmailLabel}`
-                      : `Sesión detectada: ${detectedFromEmailLabel}`}
-                  </p>
-                )}
-              </div>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Sociedad:</span>
+              <span className="font-semibold text-[#132B63] truncate max-w-[170px]">
+                {liquidation.empresa}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 tabular-nums">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Moneda:</span>
+              <span className="font-semibold text-slate-800">{liquidation.monedaBase}</span>
+              {liquidation.monedaBase === 'Dólares' && (
+                <span className="font-mono font-bold text-[#1E60A8]">
+                  (T/C {docExchangeRate || '1.00'})
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">C.C.:</span>
+              <span className={`font-semibold ${resolvedCostCenter ? 'text-slate-800' : 'text-amber-700'}`}>
+                {resolvedCostCenter || 'Sin asignar'}
+              </span>
             </div>
           </div>
 
-          {/* Right: Premex Corporate Branding + Tagline + Empresa + Centro de Costo */}
-          <div className="col-span-5 flex items-center justify-end gap-4">
-            <div className="flex items-center gap-2.5">
-              <PremexBrandLogo className="h-14 w-auto shrink-0" />
-              <div className="text-[11px] font-bold tracking-[0.16em] text-slate-500 leading-tight uppercase">
-                <div>NOURISHING</div>
-                <div>POSSIBILITIES</div>
-                <div>TOGETHER</div>
-              </div>
+          <button
+            type="button"
+            onClick={() => setIsDesktopHeaderEditing((v) => !v)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Pencil className="w-3.5 h-3.5 text-[#1E60A8]" />
+            <span>{isDesktopHeaderEditing ? 'Listo' : 'Editar encabezado'}</span>
+            {isDesktopHeaderEditing ? (
+              <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            )}
+          </button>
+        </div>
+
+        {/* Expanded Clean Header Form Grid */}
+        {isDesktopHeaderEditing && (
+          <div className="px-5 py-4 bg-slate-50/50 border-t border-slate-200/80 grid grid-cols-12 gap-4 items-end">
+            <div className="col-span-4">
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                Título / Liquidación
+              </label>
+              <input
+                type="text"
+                value={liquidation.lineaLiquidacion}
+                disabled={isLocked}
+                onChange={(e) => onUpdateHeader({ lineaLiquidacion: e.target.value })}
+                placeholder="Ej. Visita Premicol SA de CV"
+                className="w-full px-3 py-1.5 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-100"
+              />
             </div>
 
-            <div className="pl-4 border-l border-slate-200 text-right">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Sociedad
+            <div className="col-span-2">
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                Semana #
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={liquidation.semana}
+                disabled={isLocked}
+                onChange={(e) => onUpdateHeader({ semana: e.target.value })}
+                placeholder="Ej. 31"
+                className="w-full px-3 py-1.5 text-xs font-semibold text-slate-900 text-center bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 tabular-nums disabled:bg-slate-100"
+              />
+            </div>
+
+            <div className={liquidation.monedaBase === 'Dólares' ? 'col-span-3' : 'col-span-6'}>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                Moneda Base
+              </label>
+              <select
+                value={liquidation.monedaBase}
+                disabled={isLocked}
+                onChange={(e) =>
+                  onUpdateHeader({ monedaBase: e.target.value as ViaticoCurrency })
+                }
+                className="w-full px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:opacity-70"
+              >
+                {VIATICO_CURRENCIES.map((cur) => (
+                  <option key={cur} value={cur}>
+                    {cur}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {liquidation.monedaBase === 'Dólares' && (
+              <div className="col-span-3">
+                <label className="block text-[11px] font-semibold text-[#132B63] mb-1">
+                  T/C Liquidación ($)
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.0001"
+                  min="0.0001"
+                  value={docFxDraft}
+                  disabled={isLocked}
+                  onChange={(e) => handleDocFxDraftChange(e.target.value)}
+                  onBlur={handleDocFxBlur}
+                  placeholder="Ej. 7.75"
+                  aria-label="Tipo de cambio de liquidación en dólares"
+                  className="w-full px-3 py-1.5 text-xs font-mono font-bold text-[#132B63] text-right bg-sky-50/70 border border-[#1E60A8]/40 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 tabular-nums disabled:opacity-70"
+                />
               </div>
+            )}
+
+            <div className="col-span-6">
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                Nombre / Liquidador
+                {detectedFromEmailLabel && (
+                  <span className="font-normal text-slate-400 ml-1.5">
+                    ({isLockedToOwnConsultor ? `bloqueado: ${detectedFromEmailLabel}` : detectedFromEmailLabel})
+                  </span>
+                )}
+              </label>
+              <select
+                value={liquidation.consultorId}
+                disabled={isLocked || (isLockedToOwnConsultor && availableConsultores.length <= 1)}
+                onChange={(e) => {
+                  const chosen = availableConsultores.find((c) => c.id === e.target.value);
+                  if (!chosen) return;
+                  const matchedComp =
+                    moduleCompanies.length > 0
+                      ? moduleCompanies.find(
+                          (c) => normalizeCompanyKey(c.nombre) === normalizeCompanyKey(chosen.empresa)
+                        ) || moduleCompanies[0]
+                      : null;
+                  onUpdateHeader({
+                    consultorId: chosen.id,
+                    consultorNombre: chosen.nombreCompleto,
+                    consultorEmail: chosen.email,
+                    empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
+                    centroCosto: chosen.centroCosto || '',
+                    odooEmployeeName: chosen.odooEmployeeName || '',
+                    odooAnalyticDistribution: chosen.odooAnalyticDistribution || '',
+                    monedaBase: chosen.monedaBase,
+                  });
+                }}
+                className="w-full px-3 py-1.5 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:text-slate-700 disabled:bg-slate-100"
+              >
+                {!availableConsultores.some((c) => c.id === liquidation.consultorId) && (
+                  <option value={liquidation.consultorId}>
+                    {liquidation.consultorNombre}
+                  </option>
+                )}
+                {availableConsultores.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombreCompleto} — {c.empresa}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="col-span-6">
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                Sociedad · {liquidation.consultorEmail || 'Sin correo'}
+              </label>
               {!isLocked && moduleCompanies.length > 0 ? (
                 <select
                   value={liquidation.empresa}
                   onChange={(e) => onUpdateHeader({ empresa: e.target.value })}
                   aria-label="Sociedad de la liquidación"
-                  className="mt-0.5 text-xs font-bold text-[#132B63] bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 max-w-[190px]"
+                  className="w-full text-xs font-semibold text-[#132B63] bg-white border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 >
                   {!moduleCompanies.some((c) => c.nombre === liquidation.empresa) && (
                     <option value={liquidation.empresa}>{liquidation.empresa}</option>
@@ -1886,20 +1940,13 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   ))}
                 </select>
               ) : (
-                <div className="text-xs font-bold text-[#132B63]">{liquidation.empresa}</div>
+                <div className="px-3 py-1.5 text-xs font-bold text-[#132B63] bg-white border border-slate-200 rounded-lg">
+                  {liquidation.empresa}
+                </div>
               )}
-              <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                {liquidation.consultorEmail || 'Sin correo'}
-              </div>
-              <div className="text-[11px] font-semibold text-[#132B63] mt-0.5">
-                C.C.:{' '}
-                <span className={resolvedCostCenter ? '' : 'text-amber-700 font-normal italic'}>
-                  {resolvedCostCenter || 'Sin asignar'}
-                </span>
-              </div>
             </div>
           </div>
-        </div>
+        )}
       </section>
 
       {/* Closed / Read-Only Notice with Direct Download & Archive Actions */}
@@ -2644,11 +2691,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               </div>
 
               {/* Sub-section C: Clasificación Contable Odoo por Documento */}
-              <div className="rounded-2xl lg:rounded-xl border border-slate-200 bg-slate-50/70 overflow-hidden">
+              <div className="pt-2 border-t border-slate-200/80">
                 <button
                   type="button"
                   onClick={() => setShowOdooDocFields((v) => !v)}
-                  className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-slate-100/80 transition-colors cursor-pointer"
+                  className="w-full py-2 flex items-center justify-between gap-2 text-left hover:bg-slate-50 rounded-xl px-2 transition-colors cursor-pointer"
                 >
                   <div className="min-w-0">
                     <span className="text-xs lg:text-[11px] font-extrabold uppercase tracking-wider text-[#132B63]">
@@ -2794,8 +2841,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               </div>
 
               {/* Sub-section D: Dividir gastos entre empleados (última opción, solo aplicada en descarga Odoo) */}
-              <div className="rounded-2xl lg:rounded-xl border border-slate-200 bg-slate-50/70 overflow-hidden">
-                <div className="px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="pt-2 border-t border-slate-200/80">
+                <div className="px-2 py-2 flex flex-wrap items-center justify-between gap-2">
                   <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
                     <input
                       type="checkbox"

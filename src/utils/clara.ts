@@ -12,6 +12,8 @@ import {
   EffectivePermissions,
 } from '../types';
 
+import { ClaraExtractedInvoiceData } from '../services/claraAi';
+
 export const DEFAULT_CLARA_DOC_ID = 'premex-clara-principal';
 
 export const INITIAL_CLARA_CONNECTOR_CONFIG: ClaraConnectorConfig = {
@@ -24,6 +26,12 @@ export const INITIAL_CLARA_CONNECTOR_CONFIG: ClaraConnectorConfig = {
   detectarExteriorAutomatico: true,
   notaViaticosFutura:
     'Integración futura planificada: las legalizaciones sin soporte en tarjeta corporativa o cruces de reembolso podrán conectarse con Liquidación de Viáticos en una segunda fase.',
+  claraUrl: 'https://colombia.clara.com/auth/login',
+  workManagerUrl: 'https://pan.iluma.bio:8037/Account/Login',
+  agentUrl: 'http://127.0.0.1:4780',
+  executionMode: 'hibrido_web',
+  sapSociedadDefault: '1000',
+  sapClaseDocDefault: 'KR',
 };
 
 export const INITIAL_CLARA_COST_CENTER_RULES: ClaraCostCenterRule[] = [
@@ -661,30 +669,45 @@ export const reconcileClaraState = (params: {
       }
     }
 
-    // 3. Foreign origin check
+    // 3. Foreign origin & Work Manager Radicacion check
     if (tx.origenGasto === 'exterior') {
       tx.workManagerStatus = 'exenta_exterior';
+      tx.wmRadicacionStatus = 'exenta_exterior';
+      tx.wmMensajeValidacion = tx.motivoExterior || 'Gasto del exterior exento de radicación WM.';
       tx.workManagerInvoiceId = undefined;
       tx.workManagerNumeroFactura = undefined;
     } else {
-      // Check manual link first
       let matchedInv = tx.workManagerInvoiceId
         ? nextInvoices.find((inv) => inv.id === tx.workManagerInvoiceId)
         : undefined;
 
-      // Auto-match if not manually linked
       if (!matchedInv) {
-        const txNit = normalizeNitKey(tx.nitComercio || tx.terceroNit);
-        const txMerchant = normalizeTextKey(tx.comercio);
+        const txNit = normalizeNitKey(tx.facturaNit || tx.nitComercio || tx.terceroNit);
+        const txMerchant = normalizeTextKey(tx.facturaProveedor || tx.comercio);
         const txVendorName = normalizeTextKey(tx.terceroNombre);
         const obsUpper = String(tx.observacion || '').toUpperCase();
+        const extractedNumUpper = String(tx.facturaNumero || '').trim().toUpperCase();
+        const extractedCufe = String(tx.facturaCufe || '').trim().toLowerCase();
 
         matchedInv = nextInvoices.find((inv) => {
           const alreadyUsedBy = invoiceLinks.get(inv.id);
           if (alreadyUsedBy && alreadyUsedBy !== tx.id) return false;
 
-          // A. Invoice number mentioned in Clara observation
-          if (inv.numeroFactura && obsUpper.includes(inv.numeroFactura.toUpperCase())) {
+          // 0. Exact CUFE match
+          if (extractedCufe && inv.cufe && inv.cufe.trim().toLowerCase() === extractedCufe) {
+            return true;
+          }
+
+          // A. Exact invoice number match from AI extraction or Clara observation
+          const invNumUpper = String(inv.numeroFactura || '').trim().toUpperCase();
+          if (
+            invNumUpper &&
+            ((extractedNumUpper &&
+              (invNumUpper === extractedNumUpper ||
+                invNumUpper.includes(extractedNumUpper) ||
+                extractedNumUpper.includes(invNumUpper))) ||
+              obsUpper.includes(invNumUpper))
+          ) {
             return true;
           }
 
@@ -698,9 +721,10 @@ export const reconcileClaraState = (params: {
 
           if (!sameNit && !sameName) return false;
 
-          const dayDiff = daysBetweenIso(tx.fecha, inv.fechaEmision);
-          const amountDiff = Math.abs(Number(tx.valor) - Number(inv.total));
-          return dayDiff <= maxDays && amountDiff <= Math.max(tolerance, tx.valor * 0.05);
+          const dayDiff = daysBetweenIso(tx.facturaFecha || tx.fecha, inv.fechaEmision);
+          const refTotal = Number(tx.facturaTotal || tx.valor);
+          const amountDiff = Math.abs(refTotal - Number(inv.total));
+          return dayDiff <= maxDays && amountDiff <= Math.max(tolerance, refTotal * 0.05);
         });
       }
 
@@ -708,17 +732,39 @@ export const reconcileClaraState = (params: {
         invoiceLinks.set(matchedInv.id, tx.id);
         tx.workManagerInvoiceId = matchedInv.id;
         tx.workManagerNumeroFactura = matchedInv.numeroFactura;
+        tx.wmRadicacionNumero = matchedInv.numeroFactura;
+        tx.wmRadicacionFecha = matchedInv.fechaEmision;
         if (!tx.nitComercio && matchedInv.nitEmisor) {
           tx.nitComercio = matchedInv.nitEmisor;
         }
         const diff = Math.abs(Number(tx.valor) - Number(matchedInv.total));
-        tx.workManagerStatus = diff <= tolerance ? 'validada' : 'diferencia_valor';
+        if (matchedInv.estadoDian === 'Con Reclamo') {
+          tx.workManagerStatus = 'diferencia_valor';
+          tx.wmRadicacionStatus = 'inconsistencia';
+          tx.wmMensajeValidacion = 'Factura en Work Manager presenta reclamo o rechazo.';
+        } else if (diff <= tolerance) {
+          tx.workManagerStatus = 'validada';
+          tx.wmRadicacionStatus = 'radicada';
+          tx.wmMensajeValidacion = `Radicada y conciliada (${matchedInv.numeroFactura}).`;
+        } else {
+          tx.workManagerStatus = 'diferencia_valor';
+          tx.wmRadicacionStatus = 'inconsistencia';
+          tx.wmMensajeValidacion = `Diferencia vs WM de ${formatClaraMoney(diff, tx.moneda)}.`;
+        }
       } else {
         tx.workManagerInvoiceId = undefined;
         tx.workManagerNumeroFactura = undefined;
         tx.workManagerStatus = 'pendiente_factura';
+        if (tx.wmRadicacionStatus !== 'no_radicada' && tx.wmRadicacionStatus !== 'inconsistencia') {
+          tx.wmRadicacionStatus = tx.facturaNumero ? 'no_radicada' : 'pendiente';
+        }
       }
     }
+
+    // Evaluate invoice arithmetic & cuadre status
+    const cuadre = evaluateClaraInvoiceCuadre(tx, tolerance);
+    tx.facturaCuadreEstado = cuadre.status;
+    tx.facturaCuadreNota = cuadre.note;
 
     // 4. Update accounting readiness if not yet exported/posted
     if (tx.estadoContable !== 'exportado' && tx.estadoContable !== 'contabilizado') {
@@ -1317,3 +1363,285 @@ export const wmStatusLabel = (status: ClaraWorkManagerStatus): string => {
       return 'Pendiente factura WM';
   }
 };
+
+export const evaluateClaraInvoiceCuadre = (
+  tx: Pick<
+    ClaraTransaction,
+    'valor' | 'moneda' | 'facturaTotal' | 'facturaSubtotal' | 'facturaImpuesto' | 'facturaNumero'
+  >,
+  tolerance = 5
+): {
+  status: NonNullable<ClaraTransaction['facturaCuadreEstado']>;
+  note: string;
+} => {
+  if (!tx.facturaNumero && !(tx.facturaTotal && tx.facturaTotal > 0)) {
+    return {
+      status: 'sin_soporte',
+      note: 'Sin factura adjunta escaneada aún.',
+    };
+  }
+
+  const sub = Number(tx.facturaSubtotal || 0);
+  const tax = Number(tx.facturaImpuesto || 0);
+  const totalInv = Number(tx.facturaTotal || 0);
+  const claraVal = Number(tx.valor || 0);
+  const tol = Math.max(1, tolerance);
+
+  if (totalInv > 0 && sub > 0 && Math.abs(sub + tax - totalInv) > tol) {
+    return {
+      status: 'error_aritmetico',
+      note: `Subtotal (${sub}) + Impuesto (${tax}) no suma Total factura (${totalInv}).`,
+    };
+  }
+
+  if (totalInv > 0 && Math.abs(claraVal - totalInv) > Math.max(tol, claraVal * 0.02)) {
+    return {
+      status: 'diferencia_monto',
+      note: `Diferencia Clara (${formatClaraMoney(claraVal, tx.moneda)}) vs Factura (${formatClaraMoney(totalInv, tx.moneda)}).`,
+    };
+  }
+
+  return {
+    status: 'cuadra_ok',
+    note: 'Cuadre aritmético y monto Clara validados.',
+  };
+};
+
+export const applyExtractedInvoiceToTransaction = (
+  tx: ClaraTransaction,
+  extracted: ClaraExtractedInvoiceData,
+  fileName: string,
+  tolerance = 5
+): ClaraTransaction => {
+  const next: ClaraTransaction = {
+    ...tx,
+    facturaNumero: extracted.numeroFactura || tx.facturaNumero,
+    facturaSerie: extracted.serieDoc || tx.facturaSerie,
+    facturaCufe: extracted.cufe || tx.facturaCufe,
+    facturaFecha: extracted.fechaFactura || tx.facturaFecha,
+    facturaNit: extracted.nitEmisor || tx.facturaNit,
+    facturaProveedor: extracted.razonSocialEmisor || tx.facturaProveedor,
+    facturaMoneda: extracted.moneda || tx.facturaMoneda,
+    facturaSubtotal: extracted.subtotal,
+    facturaImpuesto: extracted.impuesto,
+    facturaPorcentajeImpuesto: extracted.porcentajeImpuesto,
+    facturaTotal: extracted.total,
+    facturaConfianzaIa: extracted.confianza,
+    facturaArchivoNombre: fileName,
+    nitComercio: tx.nitComercio || extracted.nitEmisor,
+    cuentaContable: tx.cuentaContable || extracted.cuentaMayorSugerida || undefined,
+    indicadorImpuesto: tx.indicadorImpuesto || extracted.indicadorImpuestoSap || undefined,
+    workManagerNumeroFactura: tx.workManagerNumeroFactura || extracted.numeroFactura || undefined,
+    observacion: tx.observacion?.trim()
+      ? tx.observacion
+      : extracted.descripcionSugerida || tx.observacion,
+  };
+  const cuadre = evaluateClaraInvoiceCuadre(next, tolerance);
+  next.facturaCuadreEstado = cuadre.status;
+  next.facturaCuadreNota = cuadre.note;
+  return next;
+};
+
+export const findBestTxForExtractedInvoice = (
+  extracted: ClaraExtractedInvoiceData,
+  fileName: string,
+  transactions: ClaraTransaction[],
+  tolerance = 5
+): ClaraTransaction | undefined => {
+  const upperFile = fileName.toUpperCase();
+  const byTxIdInFile = transactions.find(
+    (t) => t.claraTxId && upperFile.includes(t.claraTxId.toUpperCase())
+  );
+  if (byTxIdInFile) return byTxIdInFile;
+
+  const invNum = String(extracted.numeroFactura || '').trim().toUpperCase();
+  if (invNum) {
+    const byObsOrWm = transactions.find(
+      (t) =>
+        String(t.workManagerNumeroFactura || '').toUpperCase() === invNum ||
+        String(t.observacion || '').toUpperCase().includes(invNum)
+    );
+    if (byObsOrWm) return byObsOrWm;
+  }
+
+  const invNit = normalizeNitKey(extracted.nitEmisor);
+  const invVendor = normalizeTextKey(extracted.razonSocialEmisor);
+  const invTotal = Number(extracted.total || 0);
+
+  return transactions.find((t) => {
+    if (t.facturaNumero) return false;
+    const txNit = normalizeNitKey(t.nitComercio || t.terceroNit);
+    const txMerchant = normalizeTextKey(t.comercio);
+    const sameParty =
+      (invNit && txNit && invNit === txNit) ||
+      (invVendor && txMerchant && (invVendor.includes(txMerchant) || txMerchant.includes(invVendor)));
+    const amountClose = invTotal > 0 && Math.abs(t.valor - invTotal) <= Math.max(tolerance, t.valor * 0.03);
+    return (sameParty && amountClose) || (amountClose && !t.facturaArchivoNombre);
+  });
+};
+
+export interface SapBotDispatchItem {
+  txId: string;
+  claraTxId: string;
+  sociedadSap: string;
+  claseDoc: string;
+  fechaClara: string;
+  fechaFactura: string;
+  numeroFactura: string;
+  cufe: string;
+  codigoAcreedorSap: string;
+  nitTercero: string;
+  nombreTercero: string;
+  cuentaMayor: string;
+  centroCostoSap: string;
+  moneda: string;
+  subtotal: number;
+  impuesto: number;
+  total: number;
+  indicadorImpuesto: string;
+  textoPosicion: string;
+  tarjetahabiente: string;
+  estadoWorkManager: string;
+}
+
+export interface SapBotDispatchPackage {
+  schemaVersion: 'premex-sap-bot-v1';
+  batchId: string;
+  generatedAtIso: string;
+  generatedBy: string;
+  itemsCount: number;
+  items: SapBotDispatchItem[];
+}
+
+export const buildSapBotDispatchPackage = (params: {
+  transactions: ClaraTransaction[];
+  vendors: ClaraVendor[];
+  rules: ClaraCostCenterRule[];
+  connectorConfig: ClaraConnectorConfig;
+  userName: string;
+}): SapBotDispatchPackage => {
+  const { transactions, vendors, rules, connectorConfig, userName } = params;
+  const items: SapBotDispatchItem[] = transactions.map((tx) => {
+    const vendor = findMatchingVendor(tx, vendors);
+    const rule = rules.find(
+      (r) =>
+        r.activa &&
+        normalizeTextKey(r.sociedad) === normalizeTextKey(tx.sociedad) &&
+        (normalizeTextKey(r.centroCostoClara) === normalizeTextKey(tx.centroCosto) ||
+          normalizeTextKey(tx.centroCosto).includes(normalizeTextKey(r.centroCostoClara)))
+    );
+
+    const total = Number(tx.facturaTotal || tx.valor || 0);
+    const impuesto = Number(tx.facturaImpuesto || 0);
+    const subtotal =
+      tx.facturaSubtotal !== undefined
+        ? Number(tx.facturaSubtotal)
+        : Math.max(0, Math.round((total - impuesto) * 100) / 100);
+
+    return {
+      txId: tx.id,
+      claraTxId: tx.claraTxId || tx.id,
+      sociedadSap: tx.sapSociedad || rule?.sociedadSap || connectorConfig.sapSociedadDefault || '1000',
+      claseDoc: tx.sapClaseDoc || connectorConfig.sapClaseDocDefault || 'KR',
+      fechaClara: tx.fecha,
+      fechaFactura: tx.facturaFecha || tx.fecha,
+      numeroFactura:
+        tx.facturaNumero ||
+        tx.wmRadicacionNumero ||
+        tx.workManagerNumeroFactura ||
+        tx.claraTxId ||
+        tx.id,
+      cufe: tx.facturaCufe || '',
+      codigoAcreedorSap: vendor?.codigoTerceroSap || '',
+      nitTercero: vendor?.nitTaxId || tx.facturaNit || tx.nitComercio || '',
+      nombreTercero: vendor?.razonSocial || tx.facturaProveedor || tx.comercio,
+      cuentaMayor: tx.cuentaContable || rule?.cuentaContableDefault || vendor?.cuentaGastoDefault || '',
+      centroCostoSap: tx.sapCentroCosto || rule?.codigoCentroCostoErp || tx.centroCosto,
+      moneda: tx.facturaMoneda || tx.moneda || 'COP',
+      subtotal,
+      impuesto,
+      total,
+      indicadorImpuesto:
+        tx.indicadorImpuesto?.split(' ')[0] || (tx.origenGasto === 'exterior' ? 'S0' : 'V19'),
+      textoPosicion: `${tx.tarjetahabiente}: ${tx.observacion}`.trim().slice(0, 50),
+      tarjetahabiente: tx.tarjetahabiente,
+      estadoWorkManager: tx.wmRadicacionStatus || tx.workManagerStatus,
+    };
+  });
+
+  return {
+    schemaVersion: 'premex-sap-bot-v1',
+    batchId: `SAP-BOT-${Date.now()}`,
+    generatedAtIso: new Date().toISOString(),
+    generatedBy: userName,
+    itemsCount: items.length,
+    items,
+  };
+};
+
+export const downloadSapBotPackageJson = (pkg: SapBotDispatchPackage): string => {
+  const fileName = `paquete_sap_bot_${new Date().toISOString().slice(0, 10)}.json`;
+  const blob = new Blob([JSON.stringify(pkg, null, 2)], {
+    type: 'application/json;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return fileName;
+};
+
+export const downloadSapBotPackageTxt = (pkg: SapBotDispatchPackage): string => {
+  const fileName = `plano_sap_fb60_${new Date().toISOString().slice(0, 10)}.txt`;
+  const header = [
+    'SOCIEDAD',
+    'CLASE_DOC',
+    'FECHA_DOC',
+    'REFERENCIA',
+    'ACREEDOR_SAP',
+    'NIT',
+    'MONEDA',
+    'TOTAL',
+    'IMPUESTO',
+    'IND_IMP',
+    'CUENTA_MAYOR',
+    'CENTRO_COSTO',
+    'TEXTO_POSICION',
+  ].join('\t');
+
+  const lines = pkg.items.map((i) =>
+    [
+      i.sociedadSap,
+      i.claseDoc,
+      i.fechaFactura,
+      i.numeroFactura,
+      i.codigoAcreedorSap || 'PENDIENTE',
+      i.nitTercero,
+      i.moneda,
+      i.total,
+      i.impuesto,
+      i.indicadorImpuesto,
+      i.cuentaMayor,
+      i.centroCostoSap,
+      i.textoPosicion.replace(/\t/g, ' '),
+    ].join('\t')
+  );
+
+  const blob = new Blob([[header, ...lines].join('\n')], {
+    type: 'text/plain;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return fileName;
+};
+

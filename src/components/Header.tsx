@@ -1,14 +1,15 @@
-import React from 'react';
-import { 
-  Menu, 
-  FileSpreadsheet, 
-  Download, 
-  LogOut, 
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Menu,
+  FileSpreadsheet,
+  Download,
+  LogOut,
   CheckCircle2,
   Calendar,
   Save,
   Lock,
-  ChevronRight
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -80,7 +81,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenGoogleSheetsModal,
   onOpenSaveModal,
   hasUnsavedChanges = false,
-  hasToken,
   selectedMonth,
   setSelectedMonth,
   availableMonths,
@@ -89,6 +89,27 @@ export const Header: React.FC<HeaderProps> = ({
   onSwitchModule,
   permissions,
 }) => {
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExportOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [exportOpen]);
+
   const isReadOnly = Boolean(permissions?.isReadOnly);
   const isSelectedMonthClosed = selectedMonth !== 'ALL' && Boolean(closedMonths[selectedMonth]);
   const currentInfo = TAB_TITLES[activeTab] || {
@@ -97,21 +118,21 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 pt-safe">
-      <div className="px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-4">
+    <header className="sticky top-0 z-30 bg-white border-b border-slate-200 pt-safe">
+      <div className="px-3 sm:px-6 lg:px-8 min-h-[56px] py-2 flex items-center justify-between gap-2 sm:gap-3">
         {/* Left: Mobile Toggle & Contextual Breadcrumb */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onToggleMobileMenu}
-            className="lg:hidden min-w-[44px] min-h-[44px] -ml-1.5 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl focus:outline-hidden cursor-pointer shrink-0"
+            className="lg:hidden min-w-[40px] min-h-[40px] -ml-1 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl focus:outline-hidden cursor-pointer shrink-0"
             aria-label="Abrir menú de navegación"
           >
             <Menu className="w-5 h-5" />
           </button>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
               {onSwitchModule ? (
                 <button
                   type="button"
@@ -124,7 +145,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>Premex</span>
               )}
               <ChevronRight className="w-3 h-3 text-slate-400" />
-              <span className="text-[#19377B]">
+              <span className="text-[#19377B] font-semibold truncate">
                 Intercompany · {getIntercompanyScopeLabel(activeScope)}
               </span>
               {permissions && !permissions.isAdmin && (
@@ -136,33 +157,33 @@ export const Header: React.FC<HeaderProps> = ({
                 </>
               )}
             </div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate leading-tight">
               {currentInfo.title}
             </h2>
           </div>
         </div>
 
-        {/* Right: Actions and Google Integration */}
-        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-          {/* Quick Month / Period Selector Dropdown */}
+        {/* Right: Period, Consolidated Export Menu, Primary Save, Account */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Quick Month / Period Selector */}
           <div
             className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs border ${
               isSelectedMonthClosed
                 ? 'bg-slate-100 border-slate-300'
-                : 'bg-[#1E60A8]/8 border-[#1E60A8]/20'
+                : 'bg-slate-50 border-slate-200'
             }`}
             title={isSelectedMonthClosed ? 'Mes cerrado permanentemente (Solo lectura)' : 'Seleccionar mes a conciliar'}
           >
             {isSelectedMonthClosed ? (
               <Lock className="w-3.5 h-3.5 text-slate-700 shrink-0" />
             ) : (
-              <Calendar className="w-3.5 h-3.5 text-[#19377B] shrink-0" />
+              <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
             )}
             <select
               aria-label="Filtrar por mes a conciliar"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className={`bg-transparent font-bold focus:outline-hidden cursor-pointer text-xs pr-1 ${
+              className={`bg-transparent font-semibold focus:outline-hidden cursor-pointer text-xs pr-1 ${
                 isSelectedMonthClosed ? 'text-slate-800' : 'text-[#132B63]'
               }`}
             >
@@ -175,26 +196,56 @@ export const Header: React.FC<HeaderProps> = ({
             </select>
           </div>
 
-          {/* Download Excel Template (hidden in Solo Consulta) */}
+          {/* Consolidated Export Dropdown (Template + Google Sheets) */}
           {!isReadOnly && (
-            <button
-              type="button"
-              onClick={() => downloadExcelTemplate(entities)}
-              title="Descargar plantilla Excel con hojas CxC y CxP, NIT y columna mes"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#19377B] bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
-              <span>Plantilla Excel</span>
-            </button>
+            <div ref={exportMenuRef} className="relative hidden sm:block">
+              <button
+                type="button"
+                onClick={() => setExportOpen((v) => !v)}
+                aria-expanded={exportOpen}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
+                <span>Exportar</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+
+              {exportOpen && (
+                <div className="absolute right-0 mt-1.5 w-56 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 z-50">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExportOpen(false);
+                      downloadExcelTemplate(entities);
+                    }}
+                    className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                    <span>Descargar Plantilla Excel</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExportOpen(false);
+                      onOpenGoogleSheetsModal();
+                    }}
+                    className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                    <span>Exportar a Google Sheets</span>
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
-          {/* Primary Action: Guardar Conciliación (Nube + Link) */}
+          {/* Primary Action: Guardar Conciliación */}
           {!isReadOnly && (
             <button
               type="button"
               onClick={onOpenSaveModal}
               title="Guardar conciliación en la nube y obtener enlace para compartir"
-              className="relative inline-flex items-center justify-center gap-1.5 min-h-[40px] px-3 sm:px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="relative inline-flex items-center justify-center gap-1.5 min-h-[36px] px-3 sm:px-3.5 py-1.5 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Save className="w-3.5 h-3.5 text-sky-100 shrink-0" />
               <span className="hidden sm:inline">Guardar Conciliación</span>
@@ -208,60 +259,49 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Secondary Cloud Export: Guardar en Google Sheets */}
-          {!isReadOnly && (
-            <button
-              type="button"
-              onClick={onOpenGoogleSheetsModal}
-              className="hidden sm:inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-teal-100" />
-              <span className="hidden xl:inline">Google Sheets</span>
-              <span className="xl:hidden">Sheets</span>
-            </button>
-          )}
-
           {/* Google Sign In / Account section */}
           {currentUser ? (
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+            <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200">
               <div className="flex items-center gap-2" title={currentUser.email || 'Usuario Google'}>
                 {currentUser.photoURL ? (
                   <img
                     src={currentUser.photoURL}
                     alt={currentUser.displayName || 'Usuario'}
-                    className="w-8 h-8 rounded-full border border-blue-200 ring-1 ring-blue-500/20"
+                    className="w-7 h-7 rounded-full border border-slate-200"
                   />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-800 flex items-center justify-center font-bold text-xs">
+                  <div className="w-7 h-7 rounded-full bg-[#19377B]/10 text-[#19377B] flex items-center justify-center font-bold text-xs">
                     {currentUser.displayName ? currentUser.displayName[0] : 'U'}
                   </div>
                 )}
-                <div className="hidden xl:block text-left text-xs">
-                  <div className="font-semibold text-slate-800 truncate max-w-[130px]">
+                <div className="hidden xl:block text-left text-xs leading-tight">
+                  <div className="font-semibold text-slate-800 truncate max-w-[120px]">
                     {currentUser.displayName || 'Conectado'}
                   </div>
-                  <div className="text-[11px] text-emerald-600 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
+                  <div className="text-[10px] text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-2.5 h-2.5" />
                     <span>Conectado</span>
                   </div>
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={onSignOut}
                 title="Cerrar sesión de Google"
-                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
               </button>
             </div>
           ) : (
             <button
+              type="button"
               onClick={onSignInWithGoogle}
               title="Conectar con tu cuenta de Google"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-2xs transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors cursor-pointer"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
                 <path
                   fill="#4285F4"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -279,8 +319,7 @@ export const Header: React.FC<HeaderProps> = ({
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                 />
               </svg>
-              <span className="hidden sm:inline">Iniciar Sesión Google</span>
-              <span className="sm:hidden">Google</span>
+              <span className="hidden sm:inline">Google</span>
             </button>
           )}
         </div>

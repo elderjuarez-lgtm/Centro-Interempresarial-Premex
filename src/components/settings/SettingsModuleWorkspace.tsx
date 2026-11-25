@@ -1393,11 +1393,11 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
 
       {/* Left Sidebar */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-gradient-to-b from-[#0E224D] via-[#132E66] to-[#0B1C3F] text-white flex flex-col border-r border-blue-900/40 shadow-xl transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-gradient-to-b from-[#0E224D] via-[#132E66] to-[#0B1C3F] text-white flex flex-col border-r border-blue-900/40 shadow-xl transition-transform duration-300 ease-in-out lg:translate-x-0 ${
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="px-4 py-3.5 flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
+        <div className="px-4 py-3 flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
           <button
             type="button"
             onClick={() => onSwitchModule('launcher')}
@@ -1428,23 +1428,23 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
           </div>
         </div>
 
-        <div className="px-5 py-4 border-b border-white/10 flex items-center gap-3">
-          <AjustesModuleLogo className="w-10 h-10 shrink-0" />
+        <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2.5">
+          <AjustesModuleLogo className="w-8 h-8 shrink-0" />
           <div className="min-w-0">
-            <h1 className="font-bold text-sm tracking-tight text-white truncate">
+            <h1 className="font-bold text-xs tracking-tight text-white truncate">
               Ajustes y Configuraciones
             </h1>
-            <p className="text-[11px] text-sky-200/80 truncate">
+            <p className="text-[11px] text-sky-200/75 truncate">
               RBAC y BD por Módulo
             </p>
           </div>
         </div>
 
-        <div className="px-4 py-3 text-[11px] font-semibold tracking-wider text-sky-200/60 uppercase">
+        <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold tracking-wider text-sky-200/55 uppercase">
           Administración
         </div>
 
-        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-2.5 space-y-0.5 overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
@@ -1452,55 +1452,45 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
               <button
                 key={item.id}
                 type="button"
+                title={item.description}
                 onClick={() => {
                   setActiveTab(item.id);
                   setIsMobileMenuOpen(false);
                 }}
-                className={`w-full text-left px-3.5 py-2.5 rounded-xl flex items-center justify-between transition-all cursor-pointer ${
+                className={`w-full text-left px-3 py-2 rounded-xl flex items-center justify-between transition-colors cursor-pointer ${
                   active
-                    ? 'bg-[#1E60A8] text-white font-semibold shadow-sm'
+                    ? 'bg-[#1E60A8] text-white font-semibold shadow-xs'
                     : 'text-blue-100/90 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                      active ? 'bg-white/20 text-white' : 'bg-white/8 text-sky-200'
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      active ? 'text-white' : 'text-sky-200/80'
                     }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium leading-tight truncate">
-                      {item.label}
-                    </div>
-                    <div
-                      className={`text-[11px] truncate mt-0.5 ${
-                        active ? 'text-sky-100' : 'text-blue-200/60'
-                      }`}
-                    >
-                      {item.description}
-                    </div>
-                  </div>
+                  />
+                  <span className="text-[13px] font-medium leading-tight truncate">
+                    {item.label}
+                  </span>
                 </div>
                 <div className="flex items-center gap-1.5 ml-2 shrink-0">
                   {item.counter && (
-                    <span className="text-[11px] font-mono font-semibold tabular-nums">
+                    <span className="text-[11px] font-mono font-semibold tabular-nums opacity-85">
                       {item.counter}
                     </span>
                   )}
-                  {active && <ChevronRight className="w-4 h-4 text-sky-200" />}
+                  {active && <ChevronRight className="w-3.5 h-3.5 text-sky-200" />}
                 </div>
               </button>
             );
           })}
         </nav>
 
-        <div className="p-3.5 border-t border-white/10 bg-[#0A1838]/70">
+        <div className="p-3 border-t border-white/10 bg-[#0A1838]/70">
           <button
             type="button"
             onClick={() => onSwitchModule('launcher')}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-white/8 hover:bg-white/14 border border-white/12 text-xs font-semibold text-sky-100 transition-colors cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white/8 hover:bg-white/14 border border-white/12 text-xs font-semibold text-sky-100 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>Volver al Portal de Módulos</span>
@@ -1509,10 +1499,10 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       </aside>
 
       {/* Main Content */}
-      <div className="lg:pl-72 flex flex-col min-h-screen">
+      <div className="lg:pl-64 flex flex-col min-h-screen">
         {/* Top Bar */}
-        <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90">
-          <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4">
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
+          <div className="px-4 sm:px-6 lg:px-8 min-h-[56px] py-2 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 type="button"
@@ -1524,7 +1514,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
               </button>
 
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
                   <button
                     type="button"
                     onClick={() => onSwitchModule('launcher')}
@@ -1533,9 +1523,9 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                     Premex
                   </button>
                   <ChevronRight className="w-3 h-3 text-slate-400" />
-                  <span className="text-[#19377B]">Ajustes y Configuraciones</span>
+                  <span className="text-[#19377B] font-semibold">Ajustes y Configuraciones</span>
                 </div>
-                <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+                <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate leading-tight">
                   {activeTab === 'usuarios'
                     ? 'Permisos por Correo, Módulos y Sociedades'
                     : activeTab === 'empresas_modulos'
@@ -1552,7 +1542,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                 type="button"
                 onClick={handleSyncClick}
                 disabled={isSaving}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center gap-1.5 min-h-[36px] px-3.5 py-1.5 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 {isSaving ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1699,19 +1689,10 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                   <button
                     type="button"
                     onClick={openNewUserModal}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl transition-colors cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     <span>Agregar Correo con Permisos</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('empresas_modulos')}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#19377B] bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
-                  >
-                    <Database className="w-3.5 h-3.5" />
-                    <span>Administrar BD de Empresas ({totalCatalogCompanies})</span>
                   </button>
 
                   <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70">

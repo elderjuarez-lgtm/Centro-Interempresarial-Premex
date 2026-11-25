@@ -213,193 +213,135 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* View Header & Action Bar */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-lg font-bold text-slate-900">
-              Matrices de Conciliación Interempresarial
-            </h3>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-900 border border-blue-200">
-              Empresas a Conciliar ({symmetricMatrix.entities.length})
+    <div className="space-y-4">
+      {/* Unified View Toolbar + Color Legend */}
+      <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Subtab switcher */}
+            <div className="p-1 bg-slate-100 rounded-xl inline-flex items-center gap-1 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setSelectedSubTab('bilateral')}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
+                  selectedSubTab === 'bilateral'
+                    ? 'bg-white text-[#132B63] shadow-2xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Vista Bilateral Exacta
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedSubTab('ambas')}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
+                  selectedSubTab === 'ambas'
+                    ? 'bg-white text-[#132B63] shadow-2xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Con Totales
+              </button>
+            </div>
+
+            <span className="text-xs text-slate-500 tabular-nums">
+              <strong className="font-semibold text-slate-800">{symmetricMatrix.entities.length}</strong> empresas ·{' '}
+              <strong className="font-semibold text-slate-800">{movements.length}</strong> partidas
             </span>
           </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Subtab switcher */}
-          <div className="p-1 bg-slate-100 rounded-xl flex items-center gap-1 text-xs font-semibold">
-            <button
-              onClick={() => setSelectedSubTab('bilateral')}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
-                selectedSubTab === 'bilateral'
-                  ? 'bg-blue-600 text-white shadow-2xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Vista Bilateral Exacta
-            </button>
-            <button
-              onClick={() => setSelectedSubTab('ambas')}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
-                selectedSubTab === 'ambas'
-                  ? 'bg-white text-blue-900 shadow-2xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Con Totales
-            </button>
-          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {onInspectDocuments &&
+              (docRecon.summary.noConciliados > 0 ||
+                differences.some((d) => d.estado !== 'conciliado')) && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onInspectDocuments({
+                      viewMode: 'documentos',
+                      sociedad: 'ALL',
+                      contraparte: 'ALL',
+                      docStatusFilter: 'NO_CONCILIADOS',
+                      directionScope: 'PAIR_BOTH',
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors cursor-pointer"
+                >
+                  <FileSearch className="w-3.5 h-3.5 text-amber-700" />
+                  <span>No conciliados ({docRecon.summary.noConciliados})</span>
+                </button>
+              )}
 
-          {/* Download Excel Button */}
-          <button
-            onClick={handleDownloadExcel}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-2xs transition-colors cursor-pointer"
-          >
-            <Download className="w-4 h-4 text-blue-600" />
-            <span>Descargar Matriz Excel</span>
-          </button>
-
-          {/* Save & Share Reconciliation Button */}
-          {onOpenSaveModal && (
-            <button
-              onClick={onOpenSaveModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-colors cursor-pointer"
-            >
-              <Save className="w-4 h-4 text-blue-100" />
-              <span>Guardar Conciliación</span>
-            </button>
-          )}
-
-          {/* Close Month (Independent per Scope) or Closed Badge */}
-          {isSelectedMonthClosed ? (
             <button
               type="button"
-              onClick={onOpenCloseMonthModal}
-              title={
-                closedInfo
-                  ? `Cerrado en ${scopeLabel} el ${new Date(closedInfo.closedAt).toLocaleString('es-CO')} por ${closedInfo.closedBy}. Clic para consultar el cierre.`
-                  : `Mes cerrado en ${scopeLabel}`
-              }
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl transition-colors cursor-pointer"
+              onClick={handleDownloadExcel}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors cursor-pointer"
             >
-              <Lock className="w-3.5 h-3.5 text-amber-600" />
-              <span>Cerrado ({scopeLabel})</span>
+              <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span>Descargar Matriz Excel</span>
             </button>
-          ) : (
-            onOpenCloseMonthModal && (
+
+            {isSelectedMonthClosed ? (
               <button
                 type="button"
                 onClick={onOpenCloseMonthModal}
-                title={`Cerrar conciliación de ${scopeLabel} permanentemente`}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-xl shadow-xs transition-colors cursor-pointer"
+                title={
+                  closedInfo
+                    ? `Cerrado en ${scopeLabel} el ${new Date(closedInfo.closedAt).toLocaleString('es-CO')} por ${closedInfo.closedBy}. Clic para consultar el cierre.`
+                    : `Mes cerrado en ${scopeLabel}`
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
               >
-                <Lock className="w-3.5 h-3.5 text-amber-700" />
-                <span>Cerrar {scopeLabel}</span>
+                <Lock className="w-3.5 h-3.5 text-amber-600" />
+                <span>Cerrado ({scopeLabel})</span>
               </button>
-            )
-          )}
-
-          {/* Google Sheets Sync Button (hidden in Solo Consulta) */}
-          {!readOnly && (
-            <button
-              onClick={onOpenGoogleSheets}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-colors cursor-pointer"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
-              <span>Guardar en Sheets</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Visual Color Legend Bar */}
-      <div className="bg-white px-4 py-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex flex-wrap items-center gap-4">
-          <span className="font-semibold text-slate-700">Guía de Coloración:</span>
-          
-          <div className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded bg-[#bbf7d0] border border-emerald-400"></span>
-            <span className="text-slate-600 font-medium">Conciliado</span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded bg-[#fef08a] border border-amber-400"></span>
-            <span className="text-slate-600 font-medium">Discrepancia</span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded bg-[#fef3c7] border border-amber-200"></span>
-            <span className="text-slate-600 font-medium">Diagonal</span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          {onInspectDocuments && (docRecon.summary.noConciliados > 0 || differences.some((d) => d.estado !== 'conciliado')) && (
-            <button
-              type="button"
-              onClick={() =>
-                onInspectDocuments({
-                  viewMode: 'documentos',
-                  sociedad: 'ALL',
-                  contraparte: 'ALL',
-                  docStatusFilter: 'NO_CONCILIADOS',
-                  directionScope: 'PAIR_BOTH',
-                })
-              }
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors cursor-pointer"
-            >
-              <FileSearch className="w-3.5 h-3.5 text-amber-700" />
-              <span>Ver documentos no conciliados ({docRecon.summary.noConciliados})</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* BILATERAL EXACT VIEW (MATCHING THE USER'S ATTACHED IMAGE) */}
-      {selectedSubTab === 'bilateral' && (
-        <div className="space-y-6">
-          {/* Top Banner: SEPTIEMBRE 2026 - ( CIFRAS EN DOLARES ) */}
-          <div className="bg-[#1b365d] text-white py-2.5 px-4 rounded-t-xl font-bold text-xs sm:text-sm tracking-wider shadow-sm flex flex-col sm:flex-row items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-normal text-blue-200 uppercase tracking-normal">
-                Mes en conciliación:
-              </span>
-              {setSelectedMonth && availableMonths.length > 0 && (
-                <select
-                  aria-label="Seleccionar mes a conciliar"
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="bg-blue-900/90 text-white font-bold border border-blue-400/40 rounded-lg px-2 py-1 text-xs focus:outline-hidden cursor-pointer"
+            ) : (
+              onOpenCloseMonthModal && (
+                <button
+                  type="button"
+                  onClick={onOpenCloseMonthModal}
+                  title={`Cerrar conciliación de ${scopeLabel} permanentemente`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors cursor-pointer"
                 >
-                  <option value="ALL">Todos los Meses</option>
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m}>
-                      {closedMonths[m] ? `${m} (Cerrado)` : m}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            <div className="font-mono text-center tracking-wide">{activeBannerText}</div>
-
-            <div className="text-[11px] text-blue-200 font-normal">
-              {symmetricMatrix.entities.length} x {symmetricMatrix.entities.length} Entidades ({movements.length} partidas)
-            </div>
+                  <Lock className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Cerrar {scopeLabel}</span>
+                </button>
+              )
+            )}
           </div>
+        </div>
 
+        {/* Inline Color Legend Strip */}
+        <div className="px-5 py-2 bg-slate-50/70 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-600">
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="font-semibold text-slate-700">Referencias:</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-3.5 h-3.5 rounded-xs bg-[#bbf7d0] border border-emerald-400" />
+              Conciliado
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-3.5 h-3.5 rounded-xs bg-[#fef08a] border border-amber-400" />
+              Discrepancia (clic para auditar)
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-3.5 h-3.5 rounded-xs bg-[#fef3c7] border border-amber-200" />
+              Diagonal
+            </span>
+          </div>
+          <span className="font-mono font-semibold text-slate-500">
+            {activeBannerText}
+          </span>
+        </div>
+      </section>
+
+      {/* BILATERAL EXACT VIEW */}
+      {selectedSubTab === 'bilateral' && (
+        <div className="space-y-5">
           {/* Table 1: CTAS X COBRAR */}
-          <section className="space-y-1">
-            {renderBilateralSection('CTAS X COBRAR', symmetricMatrix.cxcGrid)}
-          </section>
+          <section>{renderBilateralSection('CTAS X COBRAR', symmetricMatrix.cxcGrid)}</section>
 
           {/* Table 2: CTAS X PAGAR */}
-          <section className="space-y-1 pt-2">
-            {renderBilateralSection('CTAS X PAGAR', symmetricMatrix.cxpGrid)}
-          </section>
+          <section>{renderBilateralSection('CTAS X PAGAR', symmetricMatrix.cxpGrid)}</section>
         </div>
       )}
 

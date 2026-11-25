@@ -6,6 +6,8 @@ import {
   processExtractInvoiceBody,
   resolveServerGeminiApiKey,
 } from './api/viaticos/extract-invoice.ts';
+import { processClaraExtractInvoiceBody } from './api/clara/extract-invoice.ts';
+import { processProbeRequest } from './api/clara/probe.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,6 +33,18 @@ async function startServer() {
   // Server-side Gemini multimodal invoice extraction for Viáticos
   app.post('/api/viaticos/extract-invoice', async (req, res) => {
     const result = await processExtractInvoiceBody(req.body ?? {});
+    res.status(result.status).json(result.body);
+  });
+
+  // Server-side Gemini multimodal invoice extraction for Clara -> WM -> SAP
+  app.post('/api/clara/extract-invoice', async (req, res) => {
+    const result = await processClaraExtractInvoiceBody(req.body ?? {});
+    res.status(result.status).json(result.body);
+  });
+
+  // SSRF-safe connectivity diagnostic probe for Clara and Work Manager (:8037)
+  app.post('/api/clara/probe', async (req, res) => {
+    const result = await processProbeRequest(req.body?.target);
     res.status(result.status).json(result.body);
   });
 

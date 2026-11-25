@@ -47,6 +47,13 @@ import {
   ModuleCompaniesMap,
   ModuleCompanyEntry,
   StandaloneCompanyDbModuleId,
+  ClaraTransaction,
+  ClaraWorkManagerInvoice,
+  ClaraVendor,
+  ClaraCostCenterRule,
+  ClaraConnectorConfig,
+  ClaraBatchExportLog,
+  ClaraWorkspaceData,
 } from './types';
 import {
   INITIAL_MOVEMENTS,
@@ -160,12 +167,28 @@ import {
   subscribeToModuleCompanyDirectory,
   saveModuleCompanyDirectoryToCloud,
 } from './services/moduleCompaniesStore';
+import {
+  subscribeToClaraWorkspace,
+  saveClaraWorkspaceToCloud,
+} from './services/claraStore';
+import {
+  DEFAULT_CLARA_DOC_ID,
+  INITIAL_CLARA_CONNECTOR_CONFIG,
+  INITIAL_CLARA_COST_CENTER_RULES,
+  INITIAL_CLARA_TRANSACTIONS,
+  INITIAL_CLARA_VENDORS,
+  INITIAL_CLARA_WM_INVOICES,
+  detectPendingVendorCandidates,
+  filterClaraTransactionsByPermissions,
+  reconcileClaraState,
+} from './utils/clara';
 
 import { ModuleLauncher, LauncherLiveMetrics } from './components/ModuleLauncher';
 import { LoginGateView } from './components/LoginGateView';
 import { BankModuleWorkspace, BankWorkspaceData } from './components/bank/BankModuleWorkspace';
 import { ViaticosModuleWorkspace } from './components/viaticos/ViaticosModuleWorkspace';
 import { ActivitiesModuleWorkspace } from './components/actividades/ActivitiesModuleWorkspace';
+import { ClaraModuleWorkspace } from './components/clara/ClaraModuleWorkspace';
 import {
   SettingsModuleWorkspace,
   ModuleDbSyncState,
@@ -220,6 +243,16 @@ const ACTIVITIES_STORAGE_KEYS = {
   EXECUTIONS: 'premex_actividades_executions_v1',
   RECIPIENTS: 'premex_actividades_recipients_v1',
   SETTINGS: 'premex_actividades_settings_v1',
+};
+const CLARA_STORAGE_KEYS = {
+  DOC_ID: 'premex_clara_doc_id_v1',
+  PERIOD: 'premex_clara_period_v1',
+  TRANSACTIONS: 'premex_clara_transactions_v1',
+  WM_INVOICES: 'premex_clara_wm_invoices_v1',
+  VENDORS: 'premex_clara_vendors_v1',
+  CC_RULES: 'premex_clara_cc_rules_v1',
+  CONNECTOR: 'premex_clara_connector_v1',
+  BATCH_LOGS: 'premex_clara_batch_logs_v1',
 };
 
 const STORAGE_KEYS_BY_SCOPE: Record<
@@ -374,6 +407,7 @@ function getInitialModuleFromUrl(): ActiveModuleId {
   if (m === 'bancos') return 'bancos';
   if (m === 'viaticos') return 'viaticos';
   if (m === 'actividades') return 'actividades';
+  if (m === 'clara') return 'clara';
   if (m === 'ajustes') return 'ajustes';
   return 'launcher';
 }
@@ -627,6 +661,95 @@ function loadInitialActivitiesWorkspace(): ActivitiesWorkspaceData {
   };
 }
 
+function loadInitialClaraWorkspace(): ClaraWorkspaceData {
+  const savedDocId = (() => {
+    try {
+      const raw = localStorage.getItem(CLARA_STORAGE_KEYS.DOC_ID);
+      if (raw && /^[a-zA-Z0-9_-]{1,128}$/.test(raw)) return raw;
+    } catch {
+      // ignore
+    }
+    return DEFAULT_CLARA_DOC_ID;
+  })();
+
+  const savedPeriod = (() => {
+    try {
+      const raw = localStorage.getItem(CLARA_STORAGE_KEYS.PERIOD);
+      if (raw && raw.trim()) return raw.trim();
+    } catch {
+      // ignore
+    }
+    return 'ALL';
+  })();
+
+  const rawTransactions = readJsonStorage<ClaraTransaction[]>(
+    CLARA_STORAGE_KEYS.TRANSACTIONS,
+    INITIAL_CLARA_TRANSACTIONS
+  );
+  const rawWmInvoices = readJsonStorage<ClaraWorkManagerInvoice[]>(
+    CLARA_STORAGE_KEYS.WM_INVOICES,
+    INITIAL_CLARA_WM_INVOICES
+  );
+  const rawVendors = readJsonStorage<ClaraVendor[]>(
+    CLARA_STORAGE_KEYS.VENDORS,
+    INITIAL_CLARA_VENDORS
+  );
+  const rawRules = readJsonStorage<ClaraCostCenterRule[]>(
+    CLARA_STORAGE_KEYS.CC_RULES,
+    INITIAL_CLARA_COST_CENTER_RULES
+  );
+  const savedConnector = readJsonStorage<Partial<ClaraConnectorConfig>>(
+    CLARA_STORAGE_KEYS.CONNECTOR,
+    INITIAL_CLARA_CONNECTOR_CONFIG
+  );
+  const rawLogs = readJsonStorage<ClaraBatchExportLog[]>(
+    CLARA_STORAGE_KEYS.BATCH_LOGS,
+    []
+  );
+
+  const connectorConfig: ClaraConnectorConfig = {
+    ...INITIAL_CLARA_CONNECTOR_CONFIG,
+    ...savedConnector,
+  };
+
+  const transactions =
+    Array.isArray(rawTransactions) && rawTransactions.length > 0
+      ? rawTransactions
+      : INITIAL_CLARA_TRANSACTIONS;
+  const workManagerInvoices =
+    Array.isArray(rawWmInvoices) && rawWmInvoices.length > 0
+      ? rawWmInvoices
+      : INITIAL_CLARA_WM_INVOICES;
+  const vendors =
+    Array.isArray(rawVendors) && rawVendors.length > 0 ? rawVendors : INITIAL_CLARA_VENDORS;
+  const costCenterRules =
+    Array.isArray(rawRules) && rawRules.length > 0
+      ? rawRules
+      : INITIAL_CLARA_COST_CENTER_RULES;
+  const batchLogs = Array.isArray(rawLogs) ? rawLogs : [];
+
+  const reconciled = reconcileClaraState({
+    transactions,
+    workManagerInvoices,
+    vendors,
+    costCenterRules,
+    connectorConfig,
+  });
+
+  return {
+    docId: savedDocId,
+    selectedPeriod: savedPeriod,
+    transactions: reconciled.transactions,
+    workManagerInvoices: reconciled.workManagerInvoices,
+    vendors,
+    costCenterRules,
+    connectorConfig,
+    batchLogs,
+    lastSavedAtIso: null,
+    hasUnsavedChanges: false,
+  };
+}
+
 function loadInitialStandaloneModuleCompanies(): Record<
   StandaloneCompanyDbModuleId,
   ModuleCompanyEntry[]
@@ -744,6 +867,7 @@ export default function App() {
   const canAccessBancos = effectivePermissions.canAccessModule('bancos');
   const canAccessViaticos = effectivePermissions.canAccessModule('viaticos');
   const canAccessActividades = effectivePermissions.canAccessModule('actividades');
+  const canAccessClara = effectivePermissions.canAccessModule('clara');
 
   // Bank Reconciliation module workspace state
   const [bankWorkspace, setBankWorkspace] = useState<BankWorkspaceData>(() =>
@@ -772,6 +896,17 @@ export default function App() {
   activitiesWorkspaceRef.current = activitiesWorkspace;
   const activitiesUnsavedRef = useRef<boolean>(false);
   activitiesUnsavedRef.current = activitiesWorkspace.hasUnsavedChanges;
+
+  // Automatización Clara · Work Manager · SAP module workspace state
+  const [claraWorkspace, setClaraWorkspace] = useState<ClaraWorkspaceData>(() =>
+    loadInitialClaraWorkspace()
+  );
+  const claraWorkspaceRef = useRef<ClaraWorkspaceData>(claraWorkspace);
+  claraWorkspaceRef.current = claraWorkspace;
+  const claraUnsavedRef = useRef<boolean>(false);
+  claraUnsavedRef.current = claraWorkspace.hasUnsavedChanges;
+  const claraMutationSeqRef = useRef<number>(0);
+  const claraSyncInFlightRef = useRef<boolean>(false);
 
   // Independent per-module company databases (bancos, viaticos, actividades, anticipos, cxc, cxp)
   // Intercompany uses /company_directories/internacionales as its single source of truth.
@@ -1150,6 +1285,25 @@ export default function App() {
     });
   };
 
+  const handleUpdateClaraWorkspace = (
+    updater: (prev: ClaraWorkspaceData) => ClaraWorkspaceData,
+    markUnsaved = false
+  ) => {
+    if (markUnsaved && !effectivePermissions.canOperate) return;
+    if (markUnsaved) {
+      claraMutationSeqRef.current += 1;
+    }
+    setClaraWorkspace((prev) => {
+      const next = updater(prev);
+      const nextState: ClaraWorkspaceData = {
+        ...next,
+        hasUnsavedChanges: markUnsaved ? true : next.hasUnsavedChanges,
+      };
+      claraWorkspaceRef.current = nextState;
+      return nextState;
+    });
+  };
+
   // Three independent Intercompany scopes: Internacionales, Nacionales, and Anitox
   const [workspaces, setWorkspaces] = useState<Record<ReconciliationScope, ScopeWorkspaceState>>(() => {
     const intlWs = loadInitialWorkspace(
@@ -1513,6 +1667,97 @@ export default function App() {
     };
   }, [activitiesWorkspace.docId, canLoadCloudData, canAccessActividades]);
 
+  // Persist Clara · Work Manager · SAP workspace locally
+  useEffect(() => {
+    try {
+      localStorage.setItem(CLARA_STORAGE_KEYS.DOC_ID, claraWorkspace.docId);
+      localStorage.setItem(CLARA_STORAGE_KEYS.PERIOD, claraWorkspace.selectedPeriod);
+      localStorage.setItem(
+        CLARA_STORAGE_KEYS.TRANSACTIONS,
+        JSON.stringify(claraWorkspace.transactions)
+      );
+      localStorage.setItem(
+        CLARA_STORAGE_KEYS.WM_INVOICES,
+        JSON.stringify(claraWorkspace.workManagerInvoices)
+      );
+      localStorage.setItem(CLARA_STORAGE_KEYS.VENDORS, JSON.stringify(claraWorkspace.vendors));
+      localStorage.setItem(
+        CLARA_STORAGE_KEYS.CC_RULES,
+        JSON.stringify(claraWorkspace.costCenterRules)
+      );
+      localStorage.setItem(
+        CLARA_STORAGE_KEYS.CONNECTOR,
+        JSON.stringify(claraWorkspace.connectorConfig)
+      );
+      localStorage.setItem(
+        CLARA_STORAGE_KEYS.BATCH_LOGS,
+        JSON.stringify(claraWorkspace.batchLogs)
+      );
+    } catch (e) {
+      console.warn('Failed to save Clara workspace locally:', e);
+    }
+  }, [claraWorkspace]);
+
+  // Subscribe to Clara cloud document ONLY when authenticated & authorized
+  useEffect(() => {
+    if (!canLoadCloudData || !canAccessClara) {
+      return;
+    }
+    const unsubscribe = subscribeToClaraWorkspace(
+      claraWorkspace.docId,
+      (savedDoc) => {
+        if (!savedDoc) return;
+        if (claraUnsavedRef.current || claraSyncInFlightRef.current) return;
+        setClaraWorkspace((prev) => {
+          const mergedConnector: ClaraConnectorConfig = {
+            ...INITIAL_CLARA_CONNECTOR_CONFIG,
+            ...savedDoc.connectorConfig,
+          };
+          const transactions =
+            savedDoc.transactions.length > 0 ? savedDoc.transactions : prev.transactions;
+          const workManagerInvoices =
+            savedDoc.workManagerInvoices.length > 0
+              ? savedDoc.workManagerInvoices
+              : prev.workManagerInvoices;
+          const vendors = savedDoc.vendors.length > 0 ? savedDoc.vendors : prev.vendors;
+          const costCenterRules =
+            savedDoc.costCenterRules.length > 0
+              ? savedDoc.costCenterRules
+              : prev.costCenterRules;
+
+          const reconciled = reconcileClaraState({
+            transactions,
+            workManagerInvoices,
+            vendors,
+            costCenterRules,
+            connectorConfig: mergedConnector,
+          });
+
+          const nextState: ClaraWorkspaceData = {
+            ...prev,
+            selectedPeriod: savedDoc.selectedPeriod || prev.selectedPeriod,
+            transactions: reconciled.transactions,
+            workManagerInvoices: reconciled.workManagerInvoices,
+            vendors,
+            costCenterRules,
+            connectorConfig: mergedConnector,
+            batchLogs: savedDoc.batchLogs || prev.batchLogs,
+            lastSavedAtIso: savedDoc.updatedAtIso || new Date().toISOString(),
+            hasUnsavedChanges: false,
+          };
+          claraWorkspaceRef.current = nextState;
+          return nextState;
+        });
+      },
+      (err) => {
+        console.warn('Error loading cloud Clara workspace:', err);
+      }
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, [claraWorkspace.docId, canLoadCloudData, canAccessClara]);
+
   // Persist RBAC permissions & policy locally
   useEffect(() => {
     try {
@@ -1783,6 +2028,41 @@ export default function App() {
       });
     } finally {
       setIsSavingActivitiesCloud(false);
+    }
+  };
+
+  const handleSaveClaraToCloud = async (overrideData?: ClaraWorkspaceData) => {
+    if (!effectivePermissions.canOperate) {
+      throw new Error(
+        'Tu perfil tiene permisos de Solo Consulta y no puede guardar cambios en la nube.'
+      );
+    }
+    const seqAtStart = claraMutationSeqRef.current;
+    const source = overrideData || claraWorkspaceRef.current;
+    claraSyncInFlightRef.current = true;
+    try {
+      const result = await saveClaraWorkspaceToCloud({
+        docId: source.docId,
+        selectedPeriod: source.selectedPeriod,
+        transactions: source.transactions,
+        workManagerInvoices: source.workManagerInvoices,
+        vendors: source.vendors,
+        costCenterRules: source.costCenterRules,
+        connectorConfig: source.connectorConfig,
+        batchLogs: source.batchLogs,
+      });
+      setClaraWorkspace((prev) => {
+        const hasNewerMutations = claraMutationSeqRef.current !== seqAtStart;
+        const nextState: ClaraWorkspaceData = {
+          ...prev,
+          lastSavedAtIso: result.updatedAtIso,
+          hasUnsavedChanges: hasNewerMutations ? prev.hasUnsavedChanges : false,
+        };
+        claraWorkspaceRef.current = nextState;
+        return nextState;
+      });
+    } finally {
+      claraSyncInFlightRef.current = false;
     }
   };
 
@@ -2692,6 +2972,23 @@ export default function App() {
     ).length;
     const activitiesTotalCount = activityAssignments.length;
 
+    const visibleClaraTx = filterClaraTransactionsByPermissions(
+      claraWorkspace.transactions,
+      effectivePermissions
+    );
+    const claraPendingWmCount = visibleClaraTx.filter(
+      (t) =>
+        t.origenGasto !== 'exterior' &&
+        t.wmRadicacionStatus !== 'radicada' &&
+        t.wmRadicacionStatus !== 'exenta_exterior' &&
+        t.workManagerStatus !== 'validada' &&
+        t.workManagerStatus !== 'exenta_exterior'
+    ).length;
+    const claraPendingVendorsCount = detectPendingVendorCandidates(
+      visibleClaraTx,
+      claraWorkspace.vendors
+    ).length;
+
     return {
       intercompanyEntitiesCount: visibleEntities.length,
       intercompanyMovementsCount: filteredMovements.length,
@@ -2708,6 +3005,9 @@ export default function App() {
       activitiesCompletedCount,
       activitiesPendingCount: Math.max(0, activitiesTotalCount - activitiesCompletedCount),
       activitiesPeriod: formatPeriodLabel(visibleActivitiesWorkspace.selectedPeriod),
+      claraTransactionsCount: visibleClaraTx.length,
+      claraPendingWmCount,
+      claraPendingVendorsCount,
       configuredUsersCount: permissionRecords.length,
     };
   }, [
@@ -2720,6 +3020,8 @@ export default function App() {
     viaticosWorkspace.liquidaciones,
     viaticosWorkspace.odooCatalogs,
     visibleActivitiesWorkspace,
+    claraWorkspace.transactions,
+    claraWorkspace.vendors,
     effectivePermissions,
     permissionRecords,
   ]);
@@ -2745,7 +3047,8 @@ export default function App() {
                   activeModule === 'intercompany' ||
                   activeModule === 'bancos' ||
                   activeModule === 'viaticos' ||
-                  activeModule === 'actividades'
+                  activeModule === 'actividades' ||
+                  activeModule === 'clara'
                 ) {
                   const modScope = effectivePermissions.getModuleCompanyScope(activeModule);
                   const modList =
@@ -3044,6 +3347,32 @@ export default function App() {
     );
   }
 
+  // 4C. Automatización Clara · Work Manager · SAP Module
+  if (activeModule === 'clara') {
+    return (
+      <div className="min-h-screen flex flex-col">
+        {previewBanner}
+        <div className="flex-1">
+          <ClaraModuleWorkspace
+            data={claraWorkspace}
+            onUpdateData={handleUpdateClaraWorkspace}
+            onSaveToCloud={handleSaveClaraToCloud}
+            currentUser={currentUser}
+            onSignInWithGoogle={() => {
+              handleSignInWithGoogle().catch((err) => {
+                console.error('Google sign in failed:', err);
+              });
+            }}
+            onSignOut={handleSignOut}
+            onSwitchModule={handleSwitchModule}
+            permissions={effectivePermissions}
+            moduleCompanies={moduleCompanyDatabases.clara}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // 5. Conciliación Intercompany Module (Internacionales, Nacionales y Anitox with RBAC & Company Scoping)
   return (
     <div className="min-h-screen bg-[#F5F8FC] flex flex-col font-sans text-slate-800 antialiased selection:bg-[#1E60A8] selection:text-white">
@@ -3065,7 +3394,7 @@ export default function App() {
       />
 
       {/* Main Layout Area */}
-      <div className="lg:pl-72 flex flex-col flex-1 transition-all">
+      <div className="lg:pl-64 flex flex-col flex-1 transition-all">
         {/* Sticky Header */}
         <Header
           activeTab={activeTab}

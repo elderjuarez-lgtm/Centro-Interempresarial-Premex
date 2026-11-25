@@ -105,6 +105,15 @@ const SUITE_MODULES: SuiteModuleDefinition[] = [
     accentBorderHover: 'hover:border-emerald-600/50',
   },
   {
+    id: 'clara',
+    name: 'Automatización Clara · WM · SAP',
+    category: 'Gastos y Viáticos',
+    shortDesc: 'Extracción de gastos Clara, lectura IA de facturas, cruce Work Manager (:8037) y despacho a bot SAP.',
+    status: 'active',
+    targetModule: 'clara',
+    accentBorderHover: 'hover:border-violet-600/50',
+  },
+  {
     id: 'anticipos',
     name: 'Anticipos',
     category: 'Tesorería',
@@ -382,29 +391,26 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
     );
   };
 
+  const activeFilteredModules = filteredModules.filter((m) => m.status === 'active');
+  const plannedFilteredModules = filteredModules.filter((m) => m.status === 'planned');
+
   return (
-    <div className="min-h-screen bg-[#F5F8FC] text-slate-900 flex flex-col font-sans antialiased">
-      {/* 3-Zone Premex Top Bar */}
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col font-sans antialiased">
+      {/* 3-Zone Top Bar */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 pt-safe">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
-          {/* Zone 1: Premex Brand */}
-          <div className="flex items-center gap-3.5 min-w-0">
-            <PremexBrandLogo className="h-10 w-auto shrink-0" />
-            <div className="h-6 w-px bg-slate-200 hidden sm:block shrink-0" />
-            <div className="hidden sm:block min-w-0">
-              <div className="text-sm font-bold text-[#132B63] tracking-tight leading-none">
-                Suite de Conciliaciones
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1 leading-none">
-                Plataforma Financiera Modular
-              </div>
-            </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4 sm:gap-8">
+          {/* Zone 1: Brand Wordmark */}
+          <div className="flex items-center gap-3 min-w-0 shrink-0">
+            <PremexBrandLogo className="h-9 w-auto shrink-0" />
+            <span className="hidden sm:inline text-sm font-bold text-[#132B63] tracking-tight whitespace-nowrap">
+              Suite Financiera
+            </span>
           </div>
 
           {/* Zone 2: Clean Segmented Module Filter */}
           <nav
             aria-label="Filtrar módulos"
-            className="hidden md:flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/70"
+            className="hidden md:flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200/70"
           >
             {(
               [
@@ -422,7 +428,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
                   key={tab.id}
                   type="button"
                   onClick={() => setStatusFilter(tab.id)}
-                  className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     active
                       ? 'bg-white text-[#19377B] shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900'
@@ -435,7 +441,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
           </nav>
 
           {/* Zone 3: PWA Install + Shared Google Account Control */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
             <PWAInstallButton variant="header" />
             {currentUser ? (
               <div className="flex items-center gap-2.5">
@@ -507,8 +513,8 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
       </header>
 
       {/* Main Content Workspace */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-5 sm:py-10 pb-safe">
-        {/* Mobile PWA Install Prompt Banner (auto-hidden when already installed) */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-9 pb-safe space-y-7">
+        {/* Mobile PWA Install Prompt Banner */}
         {!installBannerDismissed && (
           <div className="md:hidden">
             <PWAInstallButton
@@ -518,29 +524,28 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
           </div>
         )}
 
-        {/* Executive Premex Hero Banner (Clean single-surface corporate blue band) */}
-        <section className="rounded-2xl bg-gradient-to-r from-[#132B63] via-[#1B4A8E] to-[#2470BC] text-white p-5 sm:p-8 border border-[#19377B]/30 mb-6 sm:mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
-            <div className="max-w-2xl">
-              <p className="text-xs font-semibold uppercase tracking-widest text-sky-200 mb-2">
-                Ecosistema Financiero Premex · {roleLabel} · {companyScopeSummary}
+        {/* Clean Unboxed Workspace Header + Live Search */}
+        <section className="space-y-5">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-medium text-slate-500">
+                {roleLabel} · {companyScopeSummary}
               </p>
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                Módulos Financieros
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 mt-1 text-balance">
+                Aplicaciones Financieras
               </h1>
             </div>
 
-            {/* Live Search Field inside Hero */}
-            <div className="w-full lg:w-80 shrink-0">
+            <div className="w-full md:w-72 shrink-0">
               <div className="relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar módulo..."
+                  placeholder="Buscar aplicación..."
                   aria-label="Buscar módulo financiero"
-                  className="w-full pl-10 pr-9 py-2.5 bg-white text-slate-900 placeholder:text-slate-400 text-sm rounded-xl border border-white/20 focus:outline-hidden focus:ring-2 focus:ring-sky-300"
+                  className="w-full pl-10 pr-9 py-2 bg-white text-slate-900 placeholder:text-slate-400 text-sm rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                 />
                 {searchQuery && (
                   <button
@@ -556,70 +561,69 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
             </div>
           </div>
 
-          {/* Unboxed Operational Strip (Zero Pills, Tabular Numerals, Real Metrics) */}
-          <div className="mt-6 pt-5 border-t border-white/15 grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-0 sm:divide-x sm:divide-white/15">
-            <div className="sm:pr-6">
-              <div className="text-[11px] font-medium text-sky-200/90 uppercase tracking-wider">
-                Módulos Habilitados
+          {/* Single-Surface 3-Metric Operational Strip */}
+          <div className="bg-white rounded-xl border border-slate-200/90 grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+            <div className="px-5 py-4">
+              <div className="text-xs font-medium text-slate-500">
+                Módulos disponibles
               </div>
               <div className="mt-1 flex items-baseline gap-2 tabular-nums">
-                <span className="text-xl font-bold text-white">{activeCount} activos</span>
-                <span className="text-xs text-blue-200/80">
-                  de {authorizedModules.length} autorizados
+                <span className="text-lg font-bold text-[#132B63]">{activeCount} activos</span>
+                <span className="text-xs text-slate-500">
+                  de {authorizedModules.length} habilitados
                 </span>
               </div>
             </div>
 
             {permissions.canAccessModule('intercompany') ? (
-              <div className="sm:px-6">
-                <div className="text-[11px] font-medium text-sky-200/90 uppercase tracking-wider">
-                  Intercompany (Int. · Nac. · Anitox)
+              <div className="px-5 py-4">
+                <div className="text-xs font-medium text-slate-500">
+                  Conciliación Intercompany
                 </div>
                 <div className="mt-1 flex items-baseline gap-2 tabular-nums">
-                  <span className="text-xl font-bold text-white">
+                  <span className="text-lg font-bold text-slate-900">
                     {metrics.intercompanyEntitiesCount} sociedades
                   </span>
-                  <span className="text-xs text-blue-200/80">
-                    · {metrics.intercompanyMovementsCount} mov. ·{' '}
-                    {metrics.intercompanyDifferencesCount} diferencias
+                  <span className="text-xs text-slate-500">
+                    · {metrics.intercompanyDifferencesCount} diferencias
                   </span>
                 </div>
               </div>
             ) : (
-              <div className="sm:px-6">
-                <div className="text-[11px] font-medium text-sky-200/90 uppercase tracking-wider">
-                  Rol Asignado
+              <div className="px-5 py-4">
+                <div className="text-xs font-medium text-slate-500">
+                  Rol asignado
                 </div>
                 <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-xl font-bold text-white">{roleLabel}</span>
-                  <span className="text-xs text-blue-200/80">
-                    · {permissions.isReadOnly ? 'Lectura y exportación' : 'Operación autorizada'}
+                  <span className="text-lg font-bold text-slate-900">{roleLabel}</span>
+                  <span className="text-xs text-slate-500">
+                    · {permissions.isReadOnly ? 'Solo lectura' : 'Operación'}
                   </span>
                 </div>
               </div>
             )}
 
             {permissions.canAccessModule('bancos') ? (
-              <div className="sm:pl-6">
-                <div className="text-[11px] font-medium text-sky-200/90 uppercase tracking-wider">
+              <div className="px-5 py-4">
+                <div className="text-xs font-medium text-slate-500">
                   Conciliación Bancaria
                 </div>
                 <div className="mt-1 flex items-baseline gap-2 tabular-nums">
-                  <span className="text-xl font-bold text-white">
-                    {metrics.bankAccountsCount} cuentas
+                  <span className="text-lg font-bold text-teal-700">
+                    {metrics.bankReconciledPct}% conciliado
                   </span>
-                  <span className="text-xs text-blue-200/80">
-                    · {metrics.bankReconciledPct}% conciliado · {metrics.bankPendingCount} partidas abiertas
+                  <span className="text-xs text-slate-500">
+                    · {metrics.bankAccountsCount} cuentas · {metrics.bankPendingCount} pend.
                   </span>
                 </div>
               </div>
             ) : (
-              <div className="sm:pl-6">
-                <div className="text-[11px] font-medium text-sky-200/90 uppercase tracking-wider">
-                  Alcance de Empresas
+              <div className="px-5 py-4">
+                <div className="text-xs font-medium text-slate-500">
+                  Alcance de sociedades
                 </div>
                 <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-xl font-bold text-white truncate">
+                  <span className="text-lg font-bold text-slate-900 truncate">
                     {companyScopeSummary}
                   </span>
                 </div>
@@ -629,7 +633,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
         </section>
 
         {/* Mobile Filter Tabs */}
-        <div className="flex md:hidden items-center gap-2 mb-5 overflow-x-auto pb-1 touch-scroll-x">
+        <div className="flex md:hidden items-center gap-2 overflow-x-auto pb-1 touch-scroll-x">
           {(
             [
               { id: 'all', label: `Todos (${authorizedModules.length})` },
@@ -654,7 +658,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
 
         {/* Modular App Grid */}
         {authorizedModules.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+          <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
             <p className="text-sm font-semibold text-slate-800">
               No tienes módulos asignados actualmente
             </p>
@@ -663,7 +667,7 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
             </p>
           </div>
         ) : filteredModules.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+          <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
             <p className="text-sm font-semibold text-slate-800">
               No se encontraron módulos para &ldquo;{searchQuery}&rdquo;
             </p>
@@ -682,75 +686,100 @@ export const ModuleLauncher: React.FC<ModuleLauncherProps> = ({
             </button>
           </div>
         ) : (
-          <section aria-label="Aplicaciones de la suite">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-slate-800 tracking-tight">
-                Aplicaciones Financieras
-              </h2>
-              <span className="text-xs text-slate-500 tabular-nums">
-                Mostrando {filteredModules.length} de {authorizedModules.length} módulos habilitados
-              </span>
-            </div>
+          <div className="space-y-8">
+            {activeFilteredModules.length > 0 && (
+              <section aria-label="Aplicaciones operativas">
+                <div className="flex items-center justify-between mb-3.5">
+                  <h2 className="text-sm font-bold text-slate-800 tracking-tight">
+                    Aplicaciones Operativas
+                  </h2>
+                  <span className="text-xs text-slate-500 tabular-nums">
+                    {activeFilteredModules.length} disponibles
+                  </span>
+                </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredModules.map((mod) => {
-                const isActive = mod.status === 'active';
-                return (
-                  <button
-                    key={mod.id}
-                    type="button"
-                    onClick={() => handleTileClick(mod)}
-                    className={`group text-left bg-white rounded-2xl border border-slate-200/90 p-6 flex flex-col justify-between transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md focus:outline-hidden focus:ring-2 focus:ring-[#2169B5]/40 cursor-pointer ${mod.accentBorderHover} ${
-                      isActive ? '' : 'bg-white/80'
-                    }`}
-                  >
-                    <div>
-                      {/* Emblem + Unboxed Status Text */}
-                      <div className="flex items-start justify-between gap-4 mb-5">
-                        <div className="transition-transform duration-150 group-hover:scale-105">
-                          <ModuleEmblem
-                            moduleId={mod.id}
-                            className={`w-14 h-14 ${isActive ? '' : 'opacity-85 group-hover:opacity-100'}`}
-                          />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {activeFilteredModules.map((mod) => (
+                    <button
+                      key={mod.id}
+                      type="button"
+                      onClick={() => handleTileClick(mod)}
+                      className={`group text-left bg-white rounded-xl border border-slate-200/90 p-5 flex flex-col justify-between transition-all duration-150 hover:border-[#1E60A8]/60 hover:bg-slate-50/40 focus:outline-hidden focus:ring-2 focus:ring-[#2169B5]/40 cursor-pointer ${mod.accentBorderHover}`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <ModuleEmblem
+                          moduleId={mod.id}
+                          className="w-12 h-12 shrink-0 transition-transform duration-150 group-hover:scale-105"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs text-slate-500 font-medium">
+                            {mod.category}
+                          </div>
+                          <h3 className="text-base font-bold text-slate-900 group-hover:text-[#19377B] transition-colors leading-snug mt-0.5">
+                            {mod.name}
+                          </h3>
+                          <p className="text-xs text-slate-600 mt-1.5 leading-relaxed line-clamp-2">
+                            {mod.shortDesc}
+                          </p>
                         </div>
-                        <span
-                          className={`text-xs font-semibold ${
-                            isActive ? 'text-emerald-700' : 'text-slate-400'
-                          }`}
-                        >
-                          {isActive ? 'Disponible' : 'Próximamente'}
+                      </div>
+
+                      <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
+                        <div className="min-w-0 truncate">{renderLiveTelemetry(mod)}</div>
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#1E60A8] shrink-0 transition-transform duration-150 group-hover:translate-x-0.5 whitespace-nowrap">
+                          <span>Abrir</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
                         </span>
                       </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
 
-                      {/* Title & Description */}
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                        {mod.category}
+            {plannedFilteredModules.length > 0 && (
+              <section aria-label="Próximos módulos">
+                <div className="flex items-center justify-between mb-3.5">
+                  <h2 className="text-sm font-semibold text-slate-600 tracking-tight">
+                    Próximamente en Hoja de Ruta
+                  </h2>
+                  <span className="text-xs text-slate-400 tabular-nums">
+                    {plannedFilteredModules.length} planificados
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {plannedFilteredModules.map((mod) => (
+                    <button
+                      key={mod.id}
+                      type="button"
+                      onClick={() => handleTileClick(mod)}
+                      className="group text-left bg-white/80 rounded-xl border border-slate-200/80 p-4 flex items-center justify-between gap-3 hover:bg-white hover:border-slate-300 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <ModuleEmblem
+                          moduleId={mod.id}
+                          className="w-10 h-10 shrink-0 opacity-80 group-hover:opacity-100"
+                        />
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-semibold text-slate-800 group-hover:text-[#19377B] truncate">
+                            {mod.name}
+                          </h3>
+                          <div className="text-xs text-slate-500 truncate mt-0.5">
+                            {mod.category}
+                          </div>
+                        </div>
                       </div>
-                      <h3 className="text-lg font-bold text-slate-900 group-hover:text-[#19377B] transition-colors leading-snug">
-                        {mod.name}
-                      </h3>
-                      <p className="text-xs sm:text-[13px] text-slate-600 mt-2 leading-relaxed">
-                        {mod.shortDesc}
-                      </p>
-                    </div>
-
-                    {/* Footer Telemetry & Action */}
-                    <div className="mt-6 pt-3.5 border-t border-slate-100 flex items-center justify-between gap-3">
-                      <div className="min-w-0 truncate">{renderLiveTelemetry(mod)}</div>
-                      <span
-                        className={`inline-flex items-center gap-1 text-xs font-bold shrink-0 transition-transform duration-150 group-hover:translate-x-0.5 ${
-                          isActive ? 'text-[#1E60A8]' : 'text-slate-500 group-hover:text-slate-800'
-                        }`}
-                      >
-                        <span>{isActive ? 'Abrir' : 'Alcance'}</span>
+                      <span className="text-xs font-medium text-slate-500 group-hover:text-slate-800 shrink-0 inline-flex items-center gap-1 whitespace-nowrap">
+                        <span>Alcance</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
         )}
       </main>
 

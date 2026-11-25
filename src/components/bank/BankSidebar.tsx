@@ -103,19 +103,19 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
       )}
 
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-gradient-to-b from-[#0E224D] via-[#132E66] to-[#0B1C3F] text-white flex flex-col border-r border-blue-900/40 shadow-xl transition-transform duration-300 ease-in-out lg:translate-x-0 print:hidden ${
+        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-[#0E224D] text-white flex flex-col border-r border-blue-900/40 transition-transform duration-200 ease-out lg:translate-x-0 print:hidden ${
           isOpenMobile ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Top Premex Logo & App Switcher Bar */}
-        <div className="px-4 py-3.5 pt-safe flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
+        <div className="px-4 h-14 pt-safe flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70 shrink-0">
           <button
             type="button"
             onClick={() => onSwitchModule('launcher')}
             title="Volver al Portal de Módulos Premex"
-            className="bg-white rounded-xl px-2.5 py-1.5 flex items-center shadow-xs hover:opacity-95 transition-opacity cursor-pointer"
+            className="bg-white rounded-lg px-2 py-1 flex items-center hover:opacity-95 transition-opacity cursor-pointer"
           >
-            <PremexBrandLogo className="h-7 w-auto" />
+            <PremexBrandLogo className="h-6 w-auto" />
           </button>
 
           <div className="flex items-center gap-1">
@@ -140,11 +140,11 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
         </div>
 
         {/* Active Module Identity Header */}
-        <div className="px-5 py-4 border-b border-white/10 flex items-center gap-3">
-          <BancosModuleLogo className="w-10 h-10 shrink-0" />
+        <div className="px-4 py-3.5 border-b border-white/10 flex items-center gap-3">
+          <BancosModuleLogo className="w-8 h-8 shrink-0" />
           <div className="min-w-0">
-            <h1 className="font-bold text-sm tracking-tight text-white truncate">
-              Centro de Conciliaciones
+            <h1 className="font-bold text-[13px] tracking-tight text-white truncate">
+              Conciliación Bancaria
             </h1>
             <p className="text-[11px] text-sky-200/80 truncate">
               Tesorería SAP 00 / 01 / 02
@@ -154,13 +154,13 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
 
         {/* Active Account Context Strip */}
         {selectedAccount && (
-          <div className="mx-3.5 my-3 px-3.5 py-2.5 rounded-xl bg-white/8 border border-white/12">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-sky-200/80">
+          <div className="px-4 py-3 border-b border-white/10 space-y-0.5 bg-[#0A1838]/30">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-200/70 truncate">
               {selectedAccount.codigoSociedad
                 ? `Soc. ${selectedAccount.codigoSociedad} · ${selectedAccount.sociedad}`
                 : selectedAccount.sociedad}
             </div>
-            <div className="text-sm font-bold text-white truncate mt-0.5">
+            <div className="text-xs font-bold text-white truncate">
               {selectedAccount.banco}
             </div>
             <div className="text-[11px] text-blue-200/80 font-mono truncate">
@@ -169,18 +169,13 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
                 : selectedAccount.numeroCuenta}{' '}
               · {selectedAccount.moneda}
             </div>
-            <div className="text-[11px] mt-1.5 pt-1.5 border-t border-white/10 text-sky-200/90 truncate">
+            <div className="text-[11px] text-sky-200/85 truncate pt-0.5">
               {openPeriod ? `Ciclo abierto · ${openPeriod}` : 'Sin conciliación abierta'}
             </div>
           </div>
         )}
 
-        {/* Navigation Links */}
-        <div className="px-4 py-2 text-[11px] font-semibold tracking-wider text-sky-200/60 uppercase">
-          Vistas Bancarias SAP
-        </div>
-
-        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -188,51 +183,37 @@ export const BankSidebar: React.FC<BankSidebarProps> = ({
               <button
                 key={item.id}
                 type="button"
+                title={item.description}
                 onClick={() => {
                   setActiveTab(item.id);
                   onCloseMobile();
                 }}
-                className={`w-full group text-left px-3.5 py-2.5 rounded-xl flex items-center justify-between transition-all duration-150 cursor-pointer ${
+                className={`w-full group text-left px-3 py-2.5 rounded-lg flex items-center justify-between transition-colors cursor-pointer ${
                   isActive
-                    ? 'bg-[#1E60A8] text-white font-semibold shadow-sm'
-                    : 'text-blue-100/90 hover:bg-white/10 hover:text-white'
+                    ? 'bg-[#1E60A8] text-white font-semibold'
+                    : 'text-blue-100/85 hover:bg-white/8 hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                      isActive
-                        ? 'bg-white/20 text-white'
-                        : 'bg-white/8 text-sky-200 group-hover:bg-white/15 group-hover:text-white'
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      isActive ? 'text-white' : 'text-sky-200/80 group-hover:text-white'
                     }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium leading-tight truncate">
-                      {item.label}
-                    </div>
-                    <div
-                      className={`text-[11px] truncate mt-0.5 ${
-                        isActive ? 'text-sky-100' : 'text-blue-200/60'
-                      }`}
-                    >
-                      {item.description}
-                    </div>
-                  </div>
+                  />
+                  <span className="text-[13px] truncate">{item.label}</span>
                 </div>
 
                 <div className="flex items-center gap-1.5 ml-2 shrink-0">
                   {item.counter && (
                     <span
                       className={`text-[11px] font-mono font-semibold tabular-nums ${
-                        isActive ? 'text-white' : 'text-sky-200/90'
+                        isActive ? 'text-white' : 'text-sky-200/80'
                       }`}
                     >
                       {item.counter}
                     </span>
                   )}
-                  {isActive && <ChevronRight className="w-4 h-4 text-sky-200" />}
+                  {isActive && <ChevronRight className="w-3.5 h-3.5 text-sky-200" />}
                 </div>
               </button>
             );

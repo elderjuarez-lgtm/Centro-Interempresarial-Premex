@@ -1,0 +1,17 @@
+{
+  "name": "premex-clara-wm-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agente Puente RPA local para extracción en Clara, verificación de radicación en Work Manager (:8037) y despacho a bot SAP.",
+  "scripts": {
+    "start": "node agent.mjs",
+    "install-browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "playwright": "^1.50.0"
+  }
+}

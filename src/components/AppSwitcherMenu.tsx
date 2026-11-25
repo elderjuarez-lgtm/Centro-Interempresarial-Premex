@@ -48,6 +48,13 @@ const SWITCHER_ITEMS: SwitcherItem[] = [
     target: 'actividades',
   },
   {
+    id: 'clara',
+    title: 'Clara · Work Manager · SAP',
+    subtitle: 'Automatización de TC, facturas IA y bot SAP',
+    active: true,
+    target: 'clara',
+  },
+  {
     id: 'anticipos',
     title: 'Anticipos',
     subtitle: 'Próximamente en hoja de ruta',

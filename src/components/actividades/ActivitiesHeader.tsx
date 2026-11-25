@@ -9,6 +9,7 @@ import {
   LogOut,
   CheckCircle2,
   Loader2,
+  ChevronRight,
 } from 'lucide-react';
 import { ActiveModuleId, ActivitiesTab, EffectivePermissions } from '../../types';
 import {
@@ -64,13 +65,13 @@ export const ActivitiesHeader: React.FC<ActivitiesHeaderProps> = ({
   const roleLabel = ROLE_METADATA[permissions.role].shortLabel;
 
   return (
-    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-slate-200/90 pt-safe print:hidden">
-      <div className="px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-3">
+    <header className="sticky top-0 z-30 bg-white border-b border-slate-200 pt-safe print:hidden">
+      <div className="px-3 sm:px-6 lg:px-8 min-h-[56px] py-2 flex items-center justify-between gap-2 sm:gap-3">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onToggleMobileMenu}
-            className="lg:hidden min-w-[44px] min-h-[44px] -ml-1.5 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
+            className="lg:hidden min-w-[40px] min-h-[40px] -ml-1 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
             aria-label="Abrir menú"
           >
             <Menu className="w-5 h-5" />
@@ -85,7 +86,7 @@ export const ActivitiesHeader: React.FC<ActivitiesHeaderProps> = ({
               >
                 Premex
               </button>
-              <span>/</span>
+              <ChevronRight className="w-3 h-3 text-slate-400" />
               <span className="text-[#0F766E] font-semibold">Panel de Actividades</span>
             </div>
             <h2 className="text-sm sm:text-base font-bold text-slate-900 truncate leading-tight">
@@ -126,7 +127,7 @@ export const ActivitiesHeader: React.FC<ActivitiesHeaderProps> = ({
               onClick={onPullFromGoogleTasks}
               disabled={isSyncingGoogleTasks}
               title="Sincronizar tareas completadas desde Google Tasks"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-emerald-200 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100/80 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 bg-white text-emerald-700 hover:bg-emerald-50/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
             >
               {isSyncingGoogleTasks ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
@@ -142,9 +143,9 @@ export const ActivitiesHeader: React.FC<ActivitiesHeaderProps> = ({
               type="button"
               onClick={onSaveToCloud}
               disabled={isSavingCloud}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
+              className={`inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
                 hasUnsavedChanges
-                  ? 'bg-[#1E60A8] hover:bg-[#132B63] text-white shadow-xs'
+                  ? 'bg-[#132B63] hover:bg-[#1E60A8] text-white'
                   : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
               }`}
             >

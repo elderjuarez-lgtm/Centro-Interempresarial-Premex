@@ -1477,7 +1477,7 @@ export const BankModuleWorkspace: React.FC<BankModuleWorkspaceProps> = ({
         permissions={permissions}
       />
 
-      <div className="lg:pl-72 print:pl-0 flex flex-col min-h-screen">
+      <div className="lg:pl-64 print:pl-0 flex flex-col min-h-screen">
         <BankHeader
           activeTab={activeTab}
           onToggleMobileMenu={() => setIsMobileMenuOpen(true)}

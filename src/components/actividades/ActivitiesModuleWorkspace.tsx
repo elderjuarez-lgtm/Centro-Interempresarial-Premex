@@ -1728,7 +1728,7 @@ export const ActivitiesModuleWorkspace: React.FC<ActivitiesModuleWorkspaceProps>
         permissions={permissions}
       />
 
-      <div className="flex-1 lg:pl-72 flex flex-col min-w-0">
+      <div className="flex-1 lg:pl-64 flex flex-col min-w-0">
         <ActivitiesHeader
           activeTab={activeTab}
           selectedPeriod={data.selectedPeriod}

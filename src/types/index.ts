@@ -948,6 +948,26 @@ export type ClaraWorkManagerStatus =
   | 'exenta_exterior'
   | 'diferencia_valor';
 
+export type ClaraWorkManagerRadicacionStatus =
+  | 'radicada'
+  | 'no_radicada'
+  | 'inconsistencia'
+  | 'pendiente'
+  | 'exenta_exterior';
+
+export type ClaraInvoiceCuadreStatus =
+  | 'cuadra_ok'
+  | 'diferencia_monto'
+  | 'error_aritmetico'
+  | 'sin_soporte';
+
+export type ClaraSapDispatchStatus =
+  | 'pendiente'
+  | 'en_paquete'
+  | 'enviado_agente'
+  | 'contabilizado'
+  | 'error';
+
 export type ClaraVendorSyncStatus =
   | 'pendiente_crear'
   | 'creado_sap'
@@ -981,12 +1001,40 @@ export interface ClaraTransaction {
   workManagerStatus: ClaraWorkManagerStatus;
   workManagerInvoiceId?: string;
   workManagerNumeroFactura?: string;
+  // Estado granular de radicación en Work Manager (:8037)
+  wmRadicacionStatus?: ClaraWorkManagerRadicacionStatus;
+  wmRadicacionNumero?: string;
+  wmRadicacionFecha?: string;
+  wmMensajeValidacion?: string;
+  // Lectura inteligente de factura adjunta (IA Gemini)
+  facturaNumero?: string;
+  facturaSerie?: string;
+  facturaCufe?: string;
+  facturaFecha?: string;
+  facturaNit?: string;
+  facturaProveedor?: string;
+  facturaMoneda?: string;
+  facturaSubtotal?: number;
+  facturaImpuesto?: number;
+  facturaPorcentajeImpuesto?: number;
+  facturaTotal?: number;
+  facturaConfianzaIa?: 'alta' | 'media' | 'baja';
+  facturaArchivoNombre?: string;
+  facturaCuadreEstado?: ClaraInvoiceCuadreStatus;
+  facturaCuadreNota?: string;
+  // Terceros, contabilidad y despacho a Bot SAP
   terceroId?: string;
   terceroNit?: string;
   terceroNombre?: string;
   erpDestino: ClaraErpTarget;
   cuentaContable?: string;
   indicadorImpuesto?: string;
+  sapSociedad?: string;
+  sapClaseDoc?: string;
+  sapCentroCosto?: string;
+  sapDocContable?: string;
+  sapDespachoEstado?: ClaraSapDispatchStatus;
+  sapMensaje?: string;
   estadoContable: ClaraAccountingStatus;
   loteExportacionId?: string;
   origenRegistro: 'demo' | 'archivo_clara' | 'manual' | 'api_clara';
@@ -1041,6 +1089,8 @@ export interface ClaraCostCenterRule {
   activa: boolean;
 }
 
+export type ClaraAutomationExecutionMode = 'hibrido_web' | 'agente_local' | 'sap_bot';
+
 export interface ClaraConnectorConfig {
   claraMode: 'archivo' | 'api_pendiente';
   workManagerMode: 'archivo' | 'api_pendiente';
@@ -1050,18 +1100,29 @@ export interface ClaraConnectorConfig {
   diasVentanaCruce: number;
   detectarExteriorAutomatico: boolean;
   notaViaticosFutura?: string;
+  // Configuracion de URLs corporativas y puente local (nunca guardar secretos/passwords aquí)
+  claraUrl?: string;
+  workManagerUrl?: string;
+  agentUrl?: string;
+  executionMode?: ClaraAutomationExecutionMode;
+  sapSociedadDefault?: string;
+  sapClaseDocDefault?: string;
+  lastServerProbeIso?: string;
+  lastServerProbeSummary?: string;
 }
 
 export interface ClaraBatchExportLog {
   id: string;
   createdAtIso: string;
   createdBy: string;
-  erp: 'SAP' | 'Odoo';
-  tipo: 'gastos' | 'terceros';
+  erp: 'SAP' | 'Odoo' | 'Clara' | 'WorkManager';
+  tipo: 'gastos' | 'terceros' | 'rpa_clara' | 'rpa_wm' | 'sap_bot';
   cantidadRegistros: number;
   totalMonto: number;
   moneda: string;
   archivoNombre: string;
+  estado?: 'ok' | 'alerta' | 'error';
+  detalle?: string;
 }
 
 export interface ClaraWorkspaceData {

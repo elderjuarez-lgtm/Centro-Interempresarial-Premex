@@ -307,64 +307,16 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          {!isReadOnly && (
             <button
               type="button"
-              onClick={() =>
-                onOpenExportModal({
-                  format: 'pdf',
-                  mode: 'masivo',
-                  societyKey: selectedSocietyKey,
-                  accountId: activeAccount?.id,
-                })
-              }
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              title="Descargar o imprimir PDF (individual o masivo)"
+              onClick={() => onNavigateTab('carga')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer self-start lg:self-auto"
             >
-              <FileText className="w-3.5 h-3.5 text-[#132B63]" />
-              <span>Descargar PDF</span>
+              <UploadCloud className="w-3.5 h-3.5" />
+              <span>Cargar Balance / Partidas</span>
             </button>
-            <button
-              type="button"
-              onClick={() =>
-                onOpenExportModal({
-                  format: 'excel',
-                  mode: 'masivo',
-                  societyKey: selectedSocietyKey,
-                  accountId: activeAccount?.id,
-                })
-              }
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              title="Descargar Excel entregable (individual o masivo)"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Descargar Excel</span>
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                onOpenEmailModal({
-                  societyKey: selectedSocietyKey,
-                  accountId: activeAccount?.id,
-                })
-              }
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              title="Enviar conciliación por correo Gmail (PDF, Excel o ambos · por empresa, todas o selección)"
-            >
-              <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
-              <span>Enviar Correo</span>
-            </button>
-            {!isReadOnly && (
-              <button
-                type="button"
-                onClick={() => onNavigateTab('carga')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <UploadCloud className="w-3.5 h-3.5" />
-                <span>Cargar Balance / Partidas</span>
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
         {/* Society Horizontal Button Strip */}
@@ -495,25 +447,18 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
                   key={acc.id}
                   type="button"
                   onClick={() => onSelectAccountId(acc.id)}
-                  className={`group text-left rounded-2xl border p-4 transition-all duration-150 relative overflow-hidden cursor-pointer ${
+                  className={`group text-left rounded-2xl border p-4 transition-all duration-150 cursor-pointer ${
                     isSelected
-                      ? 'bg-gradient-to-br from-[#0E224D] via-[#132E66] to-[#1E60A8] text-white border-[#132B63] shadow-md'
-                      : 'bg-white text-slate-900 border-slate-200/90 hover:border-[#1E60A8]/60 hover:shadow-sm'
+                      ? 'bg-[#132B63]/[0.04] text-slate-900 border-[#132B63] ring-1 ring-[#132B63]/20'
+                      : 'bg-white text-slate-900 border-slate-200 hover:border-[#1E60A8]/50'
                   }`}
                 >
-                  {/* Top accent bar */}
-                  <div
-                    className={`absolute top-0 inset-x-0 h-1 ${
-                      isSelected ? 'bg-sky-300/70' : brand.accentBar
-                    }`}
-                  />
-
-                  <div className="flex items-start justify-between gap-2.5 pt-0.5">
+                  <div className="flex items-start justify-between gap-2.5">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center font-extrabold text-xs tracking-tight shrink-0 shadow-2xs ${
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center font-extrabold text-xs tracking-tight shrink-0 ${
                           isSelected
-                            ? 'bg-white/15 text-white border border-white/25'
+                            ? 'bg-[#132B63] text-white'
                             : `${brand.badgeBg} ${brand.badgeText}`
                         }`}
                       >
@@ -521,18 +466,12 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
                       </div>
                       <div className="min-w-0">
                         <div
-                          className={`text-xs font-bold leading-snug truncate ${
-                            isSelected ? 'text-white' : 'text-slate-900'
-                          }`}
+                          className="text-xs font-bold leading-snug truncate text-slate-900"
                           title={acc.banco}
                         >
                           {acc.banco}
                         </div>
-                        <div
-                          className={`text-[11px] font-mono truncate mt-0.5 ${
-                            isSelected ? 'text-sky-100/90' : 'text-slate-500'
-                          }`}
-                        >
+                        <div className="text-[11px] font-mono truncate mt-0.5 text-slate-500">
                           {acc.codigoSociedad ? `Soc. ${acc.codigoSociedad} · ` : ''}
                           {acc.cuentaMayor00 || acc.numeroCuenta} · {acc.moneda}
                         </div>
@@ -548,56 +487,30 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
                       }
                     >
                       {isOk ? (
-                        <CheckCircle2
-                          className={`w-4 h-4 ${isSelected ? 'text-emerald-300' : 'text-emerald-600'}`}
-                        />
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                       ) : (
-                        <AlertTriangle
-                          className={`w-4 h-4 ${isSelected ? 'text-amber-300' : 'text-rose-600'}`}
-                        />
+                        <AlertTriangle className="w-4 h-4 text-rose-600" />
                       )}
                     </div>
                   </div>
 
-                  <div
-                    className={`mt-3.5 pt-3 border-t flex items-end justify-between gap-2 ${
-                      isSelected ? 'border-white/15' : 'border-slate-100'
-                    }`}
-                  >
+                  <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-end justify-between gap-2">
                     <div className="min-w-0">
-                      <div
-                        className={`text-[10px] uppercase tracking-wider font-semibold ${
-                          isSelected ? 'text-sky-200/80' : 'text-slate-400'
-                        }`}
-                      >
+                      <div className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
                         Saldo Extracto
                       </div>
-                      <div
-                        className={`text-sm font-bold font-mono tabular-nums truncate mt-0.5 ${
-                          isSelected ? 'text-white' : 'text-slate-900'
-                        }`}
-                      >
+                      <div className="text-sm font-bold font-mono tabular-nums truncate mt-0.5 text-slate-900">
                         {formatBankMoney(accSum.saldoExtracto, acc.moneda)}
                       </div>
                     </div>
 
                     <div className="text-right shrink-0">
-                      <div
-                        className={`text-[10px] uppercase tracking-wider font-semibold ${
-                          isSelected ? 'text-sky-200/80' : 'text-slate-400'
-                        }`}
-                      >
+                      <div className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
                         {isOk ? 'Estado' : 'Diferencia'}
                       </div>
                       <div
                         className={`text-xs font-bold font-mono tabular-nums mt-0.5 ${
-                          isOk
-                            ? isSelected
-                              ? 'text-emerald-300'
-                              : 'text-emerald-700'
-                            : isSelected
-                            ? 'text-amber-300'
-                            : 'text-rose-700'
+                          isOk ? 'text-emerald-700' : 'text-rose-700'
                         }`}
                       >
                         {isOk
@@ -645,9 +558,9 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
       {/* BLOQUE 4: Auditoría de Subcuentas SAP (00 / 01 / 02) + Cuadro Consolidado Desplegable */}
       {activeAccount && (
         <section className="space-y-4 print:hidden">
-          {/* 3 Compact SAP Subaccount Audit Cards */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 space-y-3.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* 3 Compact SAP Subaccount Audit Strip */}
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-[#1E60A8]" />
                 <h3 className="text-sm font-bold text-slate-900">
@@ -661,9 +574,9 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-100">
               {/* Subcuenta 00 */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2">
+              <div className="p-4 sm:p-5 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -695,7 +608,7 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-2 text-xs">
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
                   <span
                     className={`font-mono font-bold tabular-nums ${
                       Math.abs(summary.diffSubcuenta00) <= 0.01
@@ -719,7 +632,7 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
               </div>
 
               {/* Subcuenta 01 */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2">
+              <div className="p-4 sm:p-5 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -751,7 +664,7 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-xs">
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                   <span
                     className={`font-mono font-bold tabular-nums ${
                       Math.abs(summary.diffSubcuenta01) <= 1 ? 'text-emerald-700' : 'text-rose-700'
@@ -766,7 +679,7 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
               </div>
 
               {/* Subcuenta 02 */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2">
+              <div className="p-4 sm:p-5 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -798,7 +711,7 @@ export const BankResumenView: React.FC<BankResumenViewProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-xs">
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                   <span
                     className={`font-mono font-bold tabular-nums ${
                       Math.abs(summary.diffSubcuenta02) <= 1 ? 'text-emerald-700' : 'text-rose-700'

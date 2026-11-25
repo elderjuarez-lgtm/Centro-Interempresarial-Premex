@@ -1249,7 +1249,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
         consultorScopeLabel={sidebarScopeLabel}
       />
 
-      <div className="lg:pl-72 flex flex-col flex-1 min-h-screen min-w-0 max-w-full">
+      <div className="lg:pl-64 flex flex-col flex-1 min-h-screen min-w-0 max-w-full">
         <ViaticosHeader
           activeTab={activeTab}
           activeLiquidation={activeLiquidation}

@@ -149,6 +149,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
   // Agrupación por liquidación (desactivada por defecto; activable a solicitud del usuario)
   const [groupByLiquidation, setGroupByLiquidation] = useState<boolean>(false);
   const [collapsedLiqIds, setCollapsedLiqIds] = useState<Set<string>>(() => new Set());
+  const [showMoreFilters, setShowMoreFilters] = useState<boolean>(false);
 
   // Alerta explícita de contabilizado tras descarga de archivo Odoo
   const [accountingDownloadAlert, setAccountingDownloadAlert] = useState<{
@@ -658,7 +659,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               void handleExportOdooExcel();
             }}
             disabled={dataset.expenseRows.length === 0 || isExportingExcel}
-            className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-2 min-h-[44px] lg:min-h-[40px] px-4 py-2 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-2 min-h-[40px] px-4 py-2 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
             <span>
@@ -670,7 +671,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             type="button"
             onClick={() => handleExportOdooCsv('gastos')}
             disabled={dataset.hrExpenseRows.length === 0}
-            className="inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-bold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-semibold text-[#132B63] bg-white hover:bg-slate-50 border border-slate-200 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             title="CSV Hoja 1 exacto para importación en Odoo (Plantilla Gastos GT S-44)"
           >
             <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
@@ -681,7 +682,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             type="button"
             onClick={() => handleExportOdooCsv('facturas')}
             disabled={dataset.expenseRows.length === 0}
-            className="inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             title="CSV plano consolidado con todas las facturas y centros de costo"
           >
             <Download className="w-3.5 h-3.5 text-emerald-700" />
@@ -692,7 +693,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             type="button"
             onClick={handleExportContabilidadPdf}
             disabled={dataset.expenseRows.length === 0 || isExportingPdf}
-            className="inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             title="Descargar reporte PDF resumido para archivo contable"
           >
             <FileText className="w-3.5 h-3.5 text-rose-700" />
@@ -1011,172 +1012,209 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           </div>
         </div>
 
-        {/* Multi-Liquidador Filters Row */}
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-          {/* Contabilizado Quick Filter */}
-          <div
-            role="group"
-            aria-label="Filtrar por estado de contabilización"
-            className="col-span-2 sm:col-span-1 inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 gap-0.5"
-          >
-            <button
-              type="button"
-              onClick={() => setContabilizadoFilter('ALL')}
-              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                contabilizadoFilter === 'ALL'
-                  ? 'bg-white text-[#132B63] shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Todas ({contabilizadoCounts.total})
-            </button>
-            <button
-              type="button"
-              onClick={() => setContabilizadoFilter('pendientes')}
-              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                contabilizadoFilter === 'pendientes'
-                  ? 'bg-amber-100 text-amber-950 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Pendientes ({contabilizadoCounts.pendientes})
-            </button>
-            <button
-              type="button"
-              onClick={() => setContabilizadoFilter('contabilizadas')}
-              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1 ${
-                contabilizadoFilter === 'contabilizadas'
-                  ? 'bg-emerald-100 text-emerald-950 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <BadgeCheck className="w-3 h-3" />
-              <span>Contabilizadas ({contabilizadoCounts.contabilizadas})</span>
-            </button>
-          </div>
+        {/* Multi-Liquidador Primary Filter Row */}
+        {(() => {
+          const secondaryActiveCount =
+            (statusFilter !== 'ALL' ? 1 : 0) +
+            (currencyFilter !== 'ALL' ? 1 : 0) +
+            (costCenterFilter !== 'ALL' ? 1 : 0) +
+            (companyFilter !== 'ALL' ? 1 : 0);
 
-          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
-            <Users className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
-            <select
-              value={consultorFilter}
-              aria-label="Filtrar por consultor o liquidador"
-              onChange={(e) => setConsultorFilter(e.target.value)}
-              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[200px]"
-            >
-              <option value="ALL">Consultor: Todos</option>
-              {filterOptions.consultores.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
+          return (
+            <>
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                {/* Contabilizado Quick Filter */}
+                <div
+                  role="group"
+                  aria-label="Filtrar por estado de contabilización"
+                  className="col-span-2 sm:col-span-1 inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 gap-0.5"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setContabilizadoFilter('ALL')}
+                    className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                      contabilizadoFilter === 'ALL'
+                        ? 'bg-white text-[#132B63] shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Todas ({contabilizadoCounts.total})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setContabilizadoFilter('pendientes')}
+                    className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                      contabilizadoFilter === 'pendientes'
+                        ? 'bg-amber-100 text-amber-950 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Pendientes ({contabilizadoCounts.pendientes})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setContabilizadoFilter('contabilizadas')}
+                    className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1 ${
+                      contabilizadoFilter === 'contabilizadas'
+                        ? 'bg-emerald-100 text-emerald-950 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <BadgeCheck className="w-3 h-3" />
+                    <span>Contabilizadas ({contabilizadoCounts.contabilizadas})</span>
+                  </button>
+                </div>
 
-          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5">
-            <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
-            <select
-              value={weekFilter}
-              aria-label="Filtrar por semana"
-              onChange={(e) => setWeekFilter(e.target.value)}
-              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
-            >
-              <option value="ALL">Semana: Todas</option>
-              {filterOptions.weeks.map((w) => (
-                <option key={w} value={w}>
-                  Semana #{w}
-                </option>
-              ))}
-            </select>
-          </div>
+                <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 min-h-[40px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
+                  <Users className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                  <select
+                    value={consultorFilter}
+                    aria-label="Filtrar por consultor o liquidador"
+                    onChange={(e) => setConsultorFilter(e.target.value)}
+                    className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[200px]"
+                  >
+                    <option value="ALL">Consultor: Todos</option>
+                    {filterOptions.consultores.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          <select
-            value={statusFilter}
-            aria-label="Filtrar por estado de liquidación"
-            onChange={(e) => setStatusFilter(e.target.value as StatusScopeFilter)}
-            className="col-span-2 sm:col-span-1 min-h-[44px] lg:min-h-0 text-sm lg:text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 cursor-pointer"
-          >
-            <option value="ALL">Todos los estados</option>
-            <option value="CLOSED_AND_SENT">Solo Cerradas y Enviadas</option>
-            <option value="cerrada">Solo Cerradas</option>
-            <option value="enviada">Solo Enviadas</option>
-            <option value="borrador">Solo Abiertas (Borrador)</option>
-          </select>
+                <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 min-h-[40px] lg:min-h-0 lg:py-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                  <select
+                    value={weekFilter}
+                    aria-label="Filtrar por semana"
+                    onChange={(e) => setWeekFilter(e.target.value)}
+                    className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+                  >
+                    <option value="ALL">Semana: Todas</option>
+                    {filterOptions.weeks.map((w) => (
+                      <option key={w} value={w}>
+                        Semana #{w}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5">
-            <Coins className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
-            <select
-              value={currencyFilter}
-              aria-label="Filtrar por moneda"
-              onChange={(e) =>
-                setCurrencyFilter(e.target.value as 'ALL' | ViaticoCurrency)
-              }
-              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
-            >
-              <option value="ALL">Monedas</option>
-              {filterOptions.currencies.map((cur) => (
-                <option key={cur} value={cur}>
-                  {cur} ({CURRENCY_SYMBOLS[cur]})
-                </option>
-              ))}
-            </select>
-          </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMoreFilters((v) => !v)}
+                  className={`inline-flex items-center justify-center gap-1.5 px-2.5 min-h-[40px] lg:min-h-0 lg:py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer whitespace-nowrap ${
+                    showMoreFilters || secondaryActiveCount > 0
+                      ? 'bg-[#132B63]/5 text-[#132B63] border-[#132B63]/25'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <Filter className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>
+                    Más filtros{secondaryActiveCount > 0 ? ` (${secondaryActiveCount})` : ''}
+                  </span>
+                  {showMoreFilters ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                </button>
 
-          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
-            <Layers className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
-            <select
-              value={costCenterFilter}
-              aria-label="Filtrar por centro de costo"
-              onChange={(e) => setCostCenterFilter(e.target.value)}
-              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[200px]"
-            >
-              <option value="ALL">Todos los Centros de Costo</option>
-              <option value="__UNASSIGNED__">Sin Centro de Costo</option>
-              {costCenterSuggestions.map((cc) => (
-                <option key={cc} value={cc}>
-                  {cc}
-                </option>
-              ))}
-            </select>
-          </div>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatusFilter('ALL');
+                      setContabilizadoFilter('ALL');
+                      setWeekFilter('ALL');
+                      setConsultorFilter('ALL');
+                      setCostCenterFilter('ALL');
+                      setCompanyFilter('ALL');
+                      setCurrencyFilter('ALL');
+                      setSearchQuery('');
+                    }}
+                    className="col-span-2 sm:col-span-1 min-h-[36px] lg:min-h-0 text-xs font-semibold text-[#1E60A8] hover:text-[#132B63] px-2 py-1 cursor-pointer whitespace-nowrap text-left sm:text-center"
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
 
-          {filterOptions.companies.length > 1 && (
-            <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
-              <Building2 className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
-              <select
-                value={companyFilter}
-                aria-label="Filtrar por sociedad"
-                onChange={(e) => setCompanyFilter(e.target.value)}
-                className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[170px]"
-              >
-                <option value="ALL">Todas las sociedades</option>
-                {filterOptions.companies.map((comp) => (
-                  <option key={comp} value={comp}>
-                    {comp}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+              {/* Secondary Collapsible Filters Drawer */}
+              {(showMoreFilters || secondaryActiveCount > 0) && (
+                <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                  <select
+                    value={statusFilter}
+                    aria-label="Filtrar por estado de liquidación"
+                    onChange={(e) => setStatusFilter(e.target.value as StatusScopeFilter)}
+                    className="min-h-[40px] lg:min-h-0 text-sm lg:text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 cursor-pointer"
+                  >
+                    <option value="ALL">Todos los estados</option>
+                    <option value="CLOSED_AND_SENT">Solo Cerradas y Enviadas</option>
+                    <option value="cerrada">Solo Cerradas</option>
+                    <option value="enviada">Solo Enviadas</option>
+                    <option value="borrador">Solo Abiertas (Borrador)</option>
+                  </select>
 
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={() => {
-                setStatusFilter('ALL');
-                setContabilizadoFilter('ALL');
-                setWeekFilter('ALL');
-                setConsultorFilter('ALL');
-                setCostCenterFilter('ALL');
-                setCompanyFilter('ALL');
-                setCurrencyFilter('ALL');
-                setSearchQuery('');
-              }}
-              className="col-span-2 sm:col-span-1 min-h-[40px] lg:min-h-0 text-xs font-semibold text-[#1E60A8] hover:text-[#132B63] px-2 py-1 cursor-pointer whitespace-nowrap text-left sm:text-center"
-            >
-              Limpiar filtros
-            </button>
-          )}
-        </div>
+                  <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 min-h-[40px] lg:min-h-0 lg:py-1.5">
+                    <Coins className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                    <select
+                      value={currencyFilter}
+                      aria-label="Filtrar por moneda"
+                      onChange={(e) =>
+                        setCurrencyFilter(e.target.value as 'ALL' | ViaticoCurrency)
+                      }
+                      className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+                    >
+                      <option value="ALL">Todas las monedas</option>
+                      {filterOptions.currencies.map((cur) => (
+                        <option key={cur} value={cur}>
+                          {cur} ({CURRENCY_SYMBOLS[cur]})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 min-h-[40px] lg:min-h-0 lg:py-1.5">
+                    <Layers className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                    <select
+                      value={costCenterFilter}
+                      aria-label="Filtrar por centro de costo"
+                      onChange={(e) => setCostCenterFilter(e.target.value)}
+                      className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[200px]"
+                    >
+                      <option value="ALL">Todos los Centros de Costo</option>
+                      <option value="__UNASSIGNED__">Sin Centro de Costo</option>
+                      {costCenterSuggestions.map((cc) => (
+                        <option key={cc} value={cc}>
+                          {cc}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {filterOptions.companies.length > 1 && (
+                    <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 min-h-[40px] lg:min-h-0 lg:py-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                      <select
+                        value={companyFilter}
+                        aria-label="Filtrar por sociedad"
+                        onChange={(e) => setCompanyFilter(e.target.value)}
+                        className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[170px]"
+                      >
+                        <option value="ALL">Todas las sociedades</option>
+                        {filterOptions.companies.map((comp) => (
+                          <option key={comp} value={comp}>
+                            {comp}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </section>
 
       {/* 6.0 SUB-TAB 0: CARGA ODOO HOJA 1 (FORMATO PLANTILLA GASTOS GT S-44) */}

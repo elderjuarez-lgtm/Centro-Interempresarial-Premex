@@ -117,19 +117,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-gradient-to-b from-[#0E224D] via-[#132E66] to-[#0B1C3F] text-white flex flex-col border-r border-blue-900/40 shadow-xl transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-[#0E224D] text-white flex flex-col border-r border-blue-900/40 transition-transform duration-200 ease-out lg:translate-x-0 ${
           isOpenMobile ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Top Premex Brand & Modular App Switcher */}
-        <div className="px-4 py-3.5 pt-safe flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
+        <div className="px-4 h-14 pt-safe flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70 shrink-0">
           <button
             type="button"
             onClick={() => onSwitchModule?.('launcher')}
             title="Volver al Portal de Módulos Premex"
-            className="bg-white rounded-xl px-2.5 py-1.5 flex items-center shadow-xs hover:opacity-95 transition-opacity cursor-pointer"
+            className="bg-white rounded-lg px-2 py-1 flex items-center hover:opacity-95 transition-opacity cursor-pointer"
           >
-            <PremexBrandLogo className="h-7 w-auto" />
+            <PremexBrandLogo className="h-6 w-auto" />
           </button>
 
           <div className="flex items-center gap-1">
@@ -156,31 +156,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Active Module Header */}
-        <div className="px-5 py-4 flex items-center gap-3 border-b border-white/10">
-          <IntercompanyModuleLogo className="w-10 h-10 shrink-0" />
+        <div className="px-4 py-3.5 flex items-center gap-3 border-b border-white/10">
+          <IntercompanyModuleLogo className="w-8 h-8 shrink-0" />
           <div className="min-w-0">
-            <h1 className="font-bold text-sm tracking-tight text-white leading-tight truncate">
+            <h1 className="font-bold text-[13px] tracking-tight text-white leading-tight truncate">
               Conciliación Intercompany
             </h1>
-            <p className="text-[11px] text-sky-200/80 font-medium truncate">
-              Centro Interempresarial · {getIntercompanyScopeLabel(activeScope)}
+            <p className="text-[11px] text-sky-200/80 truncate">
+              {getIntercompanyScopeLabel(activeScope)}
             </p>
           </div>
         </div>
 
-        {/* 3-Scope Intercompany Selector (Internacionales / Nacionales / Anitox) */}
-        <div className="px-3 py-2.5 mx-3 my-3 rounded-xl bg-white/8 border border-white/12 space-y-2">
-          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-sky-200/80 px-0.5">
+        {/* 3-Scope Intercompany Selector */}
+        <div className="px-3 py-3 border-b border-white/10 space-y-1.5">
+          <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-sky-200/70 px-1.5">
             <span className="inline-flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-sky-300 shrink-0" />
-              <span>Ámbito Intercompany</span>
+              <Layers className="w-3 h-3 text-sky-300 shrink-0" />
+              <span>Ámbito</span>
             </span>
-            <span className="font-mono text-sky-200">
+            <span className="font-mono text-sky-200/90">
               {INTERCOMPANY_SCOPE_META[activeScope].defaultCurrency}
             </span>
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {INTERCOMPANY_SCOPES.map((scope) => {
               const meta = INTERCOMPANY_SCOPE_META[scope];
               const isSelected = activeScope === scope;
@@ -193,26 +193,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onChangeScope(scope);
                     onCloseMobile();
                   }}
-                  className={`w-full px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 text-left transition-all cursor-pointer ${
+                  className={`w-full px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-2 text-left transition-colors cursor-pointer ${
                     isSelected
-                      ? 'bg-[#1E60A8] text-white shadow-xs ring-1 ring-sky-300/40'
-                      : 'text-blue-100/85 hover:bg-white/10 hover:text-white'
+                      ? 'bg-[#1E60A8] text-white font-semibold'
+                      : 'text-blue-100/80 hover:bg-white/8 hover:text-white'
                   }`}
                 >
-                  <div className="min-w-0 flex items-center gap-2">
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isSelected ? 'bg-emerald-300' : 'bg-blue-300/40'
-                      }`}
-                    />
-                    <span className="text-xs font-bold truncate">{meta.label}</span>
-                  </div>
+                  <span className="text-xs truncate">{meta.label}</span>
                   <span
                     className={`text-[10px] font-mono tabular-nums shrink-0 ${
-                      isSelected ? 'text-sky-100' : 'text-blue-200/70'
+                      isSelected ? 'text-sky-100' : 'text-blue-200/60'
                     }`}
                   >
-                    {summary.entities} emp. · {summary.movements} mov.
+                    {summary.entities}·{summary.movements}
                   </span>
                 </button>
               );
@@ -220,12 +213,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Navigation Section */}
-        <div className="px-4 py-2 text-[11px] font-semibold tracking-wider text-sky-200/60 uppercase">
-          Vistas del Módulo
-        </div>
-
-        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -234,38 +222,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 type="button"
+                title={item.description}
                 onClick={() => {
                   setActiveTab(item.id);
                   onCloseMobile();
                 }}
-                className={`w-full group text-left px-3.5 py-2.5 rounded-xl flex items-center justify-between transition-all duration-150 cursor-pointer ${
+                className={`w-full group text-left px-3 py-2.5 rounded-lg flex items-center justify-between transition-colors cursor-pointer ${
                   isActive
-                    ? 'bg-[#1E60A8] text-white font-semibold shadow-sm'
-                    : 'text-blue-100/90 hover:bg-white/10 hover:text-white'
+                    ? 'bg-[#1E60A8] text-white font-semibold'
+                    : 'text-blue-100/85 hover:bg-white/8 hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                      isActive
-                        ? 'bg-white/20 text-white'
-                        : 'bg-white/8 text-sky-200 group-hover:bg-white/15 group-hover:text-white'
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      isActive ? 'text-white' : 'text-sky-200/80 group-hover:text-white'
                     }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <div className="truncate text-left">
-                    <div className="text-sm font-medium leading-tight">
-                      {item.label}
-                    </div>
-                    <div
-                      className={`text-[11px] truncate mt-0.5 ${
-                        isActive ? 'text-sky-100' : 'text-blue-200/60'
-                      }`}
-                    >
-                      {item.description}
-                    </div>
-                  </div>
+                  />
+                  <span className="text-[13px] truncate">{item.label}</span>
                 </div>
 
                 <div className="flex items-center gap-1.5 ml-2 shrink-0">
@@ -274,13 +248,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={`text-[11px] font-mono font-semibold tabular-nums ${
                         isActive
                           ? 'text-white'
-                          : item.badgeColor || 'text-sky-200/90'
+                          : item.badgeColor || 'text-sky-200/80'
                       }`}
                     >
                       {item.badge}
                     </span>
                   )}
-                  {isActive && <ChevronRight className="w-4 h-4 text-sky-200" />}
+                  {isActive && <ChevronRight className="w-3.5 h-3.5 text-sky-200" />}
                 </div>
               </button>
             );

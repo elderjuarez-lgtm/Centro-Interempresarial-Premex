@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Menu,
   Calendar,
@@ -9,6 +9,7 @@ import {
   LogOut,
   Loader2,
   ChevronRight,
+  ChevronDown,
   Printer,
   Send,
 } from 'lucide-react';
@@ -69,6 +70,27 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
   onSwitchModule,
   permissions,
 }) => {
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExportOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [exportOpen]);
+
   const accountsByCompany = useMemo(() => {
     const map = new Map<string, BankAccount[]>();
     accounts.forEach((acc) => {
@@ -82,21 +104,21 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
   }, [accounts]);
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 pt-safe print:hidden">
-      <div className="px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
+    <header className="sticky top-0 z-30 bg-white border-b border-slate-200 pt-safe print:hidden">
+      <div className="px-3 sm:px-6 lg:px-8 min-h-[56px] py-2 flex items-center justify-between gap-2 sm:gap-3">
         {/* Left: Mobile menu + Breadcrumb + Page title */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onToggleMobileMenu}
-            className="lg:hidden min-w-[44px] min-h-[44px] -ml-1.5 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
+            className="lg:hidden min-w-[40px] min-h-[40px] -ml-1 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
             aria-label="Abrir menú bancario"
           >
             <Menu className="w-5 h-5" />
           </button>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
               <button
                 type="button"
                 onClick={() => onSwitchModule('launcher')}
@@ -105,7 +127,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
                 Premex
               </button>
               <ChevronRight className="w-3 h-3 text-slate-400" />
-              <span className="text-[#19377B]">Tesorería SAP 00/01/02</span>
+              <span className="text-[#19377B] font-semibold">Tesorería SAP 00/01/02</span>
               {!permissions.isAdmin && (
                 <>
                   <span className="text-slate-300">·</span>
@@ -115,13 +137,13 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
                 </>
               )}
             </div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate leading-tight">
               {BANK_TAB_LABEL[activeTab]}
             </h2>
           </div>
         </div>
 
-        {/* Right: Account selector grouped by society, Period selector, Print/PDF, Excel, Save, Auth */}
+        {/* Right: Account selector, Period selector, Consolidated Export/Send dropdown, Save, Auth */}
         <div className="flex items-center gap-2 shrink-0">
           {/* Account selector grouped by Society */}
           <div className="hidden md:flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs">
@@ -130,7 +152,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
               aria-label="Seleccionar cuenta bancaria"
               value={selectedAccountId}
               onChange={(e) => onSelectAccountId(e.target.value)}
-              className="bg-transparent font-semibold text-slate-800 focus:outline-hidden cursor-pointer max-w-[230px] truncate"
+              className="bg-transparent font-semibold text-slate-800 focus:outline-hidden cursor-pointer max-w-[210px] truncate"
             >
               {accountsByCompany.map(([socLabel, accList]) => (
                 <optgroup key={socLabel} label={socLabel}>
@@ -145,13 +167,13 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
           </div>
 
           {/* Month selector */}
-          <div className="flex items-center gap-1.5 bg-[#1E60A8]/8 border border-[#1E60A8]/20 rounded-xl px-2.5 py-1.5 text-xs">
-            <Calendar className="w-3.5 h-3.5 text-[#19377B] shrink-0" />
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs">
+            <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
             <select
               aria-label="Seleccionar periodo bancario"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="bg-transparent font-bold text-[#132B63] focus:outline-hidden cursor-pointer"
+              className="bg-transparent font-semibold text-[#132B63] focus:outline-hidden cursor-pointer"
             >
               {availableMonths.map((m) => {
                 const isClosed = closedPeriodKeys.has(
@@ -171,43 +193,64 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
             </select>
           </div>
 
-          {/* Print / PDF Official Sheet */}
-          <button
-            type="button"
-            onClick={onOpenPrintPreview}
-            disabled={!selectedAccountId}
-            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="Descargar o imprimir PDF oficial (individual o masivo)"
-          >
-            <Printer className="w-3.5 h-3.5 text-[#132B63]" />
-            <span className="hidden xl:inline">Imprimir / PDF</span>
-          </button>
+          {/* Consolidated Export / Send Dropdown */}
+          <div ref={exportMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setExportOpen((v) => !v)}
+              disabled={!selectedAccountId && accounts.length === 0}
+              aria-expanded={exportOpen}
+              className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              title="Descargar PDF, Excel entregable o enviar por correo"
+            >
+              <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
+              <span className="hidden sm:inline">Exportar / Enviar</span>
+              <span className="sm:hidden">Exportar</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
 
-          {/* Export Official Deliverable Excel */}
-          <button
-            type="button"
-            onClick={onExportExcel}
-            disabled={!selectedAccountId}
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="Descargar libro entregable Excel con fórmulas vivas (individual o masivo)"
-          >
-            <Download className="w-3.5 h-3.5 text-teal-700" />
-            <span className="hidden xl:inline">Excel Entregable</span>
-            <span className="xl:hidden">Excel</span>
-          </button>
-
-          {/* Send Reconciliation by Email (Gmail) */}
-          <button
-            type="button"
-            onClick={onOpenEmailModal}
-            disabled={accounts.length === 0}
-            className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 disabled:opacity-40 border border-sky-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="Enviar conciliación por correo Gmail (PDF o Excel · Individual, por empresa, todas o selección)"
-          >
-            <Send className="w-3.5 h-3.5 text-[#1E60A8]" />
-            <span className="hidden xl:inline">Enviar Correo</span>
-            <span className="hidden sm:inline xl:hidden">Correo</span>
-          </button>
+            {exportOpen && (
+              <div className="absolute right-0 mt-1.5 w-60 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 z-50">
+                <button
+                  type="button"
+                  disabled={!selectedAccountId}
+                  onClick={() => {
+                    setExportOpen(false);
+                    onOpenPrintPreview();
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-2.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5 text-[#132B63] shrink-0" />
+                  <span>Imprimir / PDF Oficial</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!selectedAccountId}
+                  onClick={() => {
+                    setExportOpen(false);
+                    onExportExcel();
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-2.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                  <span>Excel Entregable</span>
+                </button>
+                <div className="my-1 border-t border-slate-100" />
+                <button
+                  type="button"
+                  disabled={accounts.length === 0}
+                  onClick={() => {
+                    setExportOpen(false);
+                    onOpenEmailModal();
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-xs font-semibold text-[#132B63] hover:bg-slate-50 disabled:opacity-40 flex items-center gap-2.5 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                  <span>Enviar Conciliación por Correo</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Save Cloud (hidden for Solo Consulta) */}
           {!permissions.isReadOnly && (
@@ -215,7 +258,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
               type="button"
               onClick={onSaveCloud}
               disabled={isSavingCloud}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-3 sm:px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 min-h-[36px] px-3 sm:px-3.5 py-1.5 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               {isSavingCloud ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -235,7 +278,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
 
           {/* Auth Profile */}
           {currentUser ? (
-            <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200">
+            <div className="hidden sm:flex items-center gap-1.5 pl-2 border-l border-slate-200">
               {currentUser.photoURL ? (
                 <img
                   src={currentUser.photoURL}
@@ -273,7 +316,7 @@ export const BankHeader: React.FC<BankHeaderProps> = ({
             <button
               type="button"
               onClick={onSignInWithGoogle}
-              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <span>Google</span>
             </button>

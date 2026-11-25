@@ -113,19 +113,19 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
       )}
 
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-gradient-to-b from-[#0E224D] via-[#132E66] to-[#0B1C3F] text-white flex flex-col border-r border-blue-900/40 shadow-xl transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-[#0E224D] text-white flex flex-col border-r border-blue-900/40 transition-transform duration-200 ease-out lg:translate-x-0 ${
           isOpenMobile ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Brand + App Switcher Header */}
-        <div className="px-4 py-3.5 pt-safe flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70">
+        <div className="px-4 h-14 pt-safe flex items-center justify-between gap-2 border-b border-white/10 bg-[#0A1838]/70 shrink-0">
           <button
             type="button"
             onClick={() => onSwitchModule('launcher')}
             title="Volver al Portal de Módulos Premex"
-            className="bg-white rounded-xl px-2.5 py-1.5 flex items-center shadow-xs hover:opacity-95 transition-opacity cursor-pointer"
+            className="bg-white rounded-lg px-2 py-1 flex items-center hover:opacity-95 transition-opacity cursor-pointer"
           >
-            <PremexBrandLogo className="h-7 w-auto" />
+            <PremexBrandLogo className="h-6 w-auto" />
           </button>
 
           <div className="flex items-center gap-1">
@@ -150,23 +150,19 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
         </div>
 
         {/* Module Identity Block */}
-        <div className="px-5 py-4 border-b border-white/10 flex items-center gap-3">
-          <ViaticosModuleLogo className="w-10 h-10 shrink-0" />
+        <div className="px-4 py-3.5 border-b border-white/10 flex items-center gap-3">
+          <ViaticosModuleLogo className="w-8 h-8 shrink-0" />
           <div className="min-w-0">
-            <h1 className="font-bold text-sm tracking-tight text-white truncate">
+            <h1 className="font-bold text-[13px] tracking-tight text-white truncate">
               Liquidación de Viáticos
             </h1>
             <p className="text-[11px] text-sky-200/80 truncate">
-              Lectura IA · Excel y PDF Premex
+              Lectura IA · Odoo y Planilla
             </p>
           </div>
         </div>
 
-        <div className="px-4 py-3 text-[11px] font-semibold tracking-wider text-sky-200/60 uppercase">
-          Funcionalidades
-        </div>
-
-        <nav className="flex-1 px-3 space-y-1.5 overflow-y-auto">
+        <nav className="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
@@ -174,44 +170,36 @@ export const ViaticosSidebar: React.FC<ViaticosSidebarProps> = ({
               <button
                 key={item.id}
                 type="button"
+                title={item.description}
                 onClick={() => {
                   onSelectTab(item.id);
                   onCloseMobile();
                 }}
-                className={`w-full text-left px-3.5 py-2.5 rounded-xl flex items-center justify-between transition-all cursor-pointer ${
+                className={`w-full group text-left px-3 py-2.5 rounded-lg flex items-center justify-between transition-colors cursor-pointer ${
                   active
-                    ? 'bg-[#1E60A8] text-white font-semibold shadow-sm'
-                    : 'text-blue-100/90 hover:bg-white/10 hover:text-white'
+                    ? 'bg-[#1E60A8] text-white font-semibold'
+                    : 'text-blue-100/85 hover:bg-white/8 hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                      active ? 'bg-white/20 text-white' : 'bg-white/8 text-sky-200'
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      active ? 'text-white' : 'text-sky-200/80 group-hover:text-white'
                     }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium leading-tight truncate">
-                      {item.label}
-                    </div>
-                    <div
-                      className={`text-[11px] truncate mt-0.5 ${
-                        active ? 'text-sky-100' : 'text-blue-200/60'
-                      }`}
-                    >
-                      {item.description}
-                    </div>
-                  </div>
+                  />
+                  <span className="text-[13px] truncate">{item.label}</span>
                 </div>
                 <div className="flex items-center gap-1.5 ml-2 shrink-0">
                   {item.counter && (
-                    <span className="text-[11px] font-mono font-semibold tabular-nums">
+                    <span
+                      className={`text-[11px] font-mono font-semibold tabular-nums ${
+                        active ? 'text-white' : 'text-sky-200/80'
+                      }`}
+                    >
                       {item.counter}
                     </span>
                   )}
-                  {active && <ChevronRight className="w-4 h-4 text-sky-200" />}
+                  {active && <ChevronRight className="w-3.5 h-3.5 text-sky-200" />}
                 </div>
               </button>
             );

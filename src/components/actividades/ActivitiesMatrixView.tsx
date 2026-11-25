@@ -149,9 +149,9 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
   }, [assignments, currentUserEmail, isAdmin]);
 
   return (
-    <div className="space-y-5">
-      <section className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+    <div className="space-y-4">
+      <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-[#0F766E]">
@@ -166,7 +166,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                 {periodActivation.statusLabel}
               </span>
             </div>
-            <h3 className="text-lg font-extrabold text-slate-900 tracking-tight mt-0.5">
+            <h3 className="text-base font-extrabold text-slate-900 tracking-tight mt-0.5">
               {isAdmin
                 ? 'Matriz de Actividades por Sociedad'
                 : 'Mis Actividades por Sociedad'}
@@ -178,7 +178,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
               type="button"
               onClick={() => exportActivitiesMatrixToExcel(data, assignments)}
               disabled={assignments.length === 0}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
             >
               <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
               <span>Exportar Excel</span>
@@ -187,7 +187,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenNewActivity}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Nueva Actividad</span>
@@ -196,36 +196,36 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
           </div>
         </div>
 
-        <div className="pt-5 grid grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-0 lg:divide-x lg:divide-slate-200">
-          <div className="lg:pr-6">
+        <div className="px-5 py-3.5 grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-0 lg:divide-x lg:divide-slate-100">
+          <div className="lg:pr-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Cumplido
             </div>
-            <div className="mt-1.5 flex items-baseline gap-2 tabular-nums">
-              <span className="text-2xl font-extrabold text-emerald-600">{kpis.pct}%</span>
+            <div className="mt-1 flex items-baseline gap-2 tabular-nums">
+              <span className="text-xl font-extrabold text-emerald-600">{kpis.pct}%</span>
               <span className="text-xs text-slate-500">
                 {kpis.completed} de {kpis.total}
               </span>
             </div>
           </div>
 
-          <div className="lg:px-6">
+          <div className="lg:px-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Pronto a Cumplir
             </div>
-            <div className="mt-1.5 flex items-baseline gap-2 tabular-nums">
-              <span className="text-2xl font-extrabold text-amber-500">{kpis.upcoming}</span>
+            <div className="mt-1 flex items-baseline gap-2 tabular-nums">
+              <span className="text-xl font-extrabold text-amber-500">{kpis.upcoming}</span>
               <span className="text-xs text-slate-500">≤ {data.subtleReminderDaysBefore} días</span>
             </div>
           </div>
 
-          <div className="lg:px-6">
+          <div className="lg:px-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Vencido
             </div>
-            <div className="mt-1.5 flex items-baseline gap-2 tabular-nums">
+            <div className="mt-1 flex items-baseline gap-2 tabular-nums">
               <span
-                className={`text-2xl font-extrabold ${
+                className={`text-xl font-extrabold ${
                   kpis.overdue > 0 ? 'text-red-600' : 'text-slate-900'
                 }`}
               >
@@ -235,14 +235,70 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
             </div>
           </div>
 
-          <div className="lg:pl-6">
+          <div className="lg:pl-5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               En Google Tasks
             </div>
-            <div className="mt-1.5 flex items-baseline gap-2 tabular-nums">
-              <span className="text-2xl font-extrabold text-[#1E60A8]">{kpis.linkedTasks}</span>
+            <div className="mt-1 flex items-baseline gap-2 tabular-nums">
+              <span className="text-xl font-extrabold text-[#1E60A8]">{kpis.linkedTasks}</span>
               <span className="text-xs text-slate-500">en Gmail</span>
             </div>
+          </div>
+        </div>
+
+        {/* Inline Search & Filter Strip */}
+        <div className="px-5 py-3 bg-slate-50/70 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar actividad..."
+              className="w-full pl-8 pr-8 py-1.5 text-xs bg-white border border-slate-200 rounded-xl text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Filtrar periodicidad"
+              value={periodicityFilter}
+              onChange={(e) => setPeriodicityFilter(e.target.value as 'ALL' | ActivityPeriodicity)}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 cursor-pointer"
+            >
+              <option value="ALL">Todas las periodicidades</option>
+              <option value="MENSUAL">Mensual</option>
+              <option value="TRIMESTRAL">Trimestral</option>
+              <option value="SEMANAL">Semanal</option>
+              <option value="ANUAL">Anual</option>
+            </select>
+
+            {isAdmin && (
+              <select
+                aria-label="Filtrar responsable"
+                value={responsibleFilter}
+                onChange={(e) => setResponsibleFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 cursor-pointer"
+              >
+                <option value="ALL">Todos los responsables</option>
+                {data.responsibles
+                  .filter((r) => r.activo)
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.nombre}
+                    </option>
+                  ))}
+              </select>
+            )}
           </div>
         </div>
       </section>
@@ -252,7 +308,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
         (!hasWorkspaceToken ||
           pendingForTasksEnable.items.length > 0 ||
           (!closureStatus.isLinkedInGoogleTasks && closureStatus.totalTasks > 0)) && (
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white px-4 py-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5">
             {!hasWorkspaceToken ? (
               <>
                 <div className="flex items-center gap-2.5 text-xs text-amber-900">
@@ -265,7 +321,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                   type="button"
                   disabled={isConnectingWorkspace}
                   onClick={onConnectWorkspace}
-                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
                 >
                   <RefreshCw
                     className={`w-3.5 h-3.5 ${isConnectingWorkspace ? 'animate-spin' : ''}`}
@@ -301,7 +357,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                       true
                     )
                   }
-                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
                 >
                   <ListTodo className="w-3.5 h-3.5" />
                   <span>
@@ -322,7 +378,7 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
                   type="button"
                   disabled={isSyncingGoogleTasks}
                   onClick={onRequestSyncClosureTask}
-                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-xl whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
                 >
                   <ListTodo className="w-3.5 h-3.5" />
                   <span>Habilitar tarea de cierre en Tasks</span>
@@ -331,61 +387,6 @@ export const ActivitiesMatrixView: React.FC<ActivitiesMatrixViewProps> = ({
             )}
           </div>
         )}
-
-      <div className="bg-white rounded-2xl border border-slate-200/90 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar actividad..."
-            className="w-full pl-9 pr-8 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:bg-white"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            aria-label="Filtrar periodicidad"
-            value={periodicityFilter}
-            onChange={(e) => setPeriodicityFilter(e.target.value as 'ALL' | ActivityPeriodicity)}
-            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 cursor-pointer"
-          >
-            <option value="ALL">Todas las periodicidades</option>
-            <option value="MENSUAL">Mensual</option>
-            <option value="TRIMESTRAL">Trimestral</option>
-            <option value="SEMANAL">Semanal</option>
-            <option value="ANUAL">Anual</option>
-          </select>
-
-          {isAdmin && (
-            <select
-              aria-label="Filtrar responsable"
-              value={responsibleFilter}
-              onChange={(e) => setResponsibleFilter(e.target.value)}
-              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 cursor-pointer"
-            >
-              <option value="ALL">Todos los responsables</option>
-              {data.responsibles
-                .filter((r) => r.activo)
-                .map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.nombre}
-                  </option>
-                ))}
-            </select>
-          )}
-        </div>
-      </div>
 
       {activeSocieties.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200/90 p-10 text-center text-xs text-slate-500">
