@@ -416,6 +416,7 @@ service cloud.firestore {
           'active',
           'notes',
           'odooEmployeeName',
+          'assignedEmployees',
           'centroCosto',
           'odooAnalyticDistribution',
           'updatedBy',
@@ -444,6 +445,11 @@ service cloud.firestore {
         data.active is bool &&
         (!('notes' in data) || (data.notes is string && data.notes.size() <= 300)) &&
         (!('odooEmployeeName' in data) || (data.odooEmployeeName is string && data.odooEmployeeName.size() <= 140)) &&
+        (!('assignedEmployees' in data) || (
+          data.assignedEmployees is list &&
+          data.assignedEmployees.size() <= 100 &&
+          (data.assignedEmployees.size() == 0 || data.assignedEmployees[0] is string)
+        )) &&
         (!('centroCosto' in data) || (data.centroCosto is string && data.centroCosto.size() <= 140)) &&
         (!('odooAnalyticDistribution' in data) || (data.odooAnalyticDistribution is string && data.odooAnalyticDistribution.size() <= 120)) &&
         data.updatedBy is string && isValidId(data.updatedBy) &&

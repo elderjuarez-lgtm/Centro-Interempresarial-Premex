@@ -896,13 +896,12 @@ export function resolveSplitCostCentersList(
 }
 
 export function buildDefaultPaymentReference(liq: Pick<ViaticoLiquidation, 'semana' | 'lineaLiquidacion' | 'createdAtIso'>): string {
-  const year = (liq.createdAtIso || '').slice(0, 4) || String(new Date().getFullYear());
   const weekPart = liq.semana ? `S-${liq.semana}` : 'S/N';
   const desc = String(liq.lineaLiquidacion || '')
     .trim()
     .toUpperCase()
     .slice(0, 36);
-  return `LIQ. GTS ${weekPart} ${desc} ${year}`.replace(/\s+/g, ' ').trim();
+  return `LIQ. GTS ${weekPart} ${desc}`.replace(/\s+/g, ' ').trim();
 }
 
 export function resolveOperatingUserPermissionsStamp(

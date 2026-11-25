@@ -4,7 +4,6 @@ import {
   FileSpreadsheet,
   FileText,
   Download,
-  SlidersHorizontal,
   Search,
   X,
   CheckCircle2,
@@ -15,19 +14,22 @@ import {
   Users,
   Layers,
   Printer,
-  RotateCcw,
   Pencil,
   Check,
-  BookOpen,
   Eye,
   Loader2,
   ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  BadgeCheck,
+  Filter,
+  FolderOpen,
 } from 'lucide-react';
 import {
   EffectivePermissions,
   OdooExpenseType,
   UserPermissionRecord,
-  ViaticoCategory,
   ViaticoConsultor,
   ViaticoCurrency,
   ViaticoExpenseItem,
@@ -39,12 +41,9 @@ import {
 import { StoredReceiptMedia } from '../../services/viaticosMediaStore';
 import {
   CURRENCY_SYMBOLS,
-  DEFAULT_VIATICO_ODOO_CONFIG,
-  VIATICO_CATEGORIES,
   formatViaticoAmount,
   loadViaticoOdooConfig,
   resolveLiquidationCostCenter,
-  saveViaticoOdooConfig,
 } from '../../utils/viaticos';
 import {
   findMatchingCostCenterEntry,
@@ -93,6 +92,10 @@ interface ViaticosContabilidadViewProps {
     itemId: string,
     patch: Partial<ViaticoExpenseItem>
   ) => void;
+  onMarkLiquidationsContabilizadas?: (
+    liquidationIds: string[],
+    contabilizada: boolean
+  ) => void;
   onUpsertPermissionRecord?: (record: UserPermissionRecord) => Promise<void>;
   onNotify: (type: 'success' | 'info' | 'error', message: string) => void;
 }
@@ -100,10 +103,10 @@ interface ViaticosContabilidadViewProps {
 type AccountingSubTab =
   | 'carga_odoo'
   | 'facturas'
-  | 'asientos'
   | 'centros'
   | 'bases_datos';
 type StatusScopeFilter = 'CLOSED_AND_SENT' | 'ALL' | ViaticoLiquidationStatus;
+type ContabilizadoFilter = 'ALL' | 'pendientes' | 'contabilizadas';
 
 export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> = ({
   liquidaciones,
@@ -123,6 +126,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
   onAssignConsultorCostCenter,
   onSaveOdooCatalogs,
   onUpdateExpenseItemOdoo,
+  onMarkLiquidationsContabilizadas,
   onUpsertPermissionRecord,
   onNotify,
 }) => {
@@ -133,6 +137,8 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
 
   const [subTab, setSubTab] = useState<AccountingSubTab>('carga_odoo');
   const [statusFilter, setStatusFilter] = useState<StatusScopeFilter>('ALL');
+  const [contabilizadoFilter, setContabilizadoFilter] =
+    useState<ContabilizadoFilter>('ALL');
   const [weekFilter, setWeekFilter] = useState<string>('ALL');
   const [consultorFilter, setConsultorFilter] = useState<string>('ALL');
   const [costCenterFilter, setCostCenterFilter] = useState<string>('ALL');
@@ -140,12 +146,27 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
   const [currencyFilter, setCurrencyFilter] = useState<'ALL' | ViaticoCurrency>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Agrupación por liquidación (desactivada por defecto; activable a solicitud del usuario)
+  const [groupByLiquidation, setGroupByLiquidation] = useState<boolean>(false);
+  const [collapsedLiqIds, setCollapsedLiqIds] = useState<Set<string>>(() => new Set());
+
+  // Alerta explícita de contabilizado tras descarga de archivo Odoo
+  const [accountingDownloadAlert, setAccountingDownloadAlert] = useState<{
+    variant: 'success' | 'warning';
+    formatLabel: string;
+    filename: string;
+    exportedCount: number;
+    newlyCount: number;
+    alreadyCount: number;
+    summaryLabel: string;
+    atIso: string;
+  } | null>(null);
+
   // Track explicitly excluded liquidation IDs so newly filtered/added liquidations are included automatically
   const [excludedLiqIds, setExcludedLiqIds] = useState<Set<string>>(() => new Set());
 
-  // Odoo accounting configuration (persisted locally so accounting teams customize once)
-  const [odooConfig, setOdooConfig] = useState<ViaticoOdooConfig>(() => loadViaticoOdooConfig());
-  const [showOdooConfig, setShowOdooConfig] = useState(false);
+  // Odoo defaults for product-based accounting export
+  const [odooConfig] = useState<ViaticoOdooConfig>(() => loadViaticoOdooConfig());
 
   // Export loading states
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -167,10 +188,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     odooAnalyticDistribution?: string;
     odooEmployeeName?: string;
   } | null>(null);
-
-  useEffect(() => {
-    saveViaticoOdooConfig(odooConfig);
-  }, [odooConfig]);
 
   // Existing distinct cost center suggestions for autocomplete
   const costCenterSuggestions = useMemo(() => {
@@ -222,10 +239,10 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     };
   }, [liquidaciones]);
 
-  // 1. Filter liquidations across ALL liquidadores
-  const filteredLiquidaciones = useMemo(() => {
+  // 1A. Filter liquidations across ALL liquidadores (before contabilizado filter so pill counts stay accurate)
+  const baseFilteredLiquidaciones = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return liquidaciones.filter((liq) => {
+    const list = liquidaciones.filter((liq) => {
       if (statusFilter === 'CLOSED_AND_SENT') {
         if (liq.estado === 'borrador') return false;
       } else if (statusFilter !== 'ALL' && liq.estado !== statusFilter) {
@@ -270,6 +287,21 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           (it.odooDocType || '').toLowerCase().includes(q)
       );
     });
+
+    return list.sort((a, b) => {
+      const wa = Number(a.semana);
+      const wb = Number(b.semana);
+      if (Number.isFinite(wa) && Number.isFinite(wb) && wa !== wb) {
+        return wb - wa;
+      }
+      const semCmp = (b.semana || '').localeCompare(a.semana || '');
+      if (semCmp !== 0) return semCmp;
+      const consCmp = a.consultorNombre.localeCompare(b.consultorNombre);
+      if (consCmp !== 0) return consCmp;
+      return (b.updatedAtIso || b.createdAtIso || '').localeCompare(
+        a.updatedAtIso || a.createdAtIso || ''
+      );
+    });
   }, [
     liquidaciones,
     consultores,
@@ -284,10 +316,63 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     searchQuery,
   ]);
 
+  const contabilizadoCounts = useMemo(() => {
+    let pendientes = 0;
+    let contabilizadas = 0;
+    baseFilteredLiquidaciones.forEach((l) => {
+      if (l.contabilizada) contabilizadas += 1;
+      else pendientes += 1;
+    });
+    return {
+      total: baseFilteredLiquidaciones.length,
+      pendientes,
+      contabilizadas,
+    };
+  }, [baseFilteredLiquidaciones]);
+
+  // 1B. Apply Contabilizado filter
+  const filteredLiquidaciones = useMemo(() => {
+    if (contabilizadoFilter === 'pendientes') {
+      return baseFilteredLiquidaciones.filter((l) => !l.contabilizada);
+    }
+    if (contabilizadoFilter === 'contabilizadas') {
+      return baseFilteredLiquidaciones.filter((l) => Boolean(l.contabilizada));
+    }
+    return baseFilteredLiquidaciones;
+  }, [baseFilteredLiquidaciones, contabilizadoFilter]);
+
   // 2. Apply batch selection checkboxes
   const selectedLiquidaciones = useMemo(
     () => filteredLiquidaciones.filter((l) => !excludedLiqIds.has(l.id)),
     [filteredLiquidaciones, excludedLiqIds]
+  );
+
+  // 2B. Grouped per-liquidation datasets (for Agrupado por Liquidación)
+  const groupedLiquidations = useMemo(
+    () =>
+      filteredLiquidaciones.map((liq) => ({
+        liq,
+        resolvedCC: resolveLiquidationCostCenter(
+          liq,
+          consultores,
+          resolvedCatalogs,
+          permissionRecords
+        ),
+        dataset: buildOdooAccountingDataset(
+          [liq],
+          consultores,
+          odooConfig,
+          resolvedCatalogs,
+          permissionRecords
+        ),
+      })),
+    [
+      filteredLiquidaciones,
+      consultores,
+      odooConfig,
+      resolvedCatalogs,
+      permissionRecords,
+    ]
   );
 
   // 3. Build consolidated Odoo accounting dataset from selected liquidaciones
@@ -312,12 +397,17 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
   // Preload scanned invoice attachments from Firestore when viewing consolidated invoices
   useEffect(() => {
     if (subTab !== 'facturas' || !onEnsureMediaLoaded) return;
-    const ids = dataset.expenseRows
-      .map((r) => r.attachmentId || '')
-      .filter(Boolean);
+    const ids = Array.from(
+      new Set([
+        ...dataset.expenseRows.map((r) => r.attachmentId || ''),
+        ...filteredLiquidaciones.flatMap((l) =>
+          l.items.map((it) => it.attachmentId || '')
+        ),
+      ])
+    ).filter(Boolean);
     if (ids.length === 0) return;
     void onEnsureMediaLoaded(ids);
-  }, [subTab, dataset.expenseRows, onEnsureMediaLoaded]);
+  }, [subTab, dataset.expenseRows, filteredLiquidaciones, onEnsureMediaLoaded]);
 
   // Distinct liquidadores represented in the active batch
   const distinctSelectedLiquidadores = useMemo(() => {
@@ -326,18 +416,33 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     return s.size;
   }, [selectedLiquidaciones]);
 
+  const alreadyContabilizedInBatch = useMemo(
+    () => selectedLiquidaciones.filter((l) => Boolean(l.contabilizada)),
+    [selectedLiquidaciones]
+  );
+
   const batchLabel = useMemo(() => {
     const parts: string[] = [];
     if (weekFilter !== 'ALL') parts.push(`Sem${weekFilter}`);
+    if (consultorFilter !== 'ALL') parts.push(consultorFilter.split(' ').slice(0, 2).join('_'));
     if (companyFilter !== 'ALL') parts.push(companyFilter);
     if (costCenterFilter !== 'ALL' && costCenterFilter !== '__UNASSIGNED__') {
       parts.push(costCenterFilter);
     }
     return parts.length > 0 ? parts.join('_') : 'Consolidado';
-  }, [weekFilter, companyFilter, costCenterFilter]);
+  }, [weekFilter, consultorFilter, companyFilter, costCenterFilter]);
+
+  const buildSingleLiquidationSlug = (liq: ViaticoLiquidation) => {
+    const consPart = (liq.consultorNombre || 'Consultor')
+      .split(' ')
+      .slice(0, 2)
+      .join('_');
+    return `Sem${liq.semana || '0'}_${consPart}_${(liq.lineaLiquidacion || 'Liq').slice(0, 20)}`;
+  };
 
   const hasActiveFilters =
     statusFilter !== 'ALL' ||
+    contabilizadoFilter !== 'ALL' ||
     weekFilter !== 'ALL' ||
     consultorFilter !== 'ALL' ||
     costCenterFilter !== 'ALL' ||
@@ -357,6 +462,22 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     });
   };
 
+  const toggleLiquidationCollapse = (id: string) => {
+    setCollapsedLiqIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const expandAllLiquidations = () => setCollapsedLiqIds(new Set());
+  const collapseAllLiquidations = () =>
+    setCollapsedLiqIds(new Set(filteredLiquidaciones.map((l) => l.id)));
+
   const selectAllFiltered = () => {
     setExcludedLiqIds((prev) => {
       const next = new Set(prev);
@@ -373,14 +494,63 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     });
   };
 
-  const handleExportOdooExcel = async () => {
-    if (dataset.expenseRows.length === 0) return;
+  const registerDownloadAndTriggerAlert = (
+    exportedLiqs: ViaticoLiquidation[],
+    formatLabel: string,
+    filename: string
+  ) => {
+    if (exportedLiqs.length === 0) return;
+    const alreadyMarked = exportedLiqs.filter((l) => Boolean(l.contabilizada));
+    const newlyMarked = exportedLiqs.filter((l) => !l.contabilizada);
+    const summaryLabel =
+      exportedLiqs
+        .slice(0, 3)
+        .map((l) => `Sem #${l.semana || '-'} · ${l.consultorNombre}`)
+        .join(' | ') +
+      (exportedLiqs.length > 3 ? ` (+${exportedLiqs.length - 3} más)` : '');
+
+    onMarkLiquidationsContabilizadas?.(
+      exportedLiqs.map((l) => l.id),
+      true
+    );
+
+    setAccountingDownloadAlert({
+      variant: alreadyMarked.length > 0 ? 'warning' : 'success',
+      formatLabel,
+      filename,
+      exportedCount: exportedLiqs.length,
+      newlyCount: newlyMarked.length,
+      alreadyCount: alreadyMarked.length,
+      summaryLabel,
+      atIso: new Date().toISOString(),
+    });
+  };
+
+  const handleExportOdooExcel = async (targetLiquidations?: ViaticoLiquidation[]) => {
+    const targetList =
+      targetLiquidations && targetLiquidations.length > 0
+        ? targetLiquidations
+        : selectedLiquidaciones;
+    const exportDataset = buildOdooAccountingDataset(
+      targetList,
+      consultores,
+      odooConfig,
+      resolvedCatalogs,
+      permissionRecords,
+      { expandEmployeeSplitsForDownload: true }
+    );
+    if (exportDataset.expenseRows.length === 0) return;
+    const exportSlug =
+      targetList.length === 1 && targetLiquidations
+        ? buildSingleLiquidationSlug(targetList[0])
+        : batchLabel;
     setIsExportingExcel(true);
     try {
-      const filename = await exportViaticosOdooExcel(dataset, odooConfig, batchLabel);
+      const filename = await exportViaticosOdooExcel(exportDataset, odooConfig, exportSlug);
+      registerDownloadAndTriggerAlert(targetList, 'Excel Odoo (.xlsx)', filename);
       onNotify(
         'success',
-        `Archivo contable Odoo descargado: ${filename} (Hoja 1: Carga Odoo Gastos + Asientos, Facturas y C.C.).`
+        `Archivo contable Odoo descargado: ${filename} (${targetList.length} liquidación(es) marcada(s) como CONTABILIZADAS).`
       );
     } catch (err: any) {
       onNotify('error', err?.message || 'No se pudo generar el Excel contable para Odoo.');
@@ -389,16 +559,40 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     }
   };
 
-  const handleExportOdooCsv = (mode: 'gastos' | 'asientos' | 'facturas') => {
-    if (dataset.expenseRows.length === 0) return;
+  const handleExportOdooCsv = (
+    mode: 'gastos' | 'facturas',
+    targetLiquidations?: ViaticoLiquidation[]
+  ) => {
+    const targetList =
+      targetLiquidations && targetLiquidations.length > 0
+        ? targetLiquidations
+        : selectedLiquidaciones;
+    const exportDataset = buildOdooAccountingDataset(
+      targetList,
+      consultores,
+      odooConfig,
+      resolvedCatalogs,
+      permissionRecords,
+      { expandEmployeeSplitsForDownload: true }
+    );
+    if (exportDataset.expenseRows.length === 0) return;
+    const exportSlug =
+      targetList.length === 1 && targetLiquidations
+        ? buildSingleLiquidationSlug(targetList[0])
+        : batchLabel;
     try {
-      const filename = exportViaticosOdooCsv(dataset, mode, batchLabel);
+      const filename = exportViaticosOdooCsv(exportDataset, mode, exportSlug);
+      if (mode === 'gastos') {
+        registerDownloadAndTriggerAlert(
+          targetList,
+          'CSV Carga Odoo (Hoja 1)',
+          filename
+        );
+      }
       onNotify(
         'success',
         mode === 'gastos'
-          ? `CSV Carga Odoo (Hoja 1 · Plantilla GT S-44) descargado: ${filename}`
-          : mode === 'asientos'
-          ? `CSV de Asientos Odoo descargado: ${filename}`
+          ? `CSV Carga Odoo (Hoja 1 · Plantilla GT S-44) descargado: ${filename} (${targetList.length} liquidación(es) marcada(s) como CONTABILIZADAS).`
           : `CSV Consolidado de Facturas descargado: ${filename}`
       );
     } catch (err: any) {
@@ -438,23 +632,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
     setEditingCC(null);
   };
 
-  const updateCategoryAccount = (
-    category: ViaticoCategory,
-    field: 'accountCode' | 'accountName',
-    value: string
-  ) => {
-    setOdooConfig((prev) => ({
-      ...prev,
-      cuentasPorCategoria: {
-        ...prev.cuentasPorCategoria,
-        [category]: {
-          ...prev.cuentasPorCategoria[category],
-          [field]: value,
-        },
-      },
-    }));
-  };
-
   const allBalanced =
     dataset.totalsByCurrency.length > 0 &&
     dataset.totalsByCurrency.every((t) => t.isBalanced);
@@ -477,7 +654,9 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={handleExportOdooExcel}
+            onClick={() => {
+              void handleExportOdooExcel();
+            }}
             disabled={dataset.expenseRows.length === 0 || isExportingExcel}
             className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-2 min-h-[44px] lg:min-h-[40px] px-4 py-2 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
           >
@@ -496,17 +675,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           >
             <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
             <span>CSV Carga Odoo</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleExportOdooCsv('asientos')}
-            disabled={dataset.journalLines.length === 0}
-            className="inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
-            title="CSV en formato exacto de importación Odoo (account.move / line_ids)"
-          >
-            <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
-            <span>CSV Asientos</span>
           </button>
 
           <button
@@ -530,219 +698,84 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             <FileText className="w-3.5 h-3.5 text-rose-700" />
             <span>{isExportingPdf ? 'Generando PDF...' : 'PDF Resumen'}</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => setShowOdooConfig((v) => !v)}
-            className={`inline-flex items-center justify-center gap-1.5 min-h-[42px] lg:min-h-[40px] px-3 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer whitespace-nowrap ${
-              showOdooConfig
-                ? 'bg-sky-50 text-[#132B63] border-sky-300'
-                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-            }`}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-[#1E60A8]" />
-            <span>Cuentas Odoo</span>
-          </button>
         </div>
       </section>
 
-      {/* 2. Collapsible Odoo Chart of Accounts & Journal Mapping */}
-      {showOdooConfig && (
-        <section className="bg-white rounded-2xl border border-sky-200 overflow-hidden">
-          <div className="px-5 py-3.5 bg-sky-50/70 border-b border-sky-200/80 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-[#1E60A8]" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#132B63]">
-                Configuración de Cuentas y Diario Odoo
-              </h3>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setOdooConfig(DEFAULT_VIATICO_ODOO_CONFIG);
-                onNotify('info', 'Catálogo de cuentas Odoo restaurado a valores predeterminados.');
-              }}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-lg cursor-pointer"
+      {/* 1B. Alerta de Contabilizado tras descarga */}
+      {accountingDownloadAlert && (
+        <section
+          role="alert"
+          className={`rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs ${
+            accountingDownloadAlert.variant === 'warning'
+              ? 'bg-amber-50 border-amber-300 text-amber-950'
+              : 'bg-emerald-50 border-emerald-300 text-emerald-950'
+          }`}
+        >
+          <div className="flex items-start gap-3 min-w-0">
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                accountingDownloadAlert.variant === 'warning'
+                  ? 'bg-amber-200/80 text-amber-900'
+                  : 'bg-emerald-200/80 text-emerald-900'
+              }`}
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Restaurar predeterminados</span>
-            </button>
+              {accountingDownloadAlert.variant === 'warning' ? (
+                <AlertTriangle className="w-5 h-5" />
+              ) : (
+                <BadgeCheck className="w-5 h-5" />
+              )}
+            </div>
+            <div className="min-w-0 space-y-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-extrabold uppercase tracking-wider">
+                  {accountingDownloadAlert.variant === 'warning'
+                    ? 'Alerta de Contabilizado (Ya descargado previamente)'
+                    : 'Alerta de Contabilizado'}
+                </span>
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-white/80 border border-current/15 font-semibold">
+                  {accountingDownloadAlert.formatLabel}
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed">
+                {accountingDownloadAlert.variant === 'warning' ? (
+                  <>
+                    Atención: <strong>{accountingDownloadAlert.alreadyCount}</strong> de{' '}
+                    <strong>{accountingDownloadAlert.exportedCount}</strong> liquidación(es)
+                    descargada(s) (<strong>{accountingDownloadAlert.summaryLabel}</strong>) ya
+                    tenían marca de <strong>Contabilizado</strong>. Verifica en Odoo antes de
+                    reimportar para evitar duplicados.
+                  </>
+                ) : (
+                  <>
+                    Se descargó <strong>{accountingDownloadAlert.filename}</strong> y se
+                    marcó automáticamente como <strong>Contabilizado</strong> (
+                    <strong>{accountingDownloadAlert.exportedCount}</strong> liquidación(es):{' '}
+                    <strong>{accountingDownloadAlert.summaryLabel}</strong>).
+                  </>
+                )}
+              </p>
+            </div>
           </div>
 
-          <div className="p-4 sm:p-5 space-y-5">
-            {/* Journal, IVA & Payable Account settings */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
-                  Diario Contable Odoo (journal_id)
-                </label>
-                <input
-                  type="text"
-                  value={odooConfig.diarioNombre}
-                  onChange={(e) =>
-                    setOdooConfig({ ...odooConfig, diarioNombre: e.target.value })
-                  }
-                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
-                  Prefijo Referencia Asiento
-                </label>
-                <input
-                  type="text"
-                  value={odooConfig.prefijoReferencia}
-                  onChange={(e) =>
-                    setOdooConfig({ ...odooConfig, prefijoReferencia: e.target.value })
-                  }
-                  placeholder="VIAT"
-                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
-                  Criterio Fecha Contable
-                </label>
-                <select
-                  value={odooConfig.criterioFechaContable}
-                  onChange={(e) =>
-                    setOdooConfig({
-                      ...odooConfig,
-                      criterioFechaContable: e.target
-                        .value as ViaticoOdooConfig['criterioFechaContable'],
-                    })
-                  }
-                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+          <div className="flex items-center gap-2 shrink-0">
+            {contabilizadoCounts.pendientes > 0 &&
+              contabilizadoFilter !== 'pendientes' && (
+                <button
+                  type="button"
+                  onClick={() => setContabilizadoFilter('pendientes')}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl bg-white hover:bg-slate-50 border border-current/20 text-slate-900 cursor-pointer whitespace-nowrap"
                 >
-                  <option value="fecha_cierre">Fecha de cierre / actualización</option>
-                  <option value="fecha_factura">Fecha de documento (factura)</option>
-                  <option value="fecha_hoy">Fecha actual (hoy)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
-                  Etiqueta Impuesto Odoo (tax_ids)
-                </label>
-                <input
-                  type="text"
-                  value={odooConfig.etiquetaImpuesto}
-                  onChange={(e) =>
-                    setOdooConfig({ ...odooConfig, etiquetaImpuesto: e.target.value })
-                  }
-                  placeholder="IVA 12% Compras"
-                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
-                  Cuenta IVA Crédito Fiscal (Código)
-                </label>
-                <input
-                  type="text"
-                  value={odooConfig.cuentaIvaCodigo}
-                  onChange={(e) =>
-                    setOdooConfig({ ...odooConfig, cuentaIvaCodigo: e.target.value })
-                  }
-                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
-                  Nombre Cuenta IVA
-                </label>
-                <input
-                  type="text"
-                  value={odooConfig.cuentaIvaNombre}
-                  onChange={(e) =>
-                    setOdooConfig({ ...odooConfig, cuentaIvaNombre: e.target.value })
-                  }
-                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
-                  Cuenta Contrapartida Empleados (Haber)
-                </label>
-                <input
-                  type="text"
-                  value={odooConfig.cuentaContrapartidaCodigo}
-                  onChange={(e) =>
-                    setOdooConfig({
-                      ...odooConfig,
-                      cuentaContrapartidaCodigo: e.target.value,
-                    })
-                  }
-                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs font-mono rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-[11px] font-semibold text-slate-600 mb-1">
-                  Nombre Cuenta Contrapartida
-                </label>
-                <input
-                  type="text"
-                  value={odooConfig.cuentaContrapartidaNombre}
-                  onChange={(e) =>
-                    setOdooConfig({
-                      ...odooConfig,
-                      cuentaContrapartidaNombre: e.target.value,
-                    })
-                  }
-                  className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-base lg:text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                />
-              </div>
-            </div>
-
-            {/* Category -> Odoo Account Mapping Table */}
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-                Mapeo de Categorías de Viáticos → Cuentas de Gasto Odoo
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                {VIATICO_CATEGORIES.map((cat) => {
-                  const cfg = odooConfig.cuentasPorCategoria[cat];
-                  return (
-                    <div
-                      key={cat}
-                      className="flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70"
-                    >
-                      <span className="sm:w-36 text-xs font-semibold text-slate-800 truncate shrink-0">
-                        {cat}
-                      </span>
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <input
-                          type="text"
-                          value={cfg?.accountCode || ''}
-                          onChange={(e) =>
-                            updateCategoryAccount(cat, 'accountCode', e.target.value)
-                          }
-                          aria-label={`Código cuenta Odoo para ${cat}`}
-                          placeholder="Código"
-                          className="w-24 min-h-[40px] lg:min-h-0 px-2 py-1 text-base lg:text-xs font-mono bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 shrink-0"
-                        />
-                        <input
-                          type="text"
-                          value={cfg?.accountName || ''}
-                          onChange={(e) =>
-                            updateCategoryAccount(cat, 'accountName', e.target.value)
-                          }
-                          aria-label={`Nombre cuenta Odoo para ${cat}`}
-                          placeholder="Nombre cuenta"
-                          className="flex-1 min-w-0 min-h-[40px] lg:min-h-0 px-2 py-1 text-base lg:text-xs bg-white rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+                  Ver solo pendientes ({contabilizadoCounts.pendientes})
+                </button>
+              )}
+            <button
+              type="button"
+              onClick={() => setAccountingDownloadAlert(null)}
+              aria-label="Cerrar alerta de contabilizado"
+              className="p-1.5 rounded-lg hover:bg-black/5 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </section>
       )}
@@ -775,7 +808,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
           </div>
           <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
             {taxableInvoicesCount} con IVA · {dataset.expenseRows.length - taxableInvoicesCount}{' '}
-            exentas · {dataset.journalLines.length} líneas asiento
+            exentas · contabilización por producto
           </div>
         </div>
 
@@ -880,6 +913,29 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
         </div>
       )}
 
+      {/* 4B. Persistent Alert Strip if current batch includes already-contabilized liquidations */}
+      {alreadyContabilizedInBatch.length > 0 &&
+        contabilizadoFilter === 'ALL' &&
+        !accountingDownloadAlert && (
+          <div className="px-4 py-2.5 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-emerald-950 text-xs flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <BadgeCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+              <span>
+                <strong>Alerta de Contabilizado:</strong>{' '}
+                {alreadyContabilizedInBatch.length} liquidación(es) visible(s) ya fueron
+                descargadas y marcadas como <strong>Contabilizadas</strong>.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setContabilizadoFilter('pendientes')}
+              className="px-2.5 py-1 text-[11px] font-bold text-emerald-900 bg-white hover:bg-emerald-100 border border-emerald-300 rounded-lg cursor-pointer whitespace-nowrap"
+            >
+              Ocultar contabilizadas (ver {contabilizadoCounts.pendientes} pendientes)
+            </button>
+          </div>
+        )}
+
       {/* 5. Filter Toolbar & Sub-View Navigation */}
       <section className="bg-white rounded-2xl border border-slate-200/90 p-3 sm:p-3.5 space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
@@ -906,17 +962,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               }`}
             >
               Facturas ({dataset.expenseRows.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubTab('asientos')}
-              className={`min-h-[40px] lg:min-h-0 px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-semibold rounded-lg transition-colors cursor-pointer truncate ${
-                subTab === 'asientos'
-                  ? 'bg-white text-[#132B63] shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Asientos ({dataset.journalLines.length})
             </button>
             <button
               type="button"
@@ -968,18 +1013,64 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
 
         {/* Multi-Liquidador Filters Row */}
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-          <select
-            value={statusFilter}
-            aria-label="Filtrar por estado"
-            onChange={(e) => setStatusFilter(e.target.value as StatusScopeFilter)}
-            className="col-span-2 sm:col-span-1 min-h-[44px] lg:min-h-0 text-sm lg:text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 cursor-pointer"
+          {/* Contabilizado Quick Filter */}
+          <div
+            role="group"
+            aria-label="Filtrar por estado de contabilización"
+            className="col-span-2 sm:col-span-1 inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 gap-0.5"
           >
-            <option value="ALL">Todos los estados</option>
-            <option value="CLOSED_AND_SENT">Solo Cerradas y Enviadas</option>
-            <option value="cerrada">Solo Cerradas</option>
-            <option value="enviada">Solo Enviadas</option>
-            <option value="borrador">Solo Abiertas (Borrador)</option>
-          </select>
+            <button
+              type="button"
+              onClick={() => setContabilizadoFilter('ALL')}
+              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                contabilizadoFilter === 'ALL'
+                  ? 'bg-white text-[#132B63] shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Todas ({contabilizadoCounts.total})
+            </button>
+            <button
+              type="button"
+              onClick={() => setContabilizadoFilter('pendientes')}
+              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                contabilizadoFilter === 'pendientes'
+                  ? 'bg-amber-100 text-amber-950 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Pendientes ({contabilizadoCounts.pendientes})
+            </button>
+            <button
+              type="button"
+              onClick={() => setContabilizadoFilter('contabilizadas')}
+              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1 ${
+                contabilizadoFilter === 'contabilizadas'
+                  ? 'bg-emerald-100 text-emerald-950 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <BadgeCheck className="w-3 h-3" />
+              <span>Contabilizadas ({contabilizadoCounts.contabilizadas})</span>
+            </button>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
+            <Users className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+            <select
+              value={consultorFilter}
+              aria-label="Filtrar por consultor o liquidador"
+              onChange={(e) => setConsultorFilter(e.target.value)}
+              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[200px]"
+            >
+              <option value="ALL">Consultor: Todos</option>
+              {filterOptions.consultores.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5">
             <Calendar className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
@@ -989,7 +1080,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               onChange={(e) => setWeekFilter(e.target.value)}
               className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
             >
-              <option value="ALL">Semanas</option>
+              <option value="ALL">Semana: Todas</option>
               {filterOptions.weeks.map((w) => (
                 <option key={w} value={w}>
                   Semana #{w}
@@ -997,6 +1088,19 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               ))}
             </select>
           </div>
+
+          <select
+            value={statusFilter}
+            aria-label="Filtrar por estado de liquidación"
+            onChange={(e) => setStatusFilter(e.target.value as StatusScopeFilter)}
+            className="col-span-2 sm:col-span-1 min-h-[44px] lg:min-h-0 text-sm lg:text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 cursor-pointer"
+          >
+            <option value="ALL">Todos los estados</option>
+            <option value="CLOSED_AND_SENT">Solo Cerradas y Enviadas</option>
+            <option value="cerrada">Solo Cerradas</option>
+            <option value="enviada">Solo Enviadas</option>
+            <option value="borrador">Solo Abiertas (Borrador)</option>
+          </select>
 
           <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5">
             <Coins className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
@@ -1012,23 +1116,6 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               {filterOptions.currencies.map((cur) => (
                 <option key={cur} value={cur}>
                   {cur} ({CURRENCY_SYMBOLS[cur]})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 min-h-[44px] lg:min-h-0 lg:py-1.5 col-span-2 sm:col-span-1">
-            <Users className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
-            <select
-              value={consultorFilter}
-              aria-label="Filtrar por liquidador"
-              onChange={(e) => setConsultorFilter(e.target.value)}
-              className="w-full text-sm lg:text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer sm:max-w-[180px]"
-            >
-              <option value="ALL">Todos los liquidadores</option>
-              {filterOptions.consultores.map((name) => (
-                <option key={name} value={name}>
-                  {name}
                 </option>
               ))}
             </select>
@@ -1076,6 +1163,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
               type="button"
               onClick={() => {
                 setStatusFilter('ALL');
+                setContabilizadoFilter('ALL');
                 setWeekFilter('ALL');
                 setConsultorFilter('ALL');
                 setCostCenterFilter('ALL');
@@ -1093,91 +1181,613 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
 
       {/* 6.0 SUB-TAB 0: CARGA ODOO HOJA 1 (FORMATO PLANTILLA GASTOS GT S-44) */}
       {subTab === 'carga_odoo' && (
-        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
+        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-clip">
           <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <div>
               <span className="font-bold text-slate-900">
-                Hoja 1 Odoo (hr.expense · Plantilla Gastos GT S-44) — {dataset.hrExpenseRows.length} líneas
+                Hoja 1 Odoo (hr.expense · Plantilla Gastos GT S-44) —{' '}
+                {groupByLiquidation
+                  ? `${filteredLiquidaciones.length} liquidación(es) · ${dataset.hrExpenseRows.length} líneas seleccionadas`
+                  : `${dataset.hrExpenseRows.length} líneas`}
               </span>
               <div className="text-[11px] text-slate-500">
-                Los cambios en Código de Gasto, Impuesto, Tipo Documento, C.C. Interno y Distribución de Gastos (IDP, Intecap, Propina, Varios cecos) se reflejan en vivo y en la descarga a Odoo junto al usuario que opera.
+                Agrupa por liquidación para revisar y descargar una liquidación individual o un lote consolidado. Al descargar se marca automáticamente como Contabilizado.
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setSubTab('bases_datos')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-[#1E60A8] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5" />
-              <span>Administrar Catálogos Odoo</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setGroupByLiquidation((v) => !v)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-xl border cursor-pointer transition-colors ${
+                  groupByLiquidation
+                    ? 'bg-[#132B63] text-white border-[#132B63]'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                <span>
+                  {groupByLiquidation ? 'Agrupado por liquidación' : 'Agrupar por liquidación'}
+                </span>
+              </button>
+
+              {groupByLiquidation && filteredLiquidaciones.length > 1 && (
+                <div className="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={expandAllLiquidations}
+                    className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+                  >
+                    Expandir
+                  </button>
+                  <button
+                    type="button"
+                    onClick={collapseAllLiquidations}
+                    className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+                  >
+                    Colapsar
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setSubTab('bases_datos')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-[#1E60A8] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl cursor-pointer"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Administrar Catálogos Odoo</span>
+              </button>
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs min-w-[2140px]">
-              <thead>
-                <tr className="border-b border-slate-200 bg-[#132B63] text-[10px] font-bold uppercase tracking-wider text-white">
-                  <th className="py-2.5 px-3">name</th>
-                  <th className="py-2.5 px-3">product_id</th>
-                  <th className="py-2.5 px-2.5 text-right">total_amount_currency</th>
-                  <th className="py-2.5 px-2.5 text-center">currency_id</th>
-                  <th className="py-2.5 px-3">tax_ids</th>
-                  <th className="py-2.5 px-3">employee_id</th>
-                  <th className="py-2.5 px-2.5">expense_type</th>
-                  <th className="py-2.5 px-2.5 text-center">date</th>
-                  <th className="py-2.5 px-2.5">Partner_id</th>
-                  <th className="py-2.5 px-3">Journal</th>
-                  <th className="py-2.5 px-2.5">vendor_ref</th>
-                  <th className="py-2.5 px-2.5">serial_number</th>
-                  <th className="py-2.5 px-3">payment_reference</th>
-                  <th className="py-2.5 px-3">l10n_gt_edi_doc_type</th>
-                  <th className="py-2.5 px-3">analytic_distribution</th>
-                  <th className="py-2.5 px-3">Operado por</th>
-                  <th className="py-2.5 px-3">Distribuir gastos</th>
-                  <th className="py-2.5 px-3">Dividir cant. / Valor</th>
-                  <th className="py-2.5 px-3">Cecos (Dividir)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {dataset.hrExpenseRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={19} className="py-12 text-center text-slate-500">
-                      No hay líneas de gasto para exportar con los filtros actuales.
-                    </td>
+          {groupByLiquidation ? (
+            <div className="p-3 sm:p-4 space-y-3 bg-slate-50/60">
+              {groupedLiquidations.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-500 bg-white rounded-xl border border-slate-200">
+                  No hay liquidaciones para mostrar con los filtros actuales.
+                </div>
+              ) : (
+                groupedLiquidations.map(({ liq, resolvedCC, dataset: liqDataset }) => {
+                  const isIncluded = !excludedLiqIds.has(liq.id);
+                  const isCollapsed = collapsedLiqIds.has(liq.id);
+                  const isContab = Boolean(liq.contabilizada);
+                  const contabDateLabel = liq.contabilizadaAtIso
+                    ? new Date(liq.contabilizadaAtIso).toLocaleDateString('es-GT', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                      })
+                    : '';
+
+                  return (
+                    <div
+                      key={liq.id}
+                      className={`rounded-2xl border overflow-clip bg-white transition-all ${
+                        isContab
+                          ? 'border-emerald-300/90'
+                          : isIncluded
+                          ? 'border-slate-200'
+                          : 'border-slate-200 opacity-70'
+                      }`}
+                    >
+                      {/* Liquidation Group Header */}
+                      <div
+                        className={`px-3.5 sm:px-4 py-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b ${
+                          isContab
+                            ? 'bg-emerald-50/75 border-emerald-200/80'
+                            : 'bg-slate-50/90 border-slate-200/80'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isIncluded}
+                            onChange={() => toggleLiquidationSelection(liq.id)}
+                            aria-label={`Incluir liquidación ${liq.lineaLiquidacion}`}
+                            title="Incluir o excluir del lote consolidado"
+                            className="mt-1 w-4 h-4 rounded border-slate-300 text-[#1E60A8] cursor-pointer shrink-0"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => toggleLiquidationCollapse(liq.id)}
+                            aria-label={isCollapsed ? 'Expandir liquidación' : 'Colapsar liquidación'}
+                            className="mt-0.5 p-1 rounded-lg text-slate-600 hover:bg-white/80 hover:text-[#132B63] cursor-pointer shrink-0"
+                          >
+                            {isCollapsed ? (
+                              <ChevronDown className="w-4 h-4" />
+                            ) : (
+                              <ChevronUp className="w-4 h-4" />
+                            )}
+                          </button>
+
+                          <div
+                            onClick={() => toggleLiquidationCollapse(liq.id)}
+                            className="min-w-0 cursor-pointer"
+                          >
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-[#132B63] text-white font-mono text-[11px] font-bold">
+                                Sem #{liq.semana || '-'}
+                              </span>
+                              <span className="text-sm font-bold text-slate-900 break-words">
+                                {liq.lineaLiquidacion || 'Liquidación de Viáticos'}
+                              </span>
+
+                              {isContab ? (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-[11px] font-bold"
+                                  title={
+                                    liq.contabilizadaPorNombre
+                                      ? `Contabilizado por ${liq.contabilizadaPorNombre}${contabDateLabel ? ` el ${contabDateLabel}` : ''}`
+                                      : 'Liquidación descargada y contabilizada'
+                                  }
+                                >
+                                  <BadgeCheck className="w-3.5 h-3.5 text-emerald-700" />
+                                  <span>
+                                    Contabilizado
+                                    {contabDateLabel ? ` · ${contabDateLabel}` : ''}
+                                    {(liq.contabilizadaDescargasCount || 0) > 1
+                                      ? ` (${liq.contabilizadaDescargasCount}x)`
+                                      : ''}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100/90 border border-amber-200 text-amber-900 text-[11px] font-semibold">
+                                  <Filter className="w-3 h-3 text-amber-700" />
+                                  <span>Pendiente</span>
+                                </span>
+                              )}
+
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  liq.estado === 'enviada'
+                                    ? 'bg-sky-100 text-sky-800'
+                                    : liq.estado === 'cerrada'
+                                    ? 'bg-indigo-100 text-indigo-800'
+                                    : 'bg-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {liq.estado === 'enviada'
+                                  ? 'Enviada'
+                                  : liq.estado === 'cerrada'
+                                  ? 'Cerrada'
+                                  : 'Abierta'}
+                              </span>
+                            </div>
+
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-600">
+                              <span className="font-semibold text-slate-800">
+                                {liq.consultorNombre}
+                              </span>
+                              <span>· {liq.empresa}</span>
+                              <span
+                                className={
+                                  resolvedCC ? 'font-mono text-[#1E60A8]' : 'text-amber-700 italic'
+                                }
+                              >
+                                · C.C.: {resolvedCC || 'Sin asignar'}
+                              </span>
+                              <span>
+                                · {liq.items.length} fact. ({liqDataset.hrExpenseRows.length} líneas Odoo)
+                              </span>
+                              <span className="font-mono font-bold text-[#132B63]">
+                                · {formatViaticoAmount(liq.totalLiquidacion, liq.monedaBase, true)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Per-liquidation quick Odoo export + contabilizado toggle */}
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleExportOdooExcel([liq]);
+                            }}
+                            disabled={liqDataset.hrExpenseRows.length === 0 || isExportingExcel}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-45 rounded-lg cursor-pointer whitespace-nowrap"
+                            title="Descargar Excel Odoo (.xlsx) solo de esta liquidación y marcar como Contabilizado"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-300" />
+                            <span>Excel Odoo</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleExportOdooCsv('gastos', [liq])}
+                            disabled={liqDataset.hrExpenseRows.length === 0}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-[#132B63] bg-white hover:bg-sky-50 border border-sky-200 disabled:opacity-45 rounded-lg cursor-pointer whitespace-nowrap"
+                            title="Descargar CSV Hoja 1 Odoo solo de esta liquidación y marcar como Contabilizado"
+                          >
+                            <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
+                            <span>CSV Odoo</span>
+                          </button>
+
+                          {permissions.canOperate && onMarkLiquidationsContabilizadas && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onMarkLiquidationsContabilizadas([liq.id], !isContab);
+                                onNotify(
+                                  isContab ? 'info' : 'success',
+                                  isContab
+                                    ? `Liquidación "${liq.lineaLiquidacion}" marcada nuevamente como Pendiente.`
+                                    : `Liquidación "${liq.lineaLiquidacion}" marcada como Contabilizada.`
+                                );
+                              }}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border cursor-pointer whitespace-nowrap ${
+                                isContab
+                                  ? 'bg-white text-slate-600 hover:text-slate-900 border-slate-300'
+                                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-200'
+                              }`}
+                              title={
+                                isContab
+                                  ? 'Revertir a Pendiente de contabilizar'
+                                  : 'Marcar manualmente como Contabilizada'
+                              }
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>{isContab ? 'Desmarcar' : 'Marcar contab.'}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Liquidation Expense Lines */}
+                      {!isCollapsed && (
+                        <StickyHorizontalScrollContainer>
+                          <table className="w-full text-left border-collapse text-xs min-w-[2140px]">
+                            <thead>
+                              <tr className="border-b border-slate-200 bg-[#132B63] text-[10px] font-bold uppercase tracking-wider text-white">
+                                <th className="py-2.5 px-3">name</th>
+                                <th className="py-2.5 px-3">product_id</th>
+                                <th className="py-2.5 px-2.5 text-right">total_amount_currency</th>
+                                <th className="py-2.5 px-2.5 text-center">currency_id</th>
+                                <th className="py-2.5 px-3">tax_ids</th>
+                                <th className="py-2.5 px-3">employee_id</th>
+                                <th className="py-2.5 px-2.5">expense_type</th>
+                                <th className="py-2.5 px-2.5 text-center">date</th>
+                                <th className="py-2.5 px-2.5">Partner_id</th>
+                                <th className="py-2.5 px-3">Journal</th>
+                                <th className="py-2.5 px-2.5">vendor_ref</th>
+                                <th className="py-2.5 px-2.5">serial_number</th>
+                                <th className="py-2.5 px-3">payment_reference</th>
+                                <th className="py-2.5 px-3">l10n_gt_edi_doc_type</th>
+                                <th className="py-2.5 px-3">analytic_distribution</th>
+                                <th className="py-2.5 px-3">Operado por</th>
+                                <th className="py-2.5 px-3">Distribuir gastos</th>
+                                <th className="py-2.5 px-3">Dividir cant. / Valor</th>
+                                <th className="py-2.5 px-3">Cecos (Dividir)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {liqDataset.hrExpenseRows.length === 0 ? (
+                                <tr>
+                                  <td colSpan={19} className="py-6 text-center text-slate-400">
+                                    Esta liquidación aún no tiene comprobantes registrados.
+                                  </td>
+                                </tr>
+                              ) : (
+                                liqDataset.hrExpenseRows.map((row) => (
+                                  <OdooCargaExpenseRow
+                                    key={row.rowKey}
+                                    row={row}
+                                    resolvedCatalogs={resolvedCatalogs}
+                                    canOperate={
+                                      permissions.canOperate && Boolean(onUpdateExpenseItemOdoo)
+                                    }
+                                    onUpdateExpenseItemOdoo={onUpdateExpenseItemOdoo}
+                                  />
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </StickyHorizontalScrollContainer>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+            <StickyHorizontalScrollContainer>
+              <table className="w-full text-left border-collapse text-xs min-w-[2140px]">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-[#132B63] text-[10px] font-bold uppercase tracking-wider text-white">
+                    <th className="py-2.5 px-3">name</th>
+                    <th className="py-2.5 px-3">product_id</th>
+                    <th className="py-2.5 px-2.5 text-right">total_amount_currency</th>
+                    <th className="py-2.5 px-2.5 text-center">currency_id</th>
+                    <th className="py-2.5 px-3">tax_ids</th>
+                    <th className="py-2.5 px-3">employee_id</th>
+                    <th className="py-2.5 px-2.5">expense_type</th>
+                    <th className="py-2.5 px-2.5 text-center">date</th>
+                    <th className="py-2.5 px-2.5">Partner_id</th>
+                    <th className="py-2.5 px-3">Journal</th>
+                    <th className="py-2.5 px-2.5">vendor_ref</th>
+                    <th className="py-2.5 px-2.5">serial_number</th>
+                    <th className="py-2.5 px-3">payment_reference</th>
+                    <th className="py-2.5 px-3">l10n_gt_edi_doc_type</th>
+                    <th className="py-2.5 px-3">analytic_distribution</th>
+                    <th className="py-2.5 px-3">Operado por</th>
+                    <th className="py-2.5 px-3">Distribuir gastos</th>
+                    <th className="py-2.5 px-3">Dividir cant. / Valor</th>
+                    <th className="py-2.5 px-3">Cecos (Dividir)</th>
                   </tr>
-                ) : (
-                  dataset.hrExpenseRows.map((row) => (
-                    <OdooCargaExpenseRow
-                      key={row.rowKey}
-                      row={row}
-                      resolvedCatalogs={resolvedCatalogs}
-                      canOperate={permissions.canOperate && Boolean(onUpdateExpenseItemOdoo)}
-                      onUpdateExpenseItemOdoo={onUpdateExpenseItemOdoo}
-                    />
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {dataset.hrExpenseRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={19} className="py-12 text-center text-slate-500">
+                        No hay líneas de gasto para exportar con los filtros actuales.
+                      </td>
+                    </tr>
+                  ) : (
+                    dataset.hrExpenseRows.map((row) => (
+                      <OdooCargaExpenseRow
+                        key={row.rowKey}
+                        row={row}
+                        resolvedCatalogs={resolvedCatalogs}
+                        canOperate={permissions.canOperate && Boolean(onUpdateExpenseItemOdoo)}
+                        onUpdateExpenseItemOdoo={onUpdateExpenseItemOdoo}
+                      />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </StickyHorizontalScrollContainer>
+          )}
         </section>
       )}
 
       {/* 6A. SUB-TAB 1: CONSOLIDADO DE FACTURAS (TODOS LOS LIQUIDADORES) */}
       {subTab === 'facturas' && (
-        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
+        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-clip">
           <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="font-bold text-slate-900">
-              Detalle Consolidado de Gastos ({dataset.expenseRows.length} comprobantes)
+              Detalle Consolidado de Gastos (
+              {groupByLiquidation
+                ? `${filteredLiquidaciones.length} liquidación(es) · ${dataset.expenseRows.length} comprobantes seleccionados`
+                : `${dataset.expenseRows.length} comprobantes`}
+              )
             </span>
+            <button
+              type="button"
+              onClick={() => setGroupByLiquidation((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-xl border cursor-pointer transition-colors ${
+                groupByLiquidation
+                  ? 'bg-[#132B63] text-white border-[#132B63]'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span>
+                {groupByLiquidation ? 'Agrupado por liquidación' : 'Agrupar por liquidación'}
+              </span>
+            </button>
           </div>
 
-          {/* Mobile Native Cards (< lg) */}
-          <div className="lg:hidden divide-y divide-slate-200">
-            {dataset.expenseRows.length === 0 ? (
-              <div className="py-12 px-5 text-center text-sm text-slate-500">
-                No hay facturas en las liquidaciones seleccionadas. Ajusta los filtros o selecciona liquidaciones en &ldquo;Lote y C.C.&rdquo;.
-              </div>
-            ) : (
+          {groupByLiquidation ? (
+            <div className="p-3 sm:p-4 space-y-3 bg-slate-50/60">
+              {groupedLiquidations.length === 0 ? (
+                <div className="py-12 px-5 text-center text-sm text-slate-500 bg-white rounded-xl border border-slate-200">
+                  No hay liquidaciones para mostrar con los filtros actuales.
+                </div>
+              ) : (
+                groupedLiquidations.map(({ liq, resolvedCC, dataset: liqDataset }) => {
+                  const isCollapsed = collapsedLiqIds.has(liq.id);
+                  const isContab = Boolean(liq.contabilizada);
+                  return (
+                    <div
+                      key={liq.id}
+                      className={`rounded-2xl border overflow-clip bg-white ${
+                        isContab ? 'border-emerald-300/90' : 'border-slate-200'
+                      }`}
+                    >
+                      <div
+                        className={`px-3.5 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 border-b ${
+                          isContab
+                            ? 'bg-emerald-50/75 border-emerald-200/80'
+                            : 'bg-slate-50/90 border-slate-200/80'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => toggleLiquidationCollapse(liq.id)}
+                            aria-label={isCollapsed ? 'Expandir liquidación' : 'Colapsar liquidación'}
+                            className="mt-0.5 p-1 rounded-lg text-slate-600 hover:bg-white/80 cursor-pointer shrink-0"
+                          >
+                            {isCollapsed ? (
+                              <ChevronDown className="w-4 h-4" />
+                            ) : (
+                              <ChevronUp className="w-4 h-4" />
+                            )}
+                          </button>
+                          <div
+                            onClick={() => toggleLiquidationCollapse(liq.id)}
+                            className="min-w-0 cursor-pointer"
+                          >
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded-md bg-[#132B63] text-white font-mono text-[11px] font-bold">
+                                Sem #{liq.semana || '-'}
+                              </span>
+                              <span className="text-sm font-bold text-slate-900">
+                                {liq.lineaLiquidacion || 'Liquidación de Viáticos'}
+                              </span>
+                              {isContab ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-[11px] font-bold">
+                                  <BadgeCheck className="w-3.5 h-3.5 text-emerald-700" />
+                                  <span>Contabilizado</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100/90 border border-amber-200 text-amber-900 text-[11px] font-semibold">
+                                  <span>Pendiente</span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-600 flex flex-wrap gap-x-2.5">
+                              <span className="font-semibold text-slate-800">
+                                {liq.consultorNombre}
+                              </span>
+                              <span>· {liq.empresa}</span>
+                              <span>· C.C.: {resolvedCC || 'Sin asignar'}</span>
+                              <span>· {liqDataset.expenseRows.length} comprobantes</span>
+                              <span className="font-mono font-bold text-[#132B63]">
+                                · {formatViaticoAmount(liq.totalLiquidacion, liq.monedaBase, true)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleExportOdooExcel([liq]);
+                            }}
+                            disabled={liqDataset.hrExpenseRows.length === 0 || isExportingExcel}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] disabled:opacity-45 rounded-lg cursor-pointer"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-300" />
+                            <span>Excel Odoo</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleExportOdooCsv('gastos', [liq])}
+                            disabled={liqDataset.hrExpenseRows.length === 0}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-[#132B63] bg-white hover:bg-sky-50 border border-sky-200 disabled:opacity-45 rounded-lg cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5 text-[#1E60A8]" />
+                            <span>CSV Odoo</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {!isCollapsed && (
+                        <StickyHorizontalScrollContainer>
+                          <table className="w-full text-left border-collapse text-xs min-w-[1160px]">
+                            <thead>
+                              <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                <th className="py-2.5 px-3">Fecha Doc.</th>
+                                <th className="py-2.5 px-2.5">Doc / NIT</th>
+                                <th className="py-2.5 px-3">Proveedor / Descripción</th>
+                                <th className="py-2.5 px-3">Categoría / Cuenta Odoo</th>
+                                <th className="py-2.5 px-2.5 text-right">Base Sin Imp.</th>
+                                <th className="py-2.5 px-2.5 text-right">IVA / Imp.</th>
+                                <th className="py-2.5 px-3 text-right">Total Reintegrar</th>
+                                <th className="py-2.5 px-2.5 text-center">Soporte</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {liqDataset.expenseRows.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} className="py-6 text-center text-slate-400">
+                                    Sin comprobantes registrados en esta liquidación.
+                                  </td>
+                                </tr>
+                              ) : (
+                                liqDataset.expenseRows.map((row) => (
+                                  <tr key={row.rowKey} className="hover:bg-slate-50/80">
+                                    <td className="py-2.5 px-3 font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                                      {row.fechaDoc || '—'}
+                                    </td>
+                                    <td className="py-2.5 px-2.5 font-mono text-slate-700 whitespace-nowrap">
+                                      <div>{row.documentoCompleto}</div>
+                                      {row.nit && (
+                                        <div className="text-[10px] text-slate-400">NIT {row.nit}</div>
+                                      )}
+                                    </td>
+                                    <td className="py-2.5 px-3">
+                                      <div className="font-medium text-slate-900 truncate max-w-[220px]">
+                                        {row.proveedor}
+                                      </div>
+                                      {row.descripcionGasto && (
+                                        <div className="text-[11px] text-slate-500 truncate max-w-[220px]">
+                                          {row.descripcionGasto}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="py-2.5 px-3">
+                                      <div className="text-slate-800 font-medium">{row.categoria}</div>
+                                      <div className="text-[11px] font-mono text-[#1E60A8]">
+                                        {row.cuentaGastoCodigo}{' '}
+                                        <span className="font-sans text-slate-500">
+                                          · {row.cuentaGastoNombre}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="py-2.5 px-2.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                                      {formatViaticoAmount(row.baseReintegrar)}
+                                    </td>
+                                    <td className="py-2.5 px-2.5 text-right font-mono tabular-nums whitespace-nowrap">
+                                      {formatViaticoAmount(row.impuestoReintegrar)}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono font-bold tabular-nums text-[#132B63] whitespace-nowrap">
+                                      {formatViaticoAmount(row.valorReintegrar, row.monedaBase, true)}
+                                    </td>
+                                    <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
+                                      {row.attachmentId ? (
+                                        mediaMap[row.attachmentId] ? (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setReceiptLightbox({
+                                                row,
+                                                media: mediaMap[row.attachmentId!],
+                                              })
+                                            }
+                                            className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg cursor-pointer"
+                                            title="Ver factura escaneada"
+                                          >
+                                            <Eye className="w-4 h-4" />
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={async () => {
+                                              if (!row.attachmentId || !onLoadReceiptMedia) return;
+                                              const loaded = await onLoadReceiptMedia(row.attachmentId);
+                                              if (loaded) {
+                                                setReceiptLightbox({ row, media: loaded });
+                                              } else {
+                                                onNotify(
+                                                  'info',
+                                                  `La factura "${row.attachmentName || row.documentoCompleto}" aún no está sincronizada en la nube.`
+                                                );
+                                              }
+                                            }}
+                                            className="p-1.5 text-[#1E60A8] hover:bg-blue-50 rounded-lg cursor-pointer"
+                                            title="Cargar factura escaneada"
+                                          >
+                                            <Eye className="w-4 h-4" />
+                                          </button>
+                                        )
+                                      ) : (
+                                        <span className="text-slate-300">—</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </StickyHorizontalScrollContainer>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Mobile Native Cards (< lg) */}
+              <div className="lg:hidden divide-y divide-slate-200">
+                {dataset.expenseRows.length === 0 ? (
+                  <div className="py-12 px-5 text-center text-sm text-slate-500">
+                    No hay facturas en las liquidaciones seleccionadas. Ajusta los filtros o selecciona liquidaciones en &ldquo;Lote y C.C.&rdquo;.
+                  </div>
+                ) : (
               dataset.expenseRows.map((row) => (
                 <div key={row.rowKey} className="p-4 space-y-2.5 bg-white">
                   <div className="flex items-start justify-between gap-2.5">
@@ -1297,7 +1907,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
             )}
           </div>
 
-          <div className="hidden lg:block overflow-x-auto">
+          <StickyHorizontalScrollContainer className="hidden lg:block">
             <table className="w-full text-left border-collapse text-xs min-w-[1260px]">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -1462,179 +2072,9 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                 )}
               </tbody>
             </table>
-          </div>
-        </section>
-      )}
-
-      {/* 6B. SUB-TAB 2: VISTA PREVIA ASIENTOS ODOO (DEBE / HABER) */}
-      {subTab === 'asientos' && (
-        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div>
-              <span className="font-bold text-slate-900">
-                Vista Previa de Partida Contable Odoo (account.move)
-              </span>
-              <span className="text-slate-400 mx-2">·</span>
-              <span className="text-slate-600">
-                Diario: <strong>{odooConfig.diarioNombre}</strong>
-              </span>
-            </div>
-            {dataset.totalsByCurrency.length > 0 && (
-              <div className="flex flex-wrap items-center gap-3 font-mono tabular-nums text-[11px]">
-                {dataset.totalsByCurrency.map((t) => (
-                  <span key={t.moneda} className="text-slate-700">
-                    <strong>{CURRENCY_SYMBOLS[t.moneda]}</strong> Debe:{' '}
-                    {formatViaticoAmount(t.totalDebito)} = Haber:{' '}
-                    {formatViaticoAmount(t.totalCredito)}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Mobile Native Cards for Odoo Journal Lines (< lg) */}
-          <div className="lg:hidden divide-y divide-slate-200">
-            {dataset.journalLines.length === 0 ? (
-              <div className="py-12 px-5 text-center text-sm text-slate-500">
-                No hay líneas de asiento generadas con los filtros actuales.
-              </div>
-            ) : (
-              dataset.journalLines.map((line) => (
-                <div
-                  key={line.lineKey}
-                  className={`p-4 space-y-1.5 ${
-                    line.tipoLinea === 'contrapartida'
-                      ? 'bg-sky-50/70'
-                      : line.tipoLinea === 'iva'
-                      ? 'bg-slate-50/50'
-                      : 'bg-white'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-mono text-[#132B63] font-bold">
-                        {line.asientoRef} · {line.fechaContable}
-                      </div>
-                      <div className="text-sm font-bold text-slate-900 mt-0.5">
-                        {line.cuentaCodigo} · {line.cuentaNombre}
-                      </div>
-                      <div className="text-xs text-slate-600 truncate">
-                        {line.partner} {line.partnerNit ? `(${line.partnerNit})` : ''}
-                      </div>
-                    </div>
-                    <div className="text-right font-mono font-bold tabular-nums shrink-0">
-                      {line.debito > 0 ? (
-                        <div className="text-sm text-slate-900">
-                          Debe: {formatViaticoAmount(line.debito, line.moneda, true)}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-[#132B63]">
-                          Haber: {formatViaticoAmount(line.credito, line.moneda, true)}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-[11px] text-slate-600">{line.etiqueta}</div>
-                  <div className="text-[11px] font-semibold text-slate-700">
-                    C.C.: {line.centroCosto || 'Sin asignar'}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="hidden lg:block overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs min-w-[1220px]">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  <th className="py-3 px-3">Ref. Asiento (ref)</th>
-                  <th className="py-3 px-2.5 text-center">Fecha</th>
-                  <th className="py-3 px-3">Cuenta (account_id)</th>
-                  <th className="py-3 px-3">Tercero (partner_id)</th>
-                  <th className="py-3 px-3">Etiqueta (name)</th>
-                  <th className="py-3 px-3">Centro Costo (analytic)</th>
-                  <th className="py-3 px-2.5 text-right">Debe (debit)</th>
-                  <th className="py-3 px-3 text-right">Haber (credit)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {dataset.journalLines.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-500">
-                      No hay líneas de asiento generadas con los filtros actuales.
-                    </td>
-                  </tr>
-                ) : (
-                  dataset.journalLines.map((line) => (
-                    <tr
-                      key={line.lineKey}
-                      className={
-                        line.tipoLinea === 'contrapartida'
-                          ? 'bg-sky-50/70 font-semibold'
-                          : line.tipoLinea === 'iva'
-                          ? 'bg-slate-50/40'
-                          : 'hover:bg-slate-50/70'
-                      }
-                    >
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-[#132B63] whitespace-nowrap">
-                        {line.asientoRef}
-                      </td>
-                      <td className="py-2.5 px-2.5 text-center font-mono text-[11px] text-slate-600 tabular-nums whitespace-nowrap">
-                        {line.fechaContable}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <div className="font-mono font-bold text-[#132B63]">
-                          {line.cuentaCodigo}
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate max-w-[200px]">
-                          {line.cuentaNombre}
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <div className="text-slate-900 truncate max-w-[180px]">{line.partner}</div>
-                        {line.partnerNit && (
-                          <div className="text-[10px] font-mono text-slate-400">
-                            NIT {line.partnerNit}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-700 max-w-[260px]">
-                        <div className="truncate" title={line.etiqueta}>
-                          {line.etiqueta}
-                        </div>
-                        {line.impuestoOdoo && (
-                          <div className="text-[10px] text-[#1E60A8]">
-                            Impuesto: {line.impuestoOdoo}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <span
-                          className={
-                            line.centroCosto
-                              ? 'font-semibold text-slate-800'
-                              : 'text-amber-700 italic'
-                          }
-                        >
-                          {line.centroCosto || 'Sin asignar'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-2.5 text-right font-mono tabular-nums text-slate-900 whitespace-nowrap">
-                        {line.debito > 0
-                          ? formatViaticoAmount(line.debito, line.moneda, true)
-                          : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[#132B63] whitespace-nowrap">
-                        {line.credito > 0
-                          ? formatViaticoAmount(line.credito, line.moneda, true)
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          </StickyHorizontalScrollContainer>
+            </>
+          )}
         </section>
       )}
 
@@ -1796,11 +2236,17 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="font-bold text-sm text-slate-900 break-words">
-                              <span className="font-mono text-[#1E60A8] mr-1.5">
+                            <div className="font-bold text-sm text-slate-900 break-words flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono text-[#1E60A8]">
                                 Sem #{liq.semana || '-'}
                               </span>
-                              {liq.lineaLiquidacion || 'Sin título'}
+                              <span>{liq.lineaLiquidacion || 'Sin título'}</span>
+                              {liq.contabilizada && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-bold">
+                                  <BadgeCheck className="w-3 h-3 text-emerald-700" />
+                                  <span>Contabilizado</span>
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-slate-600">
                               {liq.consultorNombre} · {liq.empresa}
@@ -1816,6 +2262,16 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                             C.C.: {cc || 'Sin asignar'}
                           </span>
                           <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleExportOdooExcel([liq]);
+                              }}
+                              disabled={liq.items.length === 0 || isExportingExcel}
+                              className="min-h-[38px] px-2.5 py-1 text-xs font-semibold text-white bg-[#132B63] rounded-lg disabled:opacity-40 cursor-pointer"
+                            >
+                              Excel Odoo
+                            </button>
                             {permissions.canOperate && (
                               <button
                                 type="button"
@@ -1941,21 +2397,33 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                           </div>
                         </td>
                         <td className="py-3 px-3 text-center whitespace-nowrap">
-                          <span
-                            className={`text-[11px] font-semibold ${
-                              liq.estado === 'enviada'
-                                ? 'text-emerald-700'
+                          <div className="flex flex-col items-center gap-1">
+                            <span
+                              className={`text-[11px] font-semibold ${
+                                liq.estado === 'enviada'
+                                  ? 'text-emerald-700'
+                                  : liq.estado === 'cerrada'
+                                  ? 'text-sky-700'
+                                  : 'text-amber-700'
+                              }`}
+                            >
+                              {liq.estado === 'enviada'
+                                ? 'Enviada'
                                 : liq.estado === 'cerrada'
-                                ? 'text-sky-700'
-                                : 'text-amber-700'
-                            }`}
-                          >
-                            {liq.estado === 'enviada'
-                              ? 'Enviada'
-                              : liq.estado === 'cerrada'
-                              ? 'Cerrada'
-                              : 'Abierta'}
-                          </span>
+                                ? 'Cerrada'
+                                : 'Abierta'}
+                            </span>
+                            {liq.contabilizada ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-bold">
+                                <BadgeCheck className="w-3 h-3 text-emerald-700" />
+                                <span>Contabilizado</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-medium text-amber-700">
+                                Pendiente contab.
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-3 text-center font-mono tabular-nums text-slate-700">
                           {liq.items.length}
@@ -1976,12 +2444,23 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                             </button>
                             <button
                               type="button"
-                              onClick={() => onDownloadLiquidationExcel(liq)}
-                              disabled={liq.items.length === 0}
-                              title="Descargar Excel individual"
-                              className="p-1.5 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 rounded-lg cursor-pointer"
+                              onClick={() => {
+                                void handleExportOdooExcel([liq]);
+                              }}
+                              disabled={liq.items.length === 0 || isExportingExcel}
+                              title="Descargar Excel Odoo (.xlsx) y marcar Contabilizado"
+                              className="p-1.5 text-[#132B63] hover:bg-sky-50 disabled:opacity-40 rounded-lg cursor-pointer"
                             >
                               <FileSpreadsheet className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDownloadLiquidationExcel(liq)}
+                              disabled={liq.items.length === 0}
+                              title="Descargar Planilla Excel individual"
+                              className="p-1.5 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 rounded-lg cursor-pointer"
+                            >
+                              <Download className="w-4 h-4" />
                             </button>
                             {onDownloadLiquidationPdf && (
                               <button
@@ -2281,11 +2760,15 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
   );
   const [isCecoPickerOpen, setIsCecoPickerOpen] = useState(false);
   const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null);
+  const valueFocusedRef = useRef(false);
+  const splitFocusedRef = useRef(false);
+  const cecosFocusedRef = useRef(false);
   const cecoBtnRef = useRef<HTMLButtonElement | null>(null);
   const cecoPopoverRef = useRef<HTMLDivElement | null>(null);
 
-  // Sync controlled inputs if external row state changes
+  // Sync controlled inputs if external row state changes while not actively focused
   useEffect(() => {
+    if (valueFocusedRef.current) return;
     const extVal =
       row.odooDistributionValue && row.odooDistributionValue > 0
         ? String(row.odooDistributionValue)
@@ -2293,23 +2776,25 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
     if (Number(localValueText || 0) !== Number(extVal || 0)) {
       setLocalValueText(extVal);
     }
-  }, [row.odooDistributionValue]);
+  }, [row.odooDistributionValue, row.odooDistributionOptionId]);
 
   useEffect(() => {
+    if (splitFocusedRef.current) return;
     const extSplit =
       row.odooSplitCount && row.odooSplitCount >= 2 ? String(row.odooSplitCount) : '2';
     if (localSplitText !== extSplit && row.odooDistributionMode === 'multi_ceco') {
       setLocalSplitText(extSplit);
     }
-  }, [row.odooSplitCount, row.odooDistributionMode]);
+  }, [row.odooSplitCount, row.odooDistributionMode, row.odooDistributionOptionId]);
 
   useEffect(() => {
+    if (cecosFocusedRef.current || isCecoPickerOpen) return;
     const extText =
       row.odooSplitCostCentersText ?? (row.odooSplitCostCenters || []).join(', ');
-    if (extText !== localCecosText && !isCecoPickerOpen) {
+    if (extText !== localCecosText) {
       setLocalCecosText(extText);
     }
-  }, [row.odooSplitCostCentersText, row.odooSplitCostCenters]);
+  }, [row.odooSplitCostCentersText, row.odooSplitCostCenters, isCecoPickerOpen]);
 
   useEffect(() => {
     if (!isCecoPickerOpen) return;
@@ -2681,6 +3166,9 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
                 max={origAmount}
                 value={localValueText}
                 placeholder="Valor"
+                onFocus={() => {
+                  valueFocusedRef.current = true;
+                }}
                 onChange={(e) => {
                   const raw = e.target.value;
                   setLocalValueText(raw);
@@ -2697,6 +3185,7 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
                   });
                 }}
                 onBlur={() => {
+                  valueFocusedRef.current = false;
                   const parsed = parseFloat(localValueText);
                   if (!Number.isFinite(parsed) || parsed <= 0) {
                     setLocalValueText('');
@@ -2727,6 +3216,9 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
                 max="30"
                 value={localSplitText}
                 placeholder="Cant."
+                onFocus={() => {
+                  splitFocusedRef.current = true;
+                }}
                 onChange={(e) => {
                   const raw = e.target.value;
                   setLocalSplitText(raw);
@@ -2739,6 +3231,7 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
                   }
                 }}
                 onBlur={() => {
+                  splitFocusedRef.current = false;
                   const parsed = parseInt(localSplitText, 10);
                   const clamped = Number.isFinite(parsed)
                     ? Math.max(2, Math.min(30, parsed))
@@ -2776,6 +3269,9 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
                 type="text"
                 value={localCecosText}
                 placeholder="Ej. GT10000300, GT10000601"
+                onFocus={() => {
+                  cecosFocusedRef.current = true;
+                }}
                 onChange={(e) => {
                   const text = e.target.value;
                   setLocalCecosText(text);
@@ -2787,6 +3283,9 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
                     odooSplitCostCentersText: text,
                     odooSplitCostCenters: tokens,
                   });
+                }}
+                onBlur={() => {
+                  cecosFocusedRef.current = false;
                 }}
                 aria-label="Cecos separados por coma"
                 className="w-40 px-2 py-1 text-[11px] font-mono rounded-lg border border-slate-200 bg-white"
@@ -2861,6 +3360,156 @@ const OdooCargaExpenseRow: React.FC<OdooCargaExpenseRowProps> = ({
         )}
       </td>
     </tr>
+  );
+};
+
+interface StickyHorizontalScrollContainerProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+const StickyHorizontalScrollContainer: React.FC<StickyHorizontalScrollContainerProps> = ({
+  children,
+  className = '',
+}) => {
+  const topBarRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const syncingSourceRef = useRef<'top' | 'body' | null>(null);
+  const [metrics, setMetrics] = useState({
+    scrollWidth: 0,
+    clientWidth: 0,
+    scrollLeft: 0,
+  });
+
+  useEffect(() => {
+    const bodyEl = bodyRef.current;
+    if (!bodyEl) return;
+
+    const updateMetrics = () => {
+      setMetrics({
+        scrollWidth: bodyEl.scrollWidth,
+        clientWidth: bodyEl.clientWidth,
+        scrollLeft: bodyEl.scrollLeft,
+      });
+    };
+
+    updateMetrics();
+
+    const ro = new ResizeObserver(updateMetrics);
+    ro.observe(bodyEl);
+    if (bodyEl.firstElementChild) {
+      ro.observe(bodyEl.firstElementChild);
+    }
+    window.addEventListener('resize', updateMetrics);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateMetrics);
+    };
+  }, [children]);
+
+  const hasOverflow = metrics.scrollWidth > metrics.clientWidth + 2;
+  const maxBodyScroll = Math.max(0, metrics.scrollWidth - metrics.clientWidth);
+
+  const handleBodyScroll = () => {
+    const bodyEl = bodyRef.current;
+    const topEl = topBarRef.current;
+    if (!bodyEl) return;
+
+    setMetrics((prev) => ({
+      ...prev,
+      scrollLeft: bodyEl.scrollLeft,
+      scrollWidth: bodyEl.scrollWidth,
+      clientWidth: bodyEl.clientWidth,
+    }));
+
+    if (syncingSourceRef.current === 'top') {
+      syncingSourceRef.current = null;
+      return;
+    }
+
+    if (topEl) {
+      const topMax = Math.max(1, topEl.scrollWidth - topEl.clientWidth);
+      const bodyMax = Math.max(1, bodyEl.scrollWidth - bodyEl.clientWidth);
+      syncingSourceRef.current = 'body';
+      topEl.scrollLeft = (bodyEl.scrollLeft / bodyMax) * topMax;
+      requestAnimationFrame(() => {
+        if (syncingSourceRef.current === 'body') {
+          syncingSourceRef.current = null;
+        }
+      });
+    }
+  };
+
+  const handleTopScroll = () => {
+    const bodyEl = bodyRef.current;
+    const topEl = topBarRef.current;
+    if (!bodyEl || !topEl) return;
+
+    if (syncingSourceRef.current === 'body') {
+      syncingSourceRef.current = null;
+      return;
+    }
+
+    const topMax = Math.max(1, topEl.scrollWidth - topEl.clientWidth);
+    const bodyMax = Math.max(1, bodyEl.scrollWidth - bodyEl.clientWidth);
+    syncingSourceRef.current = 'top';
+    bodyEl.scrollLeft = (topEl.scrollLeft / topMax) * bodyMax;
+    setMetrics((prev) => ({ ...prev, scrollLeft: bodyEl.scrollLeft }));
+    requestAnimationFrame(() => {
+      if (syncingSourceRef.current === 'top') {
+        syncingSourceRef.current = null;
+      }
+    });
+  };
+
+  const scrollByStep = (delta: number) => {
+    const bodyEl = bodyRef.current;
+    if (!bodyEl) return;
+    bodyEl.scrollBy({ left: delta, behavior: 'smooth' });
+  };
+
+  return (
+    <div className={className}>
+      {hasOverflow && (
+        <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur-xs border-b border-slate-200 px-3 py-1.5 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => scrollByStep(-360)}
+            disabled={metrics.scrollLeft <= 1}
+            title="Desplazar tabla hacia la izquierda"
+            className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold text-[#132B63] bg-white hover:bg-sky-50 disabled:opacity-40 border border-slate-300 rounded-lg cursor-pointer shrink-0"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span>Izq.</span>
+          </button>
+
+          <div
+            ref={topBarRef}
+            onScroll={handleTopScroll}
+            aria-label="Barra superior de desplazamiento horizontal"
+            className="flex-1 overflow-x-auto overflow-y-hidden h-4 rounded bg-slate-200/70"
+          >
+            <div style={{ width: `${Math.max(metrics.scrollWidth, 1)}px`, height: '1px' }} />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => scrollByStep(360)}
+            disabled={metrics.scrollLeft >= maxBodyScroll - 1}
+            title="Desplazar tabla hacia la derecha"
+            className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold text-[#132B63] bg-white hover:bg-sky-50 disabled:opacity-40 border border-slate-300 rounded-lg cursor-pointer shrink-0"
+          >
+            <span>Der.</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      <div ref={bodyRef} onScroll={handleBodyScroll} className="overflow-x-auto">
+        {children}
+      </div>
+    </div>
   );
 };
 

@@ -637,10 +637,9 @@ function loadInitialStandaloneModuleCompanies(): Record<
   const result = {} as Record<StandaloneCompanyDbModuleId, ModuleCompanyEntry[]>;
   STANDALONE_COMPANY_DB_MODULES.forEach((modId) => {
     const candidate = saved[modId];
-    result[modId] =
-      Array.isArray(candidate) && candidate.length > 0
-        ? sanitizeModuleCompanyList(candidate)
-        : INITIAL_STANDALONE_MODULE_COMPANIES[modId];
+    result[modId] = Array.isArray(candidate)
+      ? sanitizeModuleCompanyList(candidate)
+      : INITIAL_STANDALONE_MODULE_COMPANIES[modId];
   });
   return result;
 }
@@ -2229,14 +2228,6 @@ export default function App() {
       ],
       'bnk'
     );
-    const viaticosList = mergeRuntimeSocietyNames(
-      standaloneModuleCompanies.viaticos,
-      [
-        ...viaticosWorkspace.consultores.map((c) => ({ nombre: c.empresa })),
-        ...viaticosWorkspace.liquidaciones.map((l) => ({ nombre: l.empresa })),
-      ],
-      'viat'
-    );
     const actividadesList = mergeRuntimeSocietyNames(
       standaloneModuleCompanies.actividades,
       activitiesWorkspace.societies.map((s) => ({
@@ -2249,7 +2240,7 @@ export default function App() {
     return {
       intercompany: mergedIntercompany,
       bancos: bancosList,
-      viaticos: viaticosList,
+      viaticos: standaloneModuleCompanies.viaticos,
       actividades: actividadesList,
       clara: standaloneModuleCompanies.clara,
       anticipos: standaloneModuleCompanies.anticipos,
@@ -2261,8 +2252,6 @@ export default function App() {
     standaloneModuleCompanies,
     bankWorkspace.societies,
     bankWorkspace.accounts,
-    viaticosWorkspace.consultores,
-    viaticosWorkspace.liquidaciones,
     activitiesWorkspace.societies,
   ]);
 
@@ -2681,12 +2670,15 @@ export default function App() {
 
     const viatScope = resolveViaticosConsultantScope(
       viaticosWorkspace.consultores,
-      effectivePermissions
+      effectivePermissions,
+      viaticosWorkspace.odooCatalogs,
+      permissionRecords
     );
     const visibleViaticos = filterLiquidacionesByPermissions(
       viaticosWorkspace.liquidaciones,
       effectivePermissions,
-      viatScope.matchedConsultor
+      viatScope.matchedConsultor,
+      viatScope.availableConsultores
     );
     const viaticosOpenCount = visibleViaticos.filter((l) => l.estado === 'borrador').length;
     const primaryViat = visibleViaticos[0];
@@ -2726,9 +2718,10 @@ export default function App() {
     visibleBankWorkspace,
     viaticosWorkspace.consultores,
     viaticosWorkspace.liquidaciones,
+    viaticosWorkspace.odooCatalogs,
     visibleActivitiesWorkspace,
     effectivePermissions,
-    permissionRecords.length,
+    permissionRecords,
   ]);
 
   // Global slim top banner when an Administrator is previewing another user's permissions

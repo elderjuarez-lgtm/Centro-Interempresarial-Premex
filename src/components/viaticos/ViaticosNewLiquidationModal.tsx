@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Plus, Calendar, Coins, Building2, UserCheck, Layers } from 'lucide-react';
 import {
   ModuleCompanyEntry,
@@ -72,26 +72,42 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
     return moduleCompanies[0].nombre;
   };
 
+  const wasOpenRef = useRef(false);
+
   useEffect(() => {
-    if (!isOpen) return;
-    const initialConsultor = defaultConsultor || availableConsultores[0] || null;
-    const matchedEmp = odooCatalogs
-      ? findMatchingOdooEmployee({
-          email: initialConsultor?.email,
-          nombre: initialConsultor?.odooEmployeeName || initialConsultor?.nombreCompleto,
-          employees: odooCatalogs.employees,
-        })
-      : null;
-    setLineaLiquidacion('');
-    setSemana(getCurrentIsoWeekNumber());
-    const initCurrency = initialConsultor?.monedaBase || 'Quetzales';
-    setMonedaBase(initCurrency);
-    setTipoCambioLiquidacion('1.00');
-    setConsultorId(initialConsultor?.id || '');
-    setEmpresa(pickPermittedCompany(initialConsultor?.empresa || matchedEmp?.empresa));
-    setCentroCosto(initialConsultor?.centroCosto || matchedEmp?.centroCosto || '');
-    setError(null);
-  }, [isOpen, defaultConsultor, availableConsultores, moduleCompanies, odooCatalogs]);
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (!wasOpenRef.current) {
+      wasOpenRef.current = true;
+      const initialConsultor = defaultConsultor || availableConsultores[0] || null;
+      const matchedEmp = odooCatalogs
+        ? findMatchingOdooEmployee({
+            email: initialConsultor?.email,
+            nombre: initialConsultor?.odooEmployeeName || initialConsultor?.nombreCompleto,
+            employees: odooCatalogs.employees,
+          })
+        : null;
+      setLineaLiquidacion('');
+      setSemana(getCurrentIsoWeekNumber());
+      const initCurrency = initialConsultor?.monedaBase || 'Quetzales';
+      setMonedaBase(initCurrency);
+      setTipoCambioLiquidacion('1.00');
+      setConsultorId(initialConsultor?.id || '');
+      setEmpresa(pickPermittedCompany(initialConsultor?.empresa || matchedEmp?.empresa));
+      setCentroCosto(initialConsultor?.centroCosto || matchedEmp?.centroCosto || '');
+      setError(null);
+      return;
+    }
+
+    if (!consultorId && (defaultConsultor || availableConsultores[0])) {
+      const fallback = defaultConsultor || availableConsultores[0];
+      if (fallback) {
+        setConsultorId(fallback.id);
+      }
+    }
+  }, [isOpen, defaultConsultor, availableConsultores, moduleCompanies, odooCatalogs, consultorId]);
 
   if (!isOpen) return null;
 
@@ -295,15 +311,15 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
             </div>
           )}
 
-          {/* Consultor */}
+          {/* Nombre (Empleado Liquidador) */}
           <div>
             <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
               <UserCheck className="w-3.5 h-3.5 text-[#1E60A8]" />
-              <span>Consultor Liquidador</span>
+              <span>Nombre (Empleado Liquidador) *</span>
             </label>
             <select
               value={consultorId}
-              disabled={isLockedToOwnConsultor}
+              disabled={isLockedToOwnConsultor && availableConsultores.length <= 1}
               onChange={(e) => handleConsultorChange(e.target.value)}
               className="w-full min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] disabled:bg-slate-50 disabled:text-slate-600"
             >

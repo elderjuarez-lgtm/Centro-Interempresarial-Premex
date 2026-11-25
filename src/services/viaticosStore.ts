@@ -22,6 +22,7 @@ import {
   OdooDocTypeEntry,
   OdooEmployeeEntry,
   OdooExpenseCodeEntry,
+  OdooExpenseDistributionEntry,
   OdooTaxIndicatorEntry,
   ViaticoConsultor,
   ViaticoEmailGroup,
@@ -148,6 +149,33 @@ const sanitizeExpenseItem = (i: ViaticoExpenseItem): ViaticoExpenseItem => {
   }
   if (i.odooJournal) clean.odooJournal = String(i.odooJournal).trim().slice(0, 120);
   if (i.odooPaymentReference) clean.odooPaymentReference = String(i.odooPaymentReference).trim().slice(0, 180);
+  if (i.odooDistributionOptionId && String(i.odooDistributionOptionId).trim()) {
+    clean.odooDistributionOptionId = String(i.odooDistributionOptionId).trim().slice(0, 120);
+  }
+  if (typeof i.odooDistributionValue === 'number' && Number.isFinite(i.odooDistributionValue) && i.odooDistributionValue > 0) {
+    clean.odooDistributionValue = roundMoney(i.odooDistributionValue);
+  }
+  if (typeof i.odooSplitCount === 'number' && Number.isFinite(i.odooSplitCount) && i.odooSplitCount >= 2) {
+    clean.odooSplitCount = Math.max(2, Math.min(30, Math.floor(i.odooSplitCount)));
+  }
+  if (i.odooSplitCostCentersText && String(i.odooSplitCostCentersText).trim()) {
+    clean.odooSplitCostCentersText = String(i.odooSplitCostCentersText).trim().slice(0, 600);
+  }
+  if (Array.isArray(i.odooSplitCostCenters) && i.odooSplitCostCenters.length > 0) {
+    clean.odooSplitCostCenters = i.odooSplitCostCenters
+      .map((c) => String(c || '').trim().slice(0, 120))
+      .filter(Boolean)
+      .slice(0, 30);
+  }
+  if (typeof i.splitByEmployeesCount === 'number' && Number.isFinite(i.splitByEmployeesCount) && i.splitByEmployeesCount >= 2) {
+    clean.splitByEmployeesCount = Math.max(2, Math.min(30, Math.floor(i.splitByEmployeesCount)));
+  }
+  if (Array.isArray(i.splitEmployeeNames) && i.splitEmployeeNames.length > 0) {
+    clean.splitEmployeeNames = i.splitEmployeeNames
+      .map((n) => String(n || '').trim().toUpperCase().slice(0, 160))
+      .filter(Boolean)
+      .slice(0, 30);
+  }
   if (i.registeredByEmail) clean.registeredByEmail = String(i.registeredByEmail).trim().toLowerCase().slice(0, 160);
   if (i.registeredByName) clean.registeredByName = String(i.registeredByName).trim().slice(0, 140);
   if (i.updatedAtIso) clean.updatedAtIso = String(i.updatedAtIso).trim().slice(0, 60);
@@ -243,6 +271,22 @@ const sanitizeOdooCatalogs = (raw: unknown): ViaticoOdooCatalogs | undefined => 
           ...(t?.updatedAtIso ? { updatedAtIso: String(t.updatedAtIso).slice(0, 60) } : {}),
         }))
       : undefined,
+    expenseDistributions: Array.isArray(src.expenseDistributions)
+      ? src.expenseDistributions.slice(0, 100).map((d: OdooExpenseDistributionEntry, idx) => ({
+          id: String(d?.id || `dist-${idx}`).slice(0, 100),
+          codigo: String(d?.codigo || '').trim().toUpperCase().slice(0, 40),
+          nombre: String(d?.nombre || '').trim().slice(0, 140),
+          mode: d?.mode === 'multi_ceco' ? 'multi_ceco' : 'extra_charge',
+          naturaleza: d?.naturaleza === 'bien' ? 'bien' : 'servicio',
+          expenseCodeLabel: String(d?.expenseCodeLabel || '').trim().slice(0, 180),
+          taxIndicatorName: String(d?.taxIndicatorName || '').trim().slice(0, 180),
+          activo: d?.activo !== false,
+          ...(d?.isCustom ? { isCustom: true } : {}),
+          ...(d?.updatedByEmail ? { updatedByEmail: String(d.updatedByEmail).trim().toLowerCase().slice(0, 160) } : {}),
+          ...(d?.updatedByName ? { updatedByName: String(d.updatedByName).trim().slice(0, 140) } : {}),
+          ...(d?.updatedAtIso ? { updatedAtIso: String(d.updatedAtIso).slice(0, 60) } : {}),
+        }))
+      : undefined,
     updatedByEmail: src.updatedByEmail ? String(src.updatedByEmail).trim().toLowerCase().slice(0, 160) : undefined,
     updatedByName: src.updatedByName ? String(src.updatedByName).trim().slice(0, 140) : undefined,
     updatedAtIso: src.updatedAtIso ? String(src.updatedAtIso).slice(0, 60) : undefined,
@@ -294,6 +338,23 @@ const sanitizeLiquidation = (l: ViaticoLiquidation): ViaticoLiquidation => {
   if (l.sentAtIso) base.sentAtIso = String(l.sentAtIso).slice(0, 60);
   if (l.sentToEmail) base.sentToEmail = String(l.sentToEmail).slice(0, 200);
   if (l.notas) base.notas = String(l.notas).slice(0, 400);
+  if (typeof l.contabilizada === 'boolean') base.contabilizada = l.contabilizada;
+  if (l.contabilizadaAtIso) base.contabilizadaAtIso = String(l.contabilizadaAtIso).slice(0, 60);
+  if (l.contabilizadaPorEmail) {
+    base.contabilizadaPorEmail = String(l.contabilizadaPorEmail).trim().toLowerCase().slice(0, 160);
+  }
+  if (l.contabilizadaPorNombre) {
+    base.contabilizadaPorNombre = String(l.contabilizadaPorNombre).trim().slice(0, 140);
+  }
+  if (
+    Number.isFinite(Number(l.contabilizadaDescargasCount)) &&
+    Number(l.contabilizadaDescargasCount) >= 0
+  ) {
+    base.contabilizadaDescargasCount = Math.min(
+      9999,
+      Math.floor(Number(l.contabilizadaDescargasCount))
+    );
+  }
 
   return recalculateLiquidationTotals(base);
 };

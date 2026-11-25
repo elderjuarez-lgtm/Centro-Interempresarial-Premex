@@ -227,9 +227,10 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
       filterLiquidacionesByPermissions(
         data.liquidaciones,
         permissions,
-        scope.matchedConsultor
+        scope.matchedConsultor,
+        scope.availableConsultores
       ),
-    [data.liquidaciones, permissions, scope.matchedConsultor]
+    [data.liquidaciones, permissions, scope.matchedConsultor, scope.availableConsultores]
   );
 
   // Consolidated multi-liquidador list for the Contabilidad / Odoo section
@@ -550,6 +551,8 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     consultorEmail?: string;
     empresa?: string;
     centroCosto?: string;
+    odooEmployeeName?: string;
+    odooAnalyticDistribution?: string;
     monedaBase?: ViaticoCurrency;
     tipoCambioLiquidacion?: number;
   }) => {
@@ -1105,6 +1108,48 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     );
   };
 
+  const handleMarkLiquidationsContabilizadas = (
+    liquidationIds: string[],
+    contabilizada: boolean
+  ) => {
+    if (!permissions.canOperate || liquidationIds.length === 0) return;
+    const idSet = new Set(liquidationIds);
+    const stamp = resolveOperatingUserPermissionsStamp(
+      permissions,
+      currentUser?.email || undefined,
+      currentUser?.displayName || undefined
+    );
+
+    mutateAndAutoSync(
+      (prev) => ({
+        ...prev,
+        liquidaciones: prev.liquidaciones.map((l) => {
+          if (!idSet.has(l.id)) return l;
+          if (contabilizada) {
+            return {
+              ...l,
+              contabilizada: true,
+              contabilizadaAtIso: stamp.atIso,
+              contabilizadaPorEmail: stamp.email,
+              contabilizadaPorNombre: stamp.name,
+              contabilizadaDescargasCount: (l.contabilizadaDescargasCount || 0) + 1,
+              updatedAtIso: stamp.atIso,
+            };
+          }
+          const next = { ...l, contabilizada: false, updatedAtIso: stamp.atIso };
+          delete next.contabilizadaAtIso;
+          delete next.contabilizadaPorEmail;
+          delete next.contabilizadaPorNombre;
+          return next;
+        }),
+      }),
+      {
+        errorPrefix:
+          'Estado de contabilización guardado localmente, pero falló la sincronización en la nube',
+      }
+    );
+  };
+
   const handleDeleteConsultor = (consultorId: string) => {
     if (!permissions.isAdmin) return;
     mutateAndAutoSync(
@@ -1423,6 +1468,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               onAssignConsultorCostCenter={handleAssignConsultorCostCenter}
               onSaveOdooCatalogs={handleSaveOdooCatalogs}
               onUpdateExpenseItemOdoo={handleUpdateExpenseItemOdoo}
+              onMarkLiquidationsContabilizadas={handleMarkLiquidationsContabilizadas}
               onUpsertPermissionRecord={onUpsertPermissionRecord}
               onNotify={showToast}
             />

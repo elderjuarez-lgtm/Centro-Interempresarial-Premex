@@ -305,6 +305,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
   const [formActive, setFormActive] = useState(true);
   const [formNotes, setFormNotes] = useState('');
   const [formOdooEmployeeName, setFormOdooEmployeeName] = useState('');
+  const [formAssignedEmployees, setFormAssignedEmployees] = useState<string[]>([]);
+  const [employeeAssignSearch, setEmployeeAssignSearch] = useState('');
   const [formCentroCosto, setFormCentroCosto] = useState('');
   const [formOdooAnalyticDistribution, setFormOdooAnalyticDistribution] = useState('');
   const [companySearch, setCompanySearch] = useState('');
@@ -511,6 +513,8 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setFormActive(true);
     setFormNotes('');
     setFormOdooEmployeeName('');
+    setFormAssignedEmployees([]);
+    setEmployeeAssignSearch('');
     setFormCentroCosto('');
     setFormOdooAnalyticDistribution('');
     setCompanySearch('');
@@ -567,6 +571,16 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
           })
         : null;
     setFormOdooEmployeeName(rec.odooEmployeeName || autoEmp?.nombreCompleto || '');
+    const initialAssigned =
+      Array.isArray(rec.assignedEmployees) && rec.assignedEmployees.length > 0
+        ? rec.assignedEmployees.map((n) => String(n || '').trim().toUpperCase()).filter(Boolean)
+        : rec.odooEmployeeName
+        ? [rec.odooEmployeeName.trim().toUpperCase()]
+        : autoEmp?.nombreCompleto
+        ? [autoEmp.nombreCompleto.trim().toUpperCase()]
+        : [];
+    setFormAssignedEmployees(Array.from(new Set(initialAssigned)));
+    setEmployeeAssignSearch('');
     const initialCC = rec.centroCosto || autoEmp?.centroCosto || '';
     setFormCentroCosto(initialCC);
     const matchedCC = findMatchingCostCenterEntry(
@@ -882,6 +896,18 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       : findMatchingCostCenterEntry(formCentroCosto, undefined, resolvedOdooCatalogs.costCenters)
           ?.analyticDistribution || '';
 
+    const cleanedAssignedEmployees = Array.from(
+      new Set(
+        formAssignedEmployees
+          .map((n) => n.trim().toUpperCase())
+          .filter(Boolean)
+      )
+    );
+    const primaryOdooEmployee =
+      formOdooEmployeeName.trim().toUpperCase() ||
+      cleanedAssignedEmployees[0] ||
+      '';
+
     const nextRecord: UserPermissionRecord = {
       id: emailToPermissionDocId(cleanEmail),
       email: cleanEmail,
@@ -895,9 +921,9 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       moduleCompanyAccess: sanitizedAccess,
       active: cleanEmail === SUPER_ADMIN_EMAIL ? true : formActive,
       notes: formNotes.trim() || undefined,
-      odooEmployeeName: formOdooEmployeeName.trim()
-        ? formOdooEmployeeName.trim().toUpperCase()
-        : undefined,
+      odooEmployeeName: primaryOdooEmployee || undefined,
+      assignedEmployees:
+        cleanedAssignedEmployees.length > 0 ? cleanedAssignedEmployees : undefined,
       centroCosto: formCentroCosto.trim() || undefined,
       odooAnalyticDistribution: resolvedAnalyticJson || undefined,
       updatedAtIso: new Date().toISOString(),
@@ -1885,6 +1911,27 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                                               </span>
                                             </div>
                                           )}
+                                          {modId === 'viaticos' &&
+                                            ((rec.assignedEmployees && rec.assignedEmployees.length > 0) ||
+                                              rec.odooEmployeeName) && (
+                                              <div className="text-[11px] text-slate-600 mt-0.5">
+                                                <span className="font-semibold text-[#132B63]">
+                                                  Empleados a liquidar (
+                                                  {rec.assignedEmployees && rec.assignedEmployees.length > 0
+                                                    ? rec.assignedEmployees.length
+                                                    : 1}
+                                                  ):
+                                                </span>{' '}
+                                                <span>
+                                                  {rec.assignedEmployees && rec.assignedEmployees.length > 0
+                                                    ? rec.assignedEmployees.slice(0, 3).join(', ') +
+                                                      (rec.assignedEmployees.length > 3
+                                                        ? ` +${rec.assignedEmployees.length - 3}`
+                                                        : '')
+                                                    : rec.odooEmployeeName}
+                                                </span>
+                                              </div>
+                                            )}
                                         </div>
                                       </div>
                                     );
@@ -3268,6 +3315,89 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                             placeholder='Ej. {"520": 100.0}'
                             className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono focus:outline-hidden focus:border-[#1E60A8]"
                           />
+                        </div>
+                      </div>
+
+                      {/* Multi-Employee Assignment Checklist for Liquidaciones */}
+                      <div className="mt-2.5 p-2.5 rounded-xl bg-white border border-slate-200 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-[11px] font-bold text-[#132B63]">
+                              Empleados asignados para hacer liquidaciones ({formAssignedEmployees.length})
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              Permite a este usuario seleccionar y liquidar viáticos para varios empleados de la base Odoo.
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {formAssignedEmployees.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setFormAssignedEmployees([])}
+                                className="text-[10px] font-semibold text-rose-600 hover:underline cursor-pointer"
+                              >
+                                Limpiar ({formAssignedEmployees.length})
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={employeeAssignSearch}
+                            onChange={(e) => setEmployeeAssignSearch(e.target.value)}
+                            placeholder="Buscar empleado Odoo por nombre o centro de costo..."
+                            className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs focus:bg-white focus:outline-hidden focus:border-[#1E60A8]"
+                          />
+                        </div>
+
+                        <div className="max-h-40 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+                          {resolvedOdooCatalogs.employees
+                            .filter((emp) => {
+                              if (emp.activo === false) return false;
+                              const q = employeeAssignSearch.trim().toLowerCase();
+                              if (!q) return true;
+                              return (
+                                emp.nombreCompleto.toLowerCase().includes(q) ||
+                                (emp.centroCosto || '').toLowerCase().includes(q) ||
+                                (emp.email || '').toLowerCase().includes(q)
+                              );
+                            })
+                            .map((emp) => {
+                              const upperName = emp.nombreCompleto.trim().toUpperCase();
+                              const isChecked = formAssignedEmployees.includes(upperName);
+                              return (
+                                <label
+                                  key={emp.id}
+                                  className={`flex items-start gap-2 p-2 rounded-lg border text-[11px] cursor-pointer transition-colors ${
+                                    isChecked
+                                      ? 'bg-[#1E60A8]/8 border-[#1E60A8]/40 text-[#132B63]'
+                                      : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100/70'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {
+                                      setFormAssignedEmployees((prev) =>
+                                        prev.includes(upperName)
+                                          ? prev.filter((x) => x !== upperName)
+                                          : [...prev, upperName]
+                                      );
+                                    }}
+                                    className="mt-0.5 w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-bold truncate">{emp.nombreCompleto}</div>
+                                    <div className="text-[10px] text-slate-500 truncate">
+                                      {emp.centroCosto || 'Sin C.C.'}
+                                    </div>
+                                  </div>
+                                </label>
+                              );
+                            })}
                         </div>
                       </div>
                     </div>

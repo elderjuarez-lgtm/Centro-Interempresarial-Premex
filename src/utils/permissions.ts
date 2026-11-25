@@ -568,6 +568,7 @@ const buildPermissionsFromRecord = (
     allowedCompanies,
     moduleCompanyAccess,
     odooEmployeeName: record.odooEmployeeName,
+    assignedEmployees: record.assignedEmployees,
     centroCosto: record.centroCosto,
     odooAnalyticDistribution: record.odooAnalyticDistribution,
     canAccessModule: (moduleId: SuiteModuleId) => {

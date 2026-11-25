@@ -288,19 +288,159 @@ export const resolveViaticosConsultantScope = (
     };
   };
 
-  if (permissions.isAdmin) {
-    const matched = enrichMatched(matchConsultorFromEmail(permissions.email, consultores));
+  const buildConsultorFromAssignedName = (empUpper: string): ViaticoConsultor | null => {
+    const cleanUpper = String(empUpper || '').trim().toUpperCase();
+    if (!cleanUpper) return null;
+    const empEntry = odooCatalogs?.employees?.find(
+      (e) => e.nombreCompleto.trim().toUpperCase() === cleanUpper
+    );
+    const existingConsultor = consultores.find(
+      (c) =>
+        (c.odooEmployeeName || '').trim().toUpperCase() === cleanUpper ||
+        normalizeTextToken(c.nombreCompleto) === normalizeTextToken(cleanUpper) ||
+        (empEntry?.email && normalizeEmail(c.email) === normalizeEmail(empEntry.email))
+    );
+
+    if (existingConsultor) {
+      return {
+        ...existingConsultor,
+        odooEmployeeName:
+          empEntry?.nombreCompleto || existingConsultor.odooEmployeeName || cleanUpper,
+        centroCosto: existingConsultor.centroCosto || empEntry?.centroCosto || '',
+        odooAnalyticDistribution:
+          existingConsultor.odooAnalyticDistribution ||
+          empEntry?.analyticDistribution ||
+          '',
+        permissionId: existingConsultor.permissionId || empEntry?.permissionDocId || permRec?.id,
+      };
+    }
+
+    const derivedEmpresa =
+      viaticosScope === 'selected' && viaticosAllowedCompanies[0]
+        ? viaticosAllowedCompanies[0]
+        : empEntry?.empresa || 'Premex Corp';
+
     return {
-      matchedConsultor: matched,
-      availableConsultores: consultores,
-      isLockedToOwnConsultor: false,
-      detectedFromEmailLabel: matched
-        ? `${matched.odooEmployeeName || matched.nombreCompleto} (Administrador · acceso total)`
-        : null,
+      id: empEntry?.id
+        ? `cons-odoo-${empEntry.id}`
+        : `cons-odoo-${normalizeTextToken(cleanUpper).replace(/\s+/g, '-')}`,
+      nombreCompleto: empEntry?.nombreCompleto || cleanUpper,
+      email: (empEntry?.email && normalizeEmail(empEntry.email)) || cleanEmail,
+      empresa: derivedEmpresa,
+      cargo: 'Consultor / Liquidador',
+      centroCosto:
+        empEntry?.centroCosto ||
+        permissions.centroCosto ||
+        permRec?.centroCosto ||
+        '',
+      odooEmployeeName: empEntry?.nombreCompleto || cleanUpper,
+      odooAnalyticDistribution:
+        empEntry?.analyticDistribution ||
+        permissions.odooAnalyticDistribution ||
+        permRec?.odooAnalyticDistribution ||
+        '',
+      permissionId: empEntry?.permissionDocId || permRec?.id,
+      monedaBase: 'Quetzales',
+      activo: true,
+    };
+  };
+
+  const dedupeConsultores = (list: ViaticoConsultor[]): ViaticoConsultor[] => {
+    const out: ViaticoConsultor[] = [];
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+    list.forEach((c) => {
+      const nameKey = (c.odooEmployeeName || c.nombreCompleto || '').trim().toUpperCase();
+      if (seenIds.has(c.id) || (nameKey && seenNames.has(nameKey))) return;
+      seenIds.add(c.id);
+      if (nameKey) seenNames.add(nameKey);
+      out.push(c);
+    });
+    return out;
+  };
+
+  const rawAssigned =
+    permissions.assignedEmployees && permissions.assignedEmployees.length > 0
+      ? permissions.assignedEmployees
+      : permRec?.assignedEmployees && permRec.assignedEmployees.length > 0
+      ? permRec.assignedEmployees
+      : [];
+  const primaryOdooName = (
+    permissions.odooEmployeeName ||
+    permRec?.odooEmployeeName ||
+    ''
+  )
+    .trim()
+    .toUpperCase();
+  const combinedAssignedNames = Array.from(
+    new Set(
+      rawAssigned
+        .map((n) => String(n || '').trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+  const assignedConsultores = dedupeConsultores(
+    combinedAssignedNames
+      .map(buildConsultorFromAssignedName)
+      .filter((c): c is ViaticoConsultor => Boolean(c))
+  );
+
+  const matched = enrichMatched(matchConsultorFromEmail(permissions.email, consultores));
+
+  // Strictly enforce explicit assignedEmployees from Permisos for the Nombre selector across all roles
+  if (assignedConsultores.length > 0) {
+    const primaryMatched =
+      (matched &&
+        assignedConsultores.find(
+          (c) =>
+            c.id === matched.id ||
+            (c.odooEmployeeName || '').trim().toUpperCase() ===
+              (matched.odooEmployeeName || '').trim().toUpperCase()
+        )) ||
+      (primaryOdooName &&
+        assignedConsultores.find(
+          (c) =>
+            (c.odooEmployeeName || c.nombreCompleto || '').trim().toUpperCase() ===
+            primaryOdooName
+        )) ||
+      assignedConsultores[0];
+    return {
+      matchedConsultor: primaryMatched,
+      availableConsultores: assignedConsultores,
+      isLockedToOwnConsultor: assignedConsultores.length <= 1,
+      detectedFromEmailLabel:
+        assignedConsultores.length > 1
+          ? `${assignedConsultores.length} empleados asignados (${permissions.email || 'permisos'})`
+          : `${primaryMatched.odooEmployeeName || primaryMatched.nombreCompleto} (asignado en permisos)`,
     };
   }
 
-  const matched = enrichMatched(matchConsultorFromEmail(permissions.email, consultores));
+  const odooEmployeeConsultores = (odooCatalogs?.employees || [])
+    .filter((e) => {
+      if (e.activo === false) return false;
+      if (permissions.isAdmin || viaticosScope === 'all') return true;
+      return !e.empresa || permissions.isCompanyAllowed(e.empresa, 'viaticos');
+    })
+    .map((e) => buildConsultorFromAssignedName(e.nombreCompleto))
+    .filter((c): c is ViaticoConsultor => Boolean(c));
+
+  if (permissions.isAdmin) {
+    const allAdminConsultores = dedupeConsultores([
+      ...consultores,
+      ...odooEmployeeConsultores,
+    ]);
+    const adminMatched =
+      enrichMatched(matchConsultorFromEmail(permissions.email, allAdminConsultores)) ||
+      null;
+    return {
+      matchedConsultor: adminMatched,
+      availableConsultores: allAdminConsultores,
+      isLockedToOwnConsultor: false,
+      detectedFromEmailLabel: adminMatched
+        ? `${adminMatched.odooEmployeeName || adminMatched.nombreCompleto} (Administrador · acceso total)`
+        : null,
+    };
+  }
 
   const isBroadReviewerProfile =
     permissions.isAdmin ||
@@ -309,7 +449,7 @@ export const resolveViaticosConsultantScope = (
     permissions.userType === 'auditor' ||
     permissions.canAccessViaticosPanel('contabilidad');
 
-  // Operador (Liquidador): scoped automatically to their own consultant profile detected via email + permissions + Odoo employee DB
+  // Operador (Liquidador) without assignedEmployees: scoped to matched profile or auto-built profile
   if (permissions.role === 'operador' && permissions.email && !isBroadReviewerProfile) {
     if (matched) {
       return {
@@ -365,11 +505,14 @@ export const resolveViaticosConsultantScope = (
     };
   }
 
-  // Contabilidad / Autorizador / Auditor / Solo Consulta: can inspect all permitted-company liquidaciones
+  // Contabilidad / Autorizador / Auditor / Solo Consulta without explicit assignedEmployees
+  const broadAvailable = dedupeConsultores([
+    ...(viaticosScope === 'selected' ? companyAllowedConsultores : consultores),
+    ...odooEmployeeConsultores,
+  ]);
   return {
-    matchedConsultor: matched,
-    availableConsultores:
-      viaticosScope === 'selected' ? companyAllowedConsultores : consultores,
+    matchedConsultor: matched || null,
+    availableConsultores: broadAvailable,
     isLockedToOwnConsultor: false,
     detectedFromEmailLabel: matched
       ? matched.odooEmployeeName || matched.nombreCompleto
@@ -380,7 +523,8 @@ export const resolveViaticosConsultantScope = (
 export const filterLiquidacionesByPermissions = (
   liquidaciones: ViaticoLiquidation[],
   permissions: EffectivePermissions,
-  matchedConsultor: ViaticoConsultor | null
+  matchedConsultor: ViaticoConsultor | null,
+  availableConsultores?: ViaticoConsultor[]
 ): ViaticoLiquidation[] => {
   if (permissions.isAdmin) return liquidaciones;
 
@@ -391,6 +535,15 @@ export const filterLiquidacionesByPermissions = (
     permissions.userType === 'auditor' ||
     permissions.canAccessViaticosPanel('contabilidad');
 
+  const assignedUpperSet = new Set(
+    (permissions.assignedEmployees || [])
+      .map((n) => String(n || '').trim().toUpperCase())
+      .filter(Boolean)
+  );
+  if (permissions.odooEmployeeName && assignedUpperSet.size === 0) {
+    assignedUpperSet.add(permissions.odooEmployeeName.trim().toUpperCase());
+  }
+
   return liquidaciones.filter((liq) => {
     const companyOk =
       viaticosScope === 'all' || permissions.isCompanyAllowed(liq.empresa, 'viaticos');
@@ -400,6 +553,39 @@ export const filterLiquidacionesByPermissions = (
       const userEmail = normalizeEmail(permissions.email);
       if (normalizeEmail(liq.consultorEmail) === userEmail) return true;
       if (matchedConsultor && liq.consultorId === matchedConsultor.id) return true;
+
+      if (availableConsultores && availableConsultores.length > 0) {
+        const matchesAssignedConsultor = availableConsultores.some((c) => {
+          if (liq.consultorId && liq.consultorId === c.id) return true;
+          if (c.email && liq.consultorEmail && normalizeEmail(c.email) === normalizeEmail(liq.consultorEmail)) {
+            return true;
+          }
+          if (
+            c.odooEmployeeName &&
+            liq.odooEmployeeName &&
+            c.odooEmployeeName.trim().toUpperCase() === liq.odooEmployeeName.trim().toUpperCase()
+          ) {
+            return true;
+          }
+          if (
+            normalizeTextToken(c.nombreCompleto) &&
+            normalizeTextToken(c.nombreCompleto) === normalizeTextToken(liq.consultorNombre)
+          ) {
+            return true;
+          }
+          return false;
+        });
+        if (matchesAssignedConsultor) return true;
+      }
+
+      if (assignedUpperSet.size > 0) {
+        const liqEmp = (liq.odooEmployeeName || '').trim().toUpperCase();
+        const liqNom = (liq.consultorNombre || '').trim().toUpperCase();
+        if ((liqEmp && assignedUpperSet.has(liqEmp)) || (liqNom && assignedUpperSet.has(liqNom))) {
+          return true;
+        }
+      }
+
       const { firstName, lastName } = parseNameTokensFromEmail(userEmail);
       if (firstName && lastName) {
         const liqWords = normalizeTextToken(liq.consultorNombre).split(' ');

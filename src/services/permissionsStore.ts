@@ -128,6 +128,18 @@ const sanitizeRecord = (rec: UserPermissionRecord): UserPermissionRecord => {
   if (rec.odooEmployeeName && String(rec.odooEmployeeName).trim()) {
     clean.odooEmployeeName = String(rec.odooEmployeeName).trim().toUpperCase().slice(0, 140);
   }
+  if (Array.isArray(rec.assignedEmployees)) {
+    const cleanedAssigned = Array.from(
+      new Set(
+        rec.assignedEmployees
+          .map((emp) => String(emp || '').trim().toUpperCase().slice(0, 140))
+          .filter(Boolean)
+      )
+    ).slice(0, 100);
+    if (cleanedAssigned.length > 0) {
+      clean.assignedEmployees = cleanedAssigned;
+    }
+  }
   if (rec.centroCosto && String(rec.centroCosto).trim()) {
     clean.centroCosto = String(rec.centroCosto).trim().slice(0, 140);
   }
@@ -250,6 +262,9 @@ const parsePermissionDocData = (
     active: data.active !== false,
     notes: data.notes ? String(data.notes) : undefined,
     odooEmployeeName: data.odooEmployeeName ? String(data.odooEmployeeName) : undefined,
+    assignedEmployees: Array.isArray(data.assignedEmployees)
+      ? data.assignedEmployees.map((e: unknown) => String(e || ''))
+      : undefined,
     centroCosto: data.centroCosto ? String(data.centroCosto) : undefined,
     odooAnalyticDistribution: data.odooAnalyticDistribution
       ? String(data.odooAnalyticDistribution)
@@ -561,6 +576,9 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
     };
     if (cleanRec.notes) payloadBase.notes = cleanRec.notes;
     if (cleanRec.odooEmployeeName) payloadBase.odooEmployeeName = cleanRec.odooEmployeeName;
+    if (cleanRec.assignedEmployees && cleanRec.assignedEmployees.length > 0) {
+      payloadBase.assignedEmployees = cleanRec.assignedEmployees;
+    }
     if (cleanRec.centroCosto) payloadBase.centroCosto = cleanRec.centroCosto;
     if (cleanRec.odooAnalyticDistribution) {
       payloadBase.odooAnalyticDistribution = cleanRec.odooAnalyticDistribution;
@@ -582,6 +600,7 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
           active: cleanRec.active,
           notes: cleanRec.notes || '',
           odooEmployeeName: cleanRec.odooEmployeeName || '',
+          assignedEmployees: cleanRec.assignedEmployees || [],
           centroCosto: cleanRec.centroCosto || '',
           odooAnalyticDistribution: cleanRec.odooAnalyticDistribution || '',
           updatedBy: user.uid,
@@ -616,6 +635,7 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
               active: cleanRec.active,
               notes: cleanRec.notes || '',
               odooEmployeeName: cleanRec.odooEmployeeName || '',
+              assignedEmployees: cleanRec.assignedEmployees || [],
               centroCosto: cleanRec.centroCosto || '',
               odooAnalyticDistribution: cleanRec.odooAnalyticDistribution || '',
               updatedBy: user.uid,
@@ -633,6 +653,7 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
           'active',
           'notes',
           'odooEmployeeName',
+          'assignedEmployees',
           'centroCosto',
           'odooAnalyticDistribution',
           'updatedBy',
@@ -699,6 +720,7 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
         active: rec.active,
         notes: rec.notes || '',
         odooEmployeeName: rec.odooEmployeeName || '',
+        assignedEmployees: rec.assignedEmployees || [],
         centroCosto: rec.centroCosto || '',
         odooAnalyticDistribution: rec.odooAnalyticDistribution || '',
         updatedBy: user.uid,
@@ -749,6 +771,7 @@ export const saveUserPermissionAndRegistryToCloud = async (params: {
               'active',
               'notes',
               'odooEmployeeName',
+              'assignedEmployees',
               'centroCosto',
               'odooAnalyticDistribution',
               'updatedBy',

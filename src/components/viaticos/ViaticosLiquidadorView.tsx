@@ -29,6 +29,8 @@ import {
   SlidersHorizontal,
   ZoomIn,
   ZoomOut,
+  Users,
+  Search,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -98,6 +100,8 @@ interface ViaticosLiquidadorViewProps {
     consultorEmail?: string;
     empresa?: string;
     centroCosto?: string;
+    odooEmployeeName?: string;
+    odooAnalyticDistribution?: string;
     monedaBase?: ViaticoCurrency;
     tipoCambioLiquidacion?: number;
   }) => void;
@@ -148,6 +152,9 @@ interface ItemFormState {
   odooExpenseType: OdooExpenseType | '';
   odooCostCenterCode: string;
   odooAnalyticDistribution: string;
+  splitByEmployeesEnabled: boolean;
+  splitByEmployeesCount: string;
+  splitEmployeeNames: string[];
   attachmentId?: string;
   attachmentName?: string;
   attachmentMimeType?: string;
@@ -194,6 +201,9 @@ const createEmptyForm = (
   odooExpenseType: '',
   odooCostCenterCode: '',
   odooAnalyticDistribution: '',
+  splitByEmployeesEnabled: false,
+  splitByEmployeesCount: '2',
+  splitEmployeeNames: [],
 });
 
 export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
@@ -230,6 +240,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     [odooCatalogs]
   );
   const [showOdooDocFields, setShowOdooDocFields] = useState(false);
+  const [splitEmployeeSearch, setSplitEmployeeSearch] = useState('');
   const isZoomHigh = zoomPercent >= 120;
   const isZoomExtra = zoomPercent >= 135;
   const baseCurrency: ViaticoCurrency = liquidation?.monedaBase || 'Quetzales';
@@ -860,6 +871,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     setEditingItemId(item.id);
     setFormError(null);
     setAiStatusBanner(null);
+    setSplitEmployeeSearch('');
+    const hasEmpSplit =
+      (item.splitByEmployeesCount || 0) >= 2 &&
+      Array.isArray(item.splitEmployeeNames) &&
+      item.splitEmployeeNames.length >= 2;
     setForm({
       id: item.id,
       fechaDoc: item.fechaDoc,
@@ -884,6 +900,14 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       odooExpenseType: item.odooExpenseType || '',
       odooCostCenterCode: item.odooCostCenterCode || '',
       odooAnalyticDistribution: item.odooAnalyticDistribution || '',
+      splitByEmployeesEnabled: hasEmpSplit,
+      splitByEmployeesCount:
+        item.splitByEmployeesCount && item.splitByEmployeesCount >= 2
+          ? String(item.splitByEmployeesCount)
+          : '2',
+      splitEmployeeNames: Array.isArray(item.splitEmployeeNames)
+        ? item.splitEmployeeNames.map((n) => String(n || '').trim().toUpperCase()).filter(Boolean)
+        : [],
       attachmentId: item.attachmentId,
       attachmentName: item.attachmentName,
       attachmentMimeType: item.attachmentMimeType,
@@ -927,6 +951,22 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     if (numericValorFactura <= 0) {
       setFormError('Ingresa un valor de factura mayor a 0.');
       return;
+    }
+
+    const parsedSplitCount = Math.floor(Number(form.splitByEmployeesCount) || 0);
+    if (form.splitByEmployeesEnabled) {
+      if (!Number.isFinite(parsedSplitCount) || parsedSplitCount < 2) {
+        setFormError(
+          'En "Dividir gastos", indica una cantidad de personas mayor o igual a 2.'
+        );
+        return;
+      }
+      if (form.splitEmployeeNames.length !== parsedSplitCount) {
+        setFormError(
+          `En "Dividir gastos", debes seleccionar exactamente ${parsedSplitCount} empleados (${form.splitEmployeeNames.length} de ${parsedSplitCount} seleccionados).`
+        );
+        return;
+      }
     }
 
     const matchedDocCostCenter = form.odooCostCenterCode.trim()
@@ -973,6 +1013,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         form.odooAnalyticDistribution.trim() ||
         matchedDocCostCenter?.analyticDistribution ||
         undefined,
+      splitByEmployeesCount: form.splitByEmployeesEnabled ? parsedSplitCount : undefined,
+      splitEmployeeNames: form.splitByEmployeesEnabled
+        ? form.splitEmployeeNames
+        : undefined,
       registeredByEmail: existingItem?.registeredByEmail,
       registeredByName: existingItem?.registeredByName,
       attachmentId: form.attachmentId,
@@ -991,6 +1035,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     if (!wasEditing && uploadQueue.length > 0) {
       const [nextQueued, ...remaining] = uploadQueue;
       setUploadQueue(remaining);
+      setSplitEmployeeSearch('');
       setForm(
         createEmptyForm(
           baseCurrency,
@@ -1007,6 +1052,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     setEditingItemId(null);
     setActiveMediaPreview(null);
     setAiStatusBanner(null);
+    setSplitEmployeeSearch('');
     setForm(
       createEmptyForm(
         baseCurrency,
@@ -1359,11 +1405,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                  Consultor / Liquidador
+                  Nombre / Liquidador
                 </label>
                 <select
                   value={liquidation.consultorId}
-                  disabled={isLocked || isLockedToOwnConsultor}
+                  disabled={isLocked || (isLockedToOwnConsultor && availableConsultores.length <= 1)}
                   onChange={(e) => {
                     const chosen = availableConsultores.find((c) => c.id === e.target.value);
                     if (!chosen) return;
@@ -1379,6 +1425,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       consultorEmail: chosen.email,
                       empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
                       centroCosto: chosen.centroCosto || '',
+                      odooEmployeeName: chosen.odooEmployeeName || '',
+                      odooAnalyticDistribution: chosen.odooAnalyticDistribution || '',
                       monedaBase: chosen.monedaBase,
                     });
                   }}
@@ -1761,7 +1809,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <div className="col-span-9">
                 <select
                   value={liquidation.consultorId}
-                  disabled={isLocked || isLockedToOwnConsultor}
+                  disabled={isLocked || (isLockedToOwnConsultor && availableConsultores.length <= 1)}
                   onChange={(e) => {
                     const chosen = availableConsultores.find((c) => c.id === e.target.value);
                     if (!chosen) return;
@@ -1777,6 +1825,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       consultorEmail: chosen.email,
                       empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
                       centroCosto: chosen.centroCosto || '',
+                      odooEmployeeName: chosen.odooEmployeeName || '',
+                      odooAnalyticDistribution: chosen.odooAnalyticDistribution || '',
                       monedaBase: chosen.monedaBase,
                     });
                   }}
@@ -2739,6 +2789,174 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                           ))}
                       </select>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sub-section D: Dividir gastos entre empleados (última opción, solo aplicada en descarga Odoo) */}
+              <div className="rounded-2xl lg:rounded-xl border border-slate-200 bg-slate-50/70 overflow-hidden">
+                <div className="px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.splitByEmployeesEnabled}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setForm((prev) => ({
+                          ...prev,
+                          splitByEmployeesEnabled: checked,
+                          splitByEmployeesCount:
+                            checked && (!prev.splitByEmployeesCount || Number(prev.splitByEmployeesCount) < 2)
+                              ? '2'
+                              : prev.splitByEmployeesCount,
+                        }));
+                      }}
+                      className="w-5 h-5 lg:w-4 lg:h-4 rounded border-slate-300 text-[#1E60A8]"
+                    />
+                    <div>
+                      <span className="text-xs lg:text-[11px] font-extrabold uppercase tracking-wider text-[#132B63] flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-[#1E60A8]" />
+                        <span>4. Dividir gastos</span>
+                      </span>
+                      <div className="text-[11px] text-slate-500">
+                        Repartir monto y centro de costo entre varios empleados al descargar Odoo (mantiene al empleado que liquida)
+                      </div>
+                    </div>
+                  </label>
+                  {form.splitByEmployeesEnabled && (
+                    <span
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-lg ${
+                        form.splitEmployeeNames.length ===
+                        Math.max(2, Math.floor(Number(form.splitByEmployeesCount) || 2))
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-amber-50 text-amber-800 border border-amber-200'
+                      }`}
+                    >
+                      {form.splitEmployeeNames.length} de{' '}
+                      {Math.max(2, Math.floor(Number(form.splitByEmployeesCount) || 2))} seleccionados
+                    </span>
+                  )}
+                </div>
+
+                {form.splitByEmployeesEnabled && (
+                  <div className="p-3.5 border-t border-slate-200 bg-white space-y-3">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+                      <div className="lg:col-span-4">
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Cantidad de personas *
+                        </label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={2}
+                          max={30}
+                          step={1}
+                          value={form.splitByEmployeesCount}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const parsed = Math.floor(Number(raw) || 0);
+                            setForm((prev) => ({
+                              ...prev,
+                              splitByEmployeesCount: raw,
+                              splitEmployeeNames:
+                                parsed >= 2 && prev.splitEmployeeNames.length > parsed
+                                  ? prev.splitEmployeeNames.slice(0, parsed)
+                                  : prev.splitEmployeeNames,
+                            }));
+                          }}
+                          className="w-full min-h-[42px] lg:min-h-0 px-3 py-1.5 text-sm lg:text-xs font-mono font-bold text-[#132B63] rounded-lg border border-slate-300 bg-white"
+                        />
+                      </div>
+
+                      <div className="lg:col-span-8">
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Buscar empleado Odoo para seleccionar ({form.splitEmployeeNames.length}/
+                          {Math.max(2, Math.floor(Number(form.splitByEmployeesCount) || 2))})
+                        </label>
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={splitEmployeeSearch}
+                            onChange={(e) => setSplitEmployeeSearch(e.target.value)}
+                            placeholder="Filtrar empleados por nombre o centro de costo..."
+                            className="w-full min-h-[42px] lg:min-h-0 pl-8 pr-3 py-1.5 text-sm lg:text-xs rounded-lg border border-slate-300 bg-slate-50 focus:bg-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const targetMax = Math.max(
+                        2,
+                        Math.min(30, Math.floor(Number(form.splitByEmployeesCount) || 2))
+                      );
+                      const q = splitEmployeeSearch.trim().toLowerCase();
+                      const activeEmployees = catalogs.employees.filter((emp) => {
+                        if (emp.activo === false) return false;
+                        if (!q) return true;
+                        return (
+                          emp.nombreCompleto.toLowerCase().includes(q) ||
+                          (emp.centroCosto || '').toLowerCase().includes(q)
+                        );
+                      });
+                      const limitReached = form.splitEmployeeNames.length >= targetMax;
+
+                      return (
+                        <div className="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 pr-1">
+                          {activeEmployees.map((emp) => {
+                            const upperName = emp.nombreCompleto.trim().toUpperCase();
+                            const isChecked = form.splitEmployeeNames.includes(upperName);
+                            const isDisabled = !isChecked && limitReached;
+                            return (
+                              <label
+                                key={emp.id}
+                                className={`flex items-start gap-2 p-2 rounded-lg border text-[11px] transition-colors ${
+                                  isChecked
+                                    ? 'bg-[#1E60A8]/10 border-[#1E60A8]/50 text-[#132B63] cursor-pointer'
+                                    : isDisabled
+                                    ? 'bg-slate-50 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed'
+                                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  disabled={isDisabled}
+                                  onChange={() => {
+                                    setForm((prev) => {
+                                      const exists = prev.splitEmployeeNames.includes(upperName);
+                                      if (exists) {
+                                        return {
+                                          ...prev,
+                                          splitEmployeeNames: prev.splitEmployeeNames.filter(
+                                            (x) => x !== upperName
+                                          ),
+                                        };
+                                      }
+                                      if (prev.splitEmployeeNames.length >= targetMax) {
+                                        return prev;
+                                      }
+                                      return {
+                                        ...prev,
+                                        splitEmployeeNames: [...prev.splitEmployeeNames, upperName],
+                                      };
+                                    });
+                                  }}
+                                  className="mt-0.5 w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-bold truncate">{emp.nombreCompleto}</div>
+                                  <div className="text-[10px] text-slate-500 truncate">
+                                    {emp.centroCosto || 'Sin C.C.'}
+                                  </div>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

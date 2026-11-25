@@ -219,6 +219,8 @@ export interface UserPermissionRecord {
   viaticosPanels?: ViaticosTab[];
   /** Empleado Odoo vinculado al usuario (para prellenar carga contable de viáticos) */
   odooEmployeeName?: string;
+  /** Lista de empleados Odoo asignados al usuario para poder crear/gestionar múltiples liquidaciones */
+  assignedEmployees?: string[];
   /** Centro de costo asignado al empleado/usuario */
   centroCosto?: string;
   /** Centro de costo interno Odoo (ej. {"529": 100.0}) */
@@ -256,6 +258,7 @@ export interface EffectivePermissions {
   allowedModules: SuiteModuleId[];
   viaticosPanels: ViaticosTab[];
   odooEmployeeName?: string;
+  assignedEmployees?: string[];
   centroCosto?: string;
   odooAnalyticDistribution?: string;
   companyScope: CompanyAccessScope;
@@ -738,6 +741,9 @@ export interface ViaticoExpenseItem {
   odooSplitCount?: number;
   odooSplitCostCentersText?: string;
   odooSplitCostCenters?: string[];
+  // División por empleados desde captura del liquidador (solo aplicada al descargar archivo Odoo)
+  splitByEmployeesCount?: number;
+  splitEmployeeNames?: string[];
   registeredByEmail?: string;
   registeredByName?: string;
   updatedAtIso?: string;
@@ -778,6 +784,12 @@ export interface ViaticoLiquidation {
   sentAtIso?: string;
   sentToEmail?: string;
   notas?: string;
+  /** Seguimiento de contabilización en Odoo (activado automáticamente al descargar archivo contable) */
+  contabilizada?: boolean;
+  contabilizadaAtIso?: string;
+  contabilizadaPorEmail?: string;
+  contabilizadaPorNombre?: string;
+  contabilizadaDescargasCount?: number;
 }
 
 export interface ViaticoOdooCategoryAccount {

@@ -387,6 +387,10 @@
           "description": "Linked Odoo uppercase employee name for Travel Expense / Odoo sheet exports",
           "maxLength": 140
         },
+        "assignedEmployees": {
+          "type": "array",
+          "description": "List of Odoo uppercase employee names assigned to this user so they can create and manage liquidations for multiple employees"
+        },
         "centroCosto": {
           "type": "string",
           "description": "Assigned cost center code for this user (e.g. GT10000601 CONTABILIDAD)",

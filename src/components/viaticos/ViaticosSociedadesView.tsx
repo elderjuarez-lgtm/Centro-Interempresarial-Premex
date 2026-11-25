@@ -149,7 +149,7 @@ export const ViaticosSociedadesView: React.FC<ViaticosSociedadesViewProps> = ({
       setConfirmRemoveId(null);
       onNotify('success', `Sociedad "${company.nombre}" quitada del módulo de Viáticos.`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'No se pudo quitar la sociedad.';
+      const msg = err instanceof Error ? err.message : 'No se pudo eliminar la sociedad.';
       onNotify('error', msg);
     } finally {
       setIsSaving(false);
@@ -405,10 +405,10 @@ export const ViaticosSociedadesView: React.FC<ViaticosSociedadesViewProps> = ({
                               type="button"
                               onClick={() => setConfirmRemoveId(comp.id)}
                               className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 border border-rose-200/80 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-                              title={`Quitar ${comp.nombre} de Viáticos`}
+                              title={`Eliminar ${comp.nombre} de Viáticos`}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              <span>Quitar</span>
+                              <span>Eliminar</span>
                             </button>
                           )}
                         </td>
