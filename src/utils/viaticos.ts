@@ -1,5 +1,6 @@
 import {
   EffectivePermissions,
+  OdooEmployeeEntry,
   UserPermissionRecord,
   ViaticoCategory,
   ViaticoConsultor,
@@ -219,128 +220,119 @@ export const resolveViaticosConsultantScope = (
   const cleanEmail = normalizeEmail(permissions.email || '');
   const viaticosScope = permissions.getModuleCompanyScope('viaticos');
   const viaticosAllowedCompanies = permissions.getAllowedCompaniesForModule('viaticos');
-  const companyAllowedConsultores = consultores.filter(
-    (c) =>
-      permissions.isAdmin ||
-      viaticosScope === 'all' ||
-      permissions.isCompanyAllowed(c.empresa, 'viaticos')
+  const activeEmployees = (odooCatalogs?.employees || []).filter(
+    (e) => e.activo !== false
   );
 
-  // Enrich matched consultant from UserPermissionRecord / Odoo Employees DB
   const permRec =
     cleanEmail && Array.isArray(permissionRecords)
       ? permissionRecords.find((p) => normalizeEmail(p.email) === cleanEmail)
       : undefined;
-  const linkedOdooEmp = (() => {
-    if (!odooCatalogs?.employees?.length) return undefined;
-    const explicitOdooName = (
-      permissions.odooEmployeeName ||
-      permRec?.odooEmployeeName ||
-      ''
-    )
-      .trim()
-      .toUpperCase();
-    if (explicitOdooName) {
-      const byExact = odooCatalogs.employees.find(
-        (e) => e.nombreCompleto.trim().toUpperCase() === explicitOdooName
-      );
-      if (byExact) return byExact;
+
+  // Match signed-in user strictly by their email or name tokens against Empleados (never via stale odooEmployeeName)
+  const linkedOdooEmpByIdentity: OdooEmployeeEntry | undefined = (() => {
+    if (!activeEmployees.length || !cleanEmail) return undefined;
+    const byEmail = activeEmployees.find(
+      (e) => normalizeEmail(e.email || '') === cleanEmail
+    );
+    if (byEmail) return byEmail;
+
+    const { firstName, lastName } = parseNameTokensFromEmail(cleanEmail);
+    if (firstName && lastName) {
+      const byTokens = activeEmployees.find((e) => {
+        const words = normalizeTextToken(e.nombreCompleto).split(' ').filter(Boolean);
+        return words.includes(firstName) && words.includes(lastName);
+      });
+      if (byTokens) return byTokens;
     }
-    if (cleanEmail) {
-      const byEmail = odooCatalogs.employees.find(
-        (e) => normalizeEmail(e.email || '') === cleanEmail
+
+    const displayNorm = normalizeTextToken(permissions.displayName || '');
+    if (displayNorm && !String(permissions.displayName || '').includes('@')) {
+      const exactDisplay = activeEmployees.find(
+        (e) => normalizeTextToken(e.nombreCompleto) === displayNorm
       );
-      if (byEmail) return byEmail;
-      const { firstName, lastName } = parseNameTokensFromEmail(cleanEmail);
-      if (firstName && lastName) {
-        return odooCatalogs.employees.find((e) => {
-          const words = normalizeTextToken(e.nombreCompleto).split(' ').filter(Boolean);
-          return words.includes(firstName) && words.includes(lastName);
-        });
-      }
+      if (exactDisplay) return exactDisplay;
     }
     return undefined;
   })();
 
-  const enrichMatched = (c: ViaticoConsultor | null): ViaticoConsultor | null => {
-    if (!c) return null;
-    const resolvedEmpName =
-      c.odooEmployeeName ||
-      permissions.odooEmployeeName ||
-      permRec?.odooEmployeeName ||
-      linkedOdooEmp?.nombreCompleto;
-    const resolvedCC =
-      c.centroCosto ||
-      permissions.centroCosto ||
-      permRec?.centroCosto ||
-      linkedOdooEmp?.centroCosto;
-    const resolvedAnalytic =
-      c.odooAnalyticDistribution ||
-      permissions.odooAnalyticDistribution ||
-      permRec?.odooAnalyticDistribution ||
-      linkedOdooEmp?.analyticDistribution;
+  const findLegacyConsultorForEmployee = (
+    empEntry?: OdooEmployeeEntry,
+    nameUpper?: string
+  ): ViaticoConsultor | undefined => {
+    const cleanUpper = (empEntry?.nombreCompleto || nameUpper || '').trim().toUpperCase();
+    const empEmail = normalizeEmail(empEntry?.email || '');
+    return consultores.find(
+      (c) =>
+        (cleanUpper &&
+          ((c.odooEmployeeName || '').trim().toUpperCase() === cleanUpper ||
+            normalizeTextToken(c.nombreCompleto) === normalizeTextToken(cleanUpper))) ||
+        (empEmail && normalizeEmail(c.email) === empEmail)
+    );
+  };
+
+  const buildConsultorFromOdooEntry = (
+    empEntry: OdooEmployeeEntry
+  ): ViaticoConsultor => {
+    const legacy = findLegacyConsultorForEmployee(empEntry);
+    const derivedEmpresa =
+      viaticosScope === 'selected' &&
+      viaticosAllowedCompanies[0] &&
+      (!empEntry.empresa || !permissions.isCompanyAllowed(empEntry.empresa, 'viaticos'))
+        ? viaticosAllowedCompanies[0]
+        : empEntry.empresa || legacy?.empresa || 'Premex Corp';
+
     return {
-      ...c,
-      odooEmployeeName: resolvedEmpName,
-      centroCosto: resolvedCC,
-      odooAnalyticDistribution: resolvedAnalytic,
-      permissionId: c.permissionId || permRec?.id,
+      id: empEntry.id.startsWith('cons-') ? empEntry.id : `cons-odoo-${empEntry.id}`,
+      nombreCompleto: empEntry.nombreCompleto,
+      email:
+        normalizeEmail(empEntry.email || '') ||
+        normalizeEmail(legacy?.email || '') ||
+        '',
+      empresa: derivedEmpresa,
+      cargo: legacy?.cargo || 'Consultor / Liquidador',
+      centroCosto: empEntry.centroCosto || legacy?.centroCosto || '',
+      odooEmployeeName: empEntry.nombreCompleto,
+      odooAnalyticDistribution:
+        empEntry.analyticDistribution || legacy?.odooAnalyticDistribution || '',
+      permissionId: empEntry.permissionDocId || legacy?.permissionId,
+      monedaBase: legacy?.monedaBase || 'Quetzales',
+      activo: empEntry.activo !== false,
     };
   };
 
   const buildConsultorFromAssignedName = (empUpper: string): ViaticoConsultor | null => {
     const cleanUpper = String(empUpper || '').trim().toUpperCase();
     if (!cleanUpper) return null;
-    const empEntry = odooCatalogs?.employees?.find(
-      (e) => e.nombreCompleto.trim().toUpperCase() === cleanUpper
-    );
-    const existingConsultor = consultores.find(
-      (c) =>
-        (c.odooEmployeeName || '').trim().toUpperCase() === cleanUpper ||
-        normalizeTextToken(c.nombreCompleto) === normalizeTextToken(cleanUpper) ||
-        (empEntry?.email && normalizeEmail(c.email) === normalizeEmail(empEntry.email))
-    );
+    const empEntry =
+      activeEmployees.find(
+        (e) => e.nombreCompleto.trim().toUpperCase() === cleanUpper
+      ) ||
+      activeEmployees.find(
+        (e) => normalizeTextToken(e.nombreCompleto) === normalizeTextToken(cleanUpper)
+      );
 
-    if (existingConsultor) {
-      return {
-        ...existingConsultor,
-        odooEmployeeName:
-          empEntry?.nombreCompleto || existingConsultor.odooEmployeeName || cleanUpper,
-        centroCosto: existingConsultor.centroCosto || empEntry?.centroCosto || '',
-        odooAnalyticDistribution:
-          existingConsultor.odooAnalyticDistribution ||
-          empEntry?.analyticDistribution ||
-          '',
-        permissionId: existingConsultor.permissionId || empEntry?.permissionDocId || permRec?.id,
-      };
+    if (empEntry) {
+      return buildConsultorFromOdooEntry(empEntry);
     }
 
+    const legacy = findLegacyConsultorForEmployee(undefined, cleanUpper);
     const derivedEmpresa =
       viaticosScope === 'selected' && viaticosAllowedCompanies[0]
         ? viaticosAllowedCompanies[0]
-        : empEntry?.empresa || 'Premex Corp';
+        : legacy?.empresa || 'Premex Corp';
 
     return {
-      id: empEntry?.id
-        ? `cons-odoo-${empEntry.id}`
-        : `cons-odoo-${normalizeTextToken(cleanUpper).replace(/\s+/g, '-')}`,
-      nombreCompleto: empEntry?.nombreCompleto || cleanUpper,
-      email: (empEntry?.email && normalizeEmail(empEntry.email)) || cleanEmail,
+      id: `cons-odoo-${normalizeTextToken(cleanUpper).replace(/\s+/g, '-')}`,
+      nombreCompleto: cleanUpper,
+      email: normalizeEmail(legacy?.email || '') || '',
       empresa: derivedEmpresa,
-      cargo: 'Consultor / Liquidador',
-      centroCosto:
-        empEntry?.centroCosto ||
-        permissions.centroCosto ||
-        permRec?.centroCosto ||
-        '',
-      odooEmployeeName: empEntry?.nombreCompleto || cleanUpper,
-      odooAnalyticDistribution:
-        empEntry?.analyticDistribution ||
-        permissions.odooAnalyticDistribution ||
-        permRec?.odooAnalyticDistribution ||
-        '',
-      permissionId: empEntry?.permissionDocId || permRec?.id,
-      monedaBase: 'Quetzales',
+      cargo: legacy?.cargo || 'Consultor / Liquidador',
+      centroCosto: legacy?.centroCosto || '',
+      odooEmployeeName: cleanUpper,
+      odooAnalyticDistribution: legacy?.odooAnalyticDistribution || '',
+      permissionId: legacy?.permissionId || permRec?.id,
+      monedaBase: legacy?.monedaBase || 'Quetzales',
       activo: true,
     };
   };
@@ -359,19 +351,24 @@ export const resolveViaticosConsultantScope = (
     return out;
   };
 
+  // All active employees strictly from BD Empleados catalog
+  const odooEmployeeConsultores = dedupeConsultores(
+    activeEmployees
+      .filter((e) => {
+        if (permissions.isAdmin || viaticosScope === 'all') return true;
+        return !e.empresa || permissions.isCompanyAllowed(e.empresa, 'viaticos');
+      })
+      .map(buildConsultorFromOdooEntry)
+  );
+
+  // Explicit employee assignments configured in Ajustes > Permisos (no suggested principal)
   const rawAssigned =
     permissions.assignedEmployees && permissions.assignedEmployees.length > 0
       ? permissions.assignedEmployees
       : permRec?.assignedEmployees && permRec.assignedEmployees.length > 0
       ? permRec.assignedEmployees
       : [];
-  const primaryOdooName = (
-    permissions.odooEmployeeName ||
-    permRec?.odooEmployeeName ||
-    ''
-  )
-    .trim()
-    .toUpperCase();
+
   const combinedAssignedNames = Array.from(
     new Set(
       rawAssigned
@@ -379,35 +376,35 @@ export const resolveViaticosConsultantScope = (
         .filter(Boolean)
     )
   );
+
   const assignedConsultores = dedupeConsultores(
     combinedAssignedNames
       .map(buildConsultorFromAssignedName)
       .filter((c): c is ViaticoConsultor => Boolean(c))
   );
 
-  const matched = enrichMatched(matchConsultorFromEmail(permissions.email, consultores));
+  const matchIdentityInPool = (pool: ViaticoConsultor[]): ViaticoConsultor | null => {
+    if (pool.length === 0) return null;
+    if (linkedOdooEmpByIdentity) {
+      const empUpper = linkedOdooEmpByIdentity.nombreCompleto.trim().toUpperCase();
+      const byLinked = pool.find(
+        (c) =>
+          (c.odooEmployeeName || c.nombreCompleto || '').trim().toUpperCase() === empUpper ||
+          c.id === `cons-odoo-${linkedOdooEmpByIdentity.id}`
+      );
+      if (byLinked) return byLinked;
+    }
+    return matchConsultorFromEmail(permissions.email, pool);
+  };
 
-  // Strictly enforce explicit assignedEmployees from Permisos for the Nombre selector across all roles
+  // 1) When explicit assignedEmployees exist in Permisos, restrict Nombre selector strictly to them
   if (assignedConsultores.length > 0) {
     const primaryMatched =
-      (matched &&
-        assignedConsultores.find(
-          (c) =>
-            c.id === matched.id ||
-            (c.odooEmployeeName || '').trim().toUpperCase() ===
-              (matched.odooEmployeeName || '').trim().toUpperCase()
-        )) ||
-      (primaryOdooName &&
-        assignedConsultores.find(
-          (c) =>
-            (c.odooEmployeeName || c.nombreCompleto || '').trim().toUpperCase() ===
-            primaryOdooName
-        )) ||
-      assignedConsultores[0];
+      matchIdentityInPool(assignedConsultores) || assignedConsultores[0];
     return {
       matchedConsultor: primaryMatched,
       availableConsultores: assignedConsultores,
-      isLockedToOwnConsultor: assignedConsultores.length <= 1,
+      isLockedToOwnConsultor: !permissions.isAdmin && assignedConsultores.length <= 1,
       detectedFromEmailLabel:
         assignedConsultores.length > 1
           ? `${assignedConsultores.length} empleados asignados (${permissions.email || 'permisos'})`
@@ -415,30 +412,20 @@ export const resolveViaticosConsultantScope = (
     };
   }
 
-  const odooEmployeeConsultores = (odooCatalogs?.employees || [])
-    .filter((e) => {
-      if (e.activo === false) return false;
-      if (permissions.isAdmin || viaticosScope === 'all') return true;
-      return !e.empresa || permissions.isCompanyAllowed(e.empresa, 'viaticos');
-    })
-    .map((e) => buildConsultorFromAssignedName(e.nombreCompleto))
-    .filter((c): c is ViaticoConsultor => Boolean(c));
-
+  // 2) Admin without explicit assignedEmployees restriction -> full Empleados catalog, defaulting to own identity if present
   if (permissions.isAdmin) {
-    const allAdminConsultores = dedupeConsultores([
-      ...consultores,
-      ...odooEmployeeConsultores,
-    ]);
-    const adminMatched =
-      enrichMatched(matchConsultorFromEmail(permissions.email, allAdminConsultores)) ||
-      null;
+    const allAdminConsultores =
+      odooEmployeeConsultores.length > 0
+        ? odooEmployeeConsultores
+        : dedupeConsultores(consultores);
+    const adminMatched = matchIdentityInPool(allAdminConsultores);
     return {
       matchedConsultor: adminMatched,
       availableConsultores: allAdminConsultores,
       isLockedToOwnConsultor: false,
       detectedFromEmailLabel: adminMatched
-        ? `${adminMatched.odooEmployeeName || adminMatched.nombreCompleto} (Administrador · acceso total)`
-        : null,
+        ? `${adminMatched.odooEmployeeName || adminMatched.nombreCompleto} (Administrador · catálogo Empleados)`
+        : 'Administrador · catálogo Empleados',
     };
   }
 
@@ -449,50 +436,49 @@ export const resolveViaticosConsultantScope = (
     permissions.userType === 'auditor' ||
     permissions.canAccessViaticosPanel('contabilidad');
 
-  // Operador (Liquidador) without assignedEmployees: scoped to matched profile or auto-built profile
+  // 3) Operador (Liquidador) without assignedEmployees -> own identity from Empleados catalog (or auto-profile)
   if (permissions.role === 'operador' && permissions.email && !isBroadReviewerProfile) {
-    if (matched) {
+    const ownFromCatalog = matchIdentityInPool(odooEmployeeConsultores);
+    if (ownFromCatalog) {
       return {
-        matchedConsultor: matched,
-        availableConsultores: [matched],
+        matchedConsultor: ownFromCatalog,
+        availableConsultores: [ownFromCatalog],
         isLockedToOwnConsultor: true,
-        detectedFromEmailLabel: `${matched.odooEmployeeName || matched.nombreCompleto} (vinculado a ${permissions.email})`,
+        detectedFromEmailLabel: `${ownFromCatalog.odooEmployeeName || ownFromCatalog.nombreCompleto} (vinculado a ${permissions.email})`,
       };
     }
 
-    // Auto-build virtual consultant entry from Odoo Employee DB / Permisos / correo
-    const derivedName =
-      permissions.odooEmployeeName ||
-      permRec?.odooEmployeeName ||
-      linkedOdooEmp?.nombreCompleto ||
-      (permissions.displayName && !permissions.displayName.includes('@')
+    const legacyMatched = matchConsultorFromEmail(permissions.email, consultores);
+    if (legacyMatched) {
+      return {
+        matchedConsultor: legacyMatched,
+        availableConsultores: [legacyMatched],
+        isLockedToOwnConsultor: true,
+        detectedFromEmailLabel: `${legacyMatched.odooEmployeeName || legacyMatched.nombreCompleto} (vinculado a ${permissions.email})`,
+      };
+    }
+
+    const derivedName = (
+      permissions.displayName && !permissions.displayName.includes('@')
         ? permissions.displayName
-        : formatConsultorNameFromEmail(permissions.email));
+        : formatConsultorNameFromEmail(permissions.email)
+    )
+      .trim()
+      .toUpperCase();
     const derivedEmpresa =
       viaticosScope === 'selected' && viaticosAllowedCompanies[0]
         ? viaticosAllowedCompanies[0]
-        : linkedOdooEmp?.empresa || 'Premex Corp';
+        : 'Premex Corp';
     const virtualConsultor: ViaticoConsultor = {
       id: `cons-auto-${normalizeTextToken(permissions.email).replace(/\s+/g, '-')}`,
       nombreCompleto: derivedName,
       email: cleanEmail,
       empresa: derivedEmpresa,
       cargo: 'Consultor / Liquidador',
-      centroCosto:
-        permissions.centroCosto ||
-        permRec?.centroCosto ||
-        linkedOdooEmp?.centroCosto ||
-        '',
-      odooEmployeeName:
-        permissions.odooEmployeeName ||
-        permRec?.odooEmployeeName ||
-        linkedOdooEmp?.nombreCompleto ||
-        derivedName.toUpperCase(),
+      centroCosto: permissions.centroCosto || permRec?.centroCosto || '',
+      odooEmployeeName: derivedName,
       odooAnalyticDistribution:
-        permissions.odooAnalyticDistribution ||
-        permRec?.odooAnalyticDistribution ||
-        linkedOdooEmp?.analyticDistribution ||
-        '',
+        permissions.odooAnalyticDistribution || permRec?.odooAnalyticDistribution || '',
       permissionId: permRec?.id,
       monedaBase: 'Quetzales',
       activo: true,
@@ -501,21 +487,25 @@ export const resolveViaticosConsultantScope = (
       matchedConsultor: virtualConsultor,
       availableConsultores: [virtualConsultor],
       isLockedToOwnConsultor: true,
-      detectedFromEmailLabel: `${virtualConsultor.odooEmployeeName || virtualConsultor.nombreCompleto} (detectado desde ${permissions.email})`,
+      detectedFromEmailLabel: `${virtualConsultor.nombreCompleto} (detectado desde ${permissions.email})`,
     };
   }
 
-  // Contabilidad / Autorizador / Auditor / Solo Consulta without explicit assignedEmployees
-  const broadAvailable = dedupeConsultores([
-    ...(viaticosScope === 'selected' ? companyAllowedConsultores : consultores),
-    ...odooEmployeeConsultores,
-  ]);
+  // 4) Contabilidad / Autorizador / Auditor / Solo Consulta without explicit assignedEmployees
+  const companyAllowedLegacy = consultores.filter(
+    (c) => viaticosScope === 'all' || permissions.isCompanyAllowed(c.empresa, 'viaticos')
+  );
+  const broadAvailable =
+    odooEmployeeConsultores.length > 0
+      ? odooEmployeeConsultores
+      : dedupeConsultores(companyAllowedLegacy);
+  const matchedBroad = matchIdentityInPool(broadAvailable);
   return {
-    matchedConsultor: matched || null,
+    matchedConsultor: matchedBroad,
     availableConsultores: broadAvailable,
     isLockedToOwnConsultor: false,
-    detectedFromEmailLabel: matched
-      ? matched.odooEmployeeName || matched.nombreCompleto
+    detectedFromEmailLabel: matchedBroad
+      ? matchedBroad.odooEmployeeName || matchedBroad.nombreCompleto
       : null,
   };
 };

@@ -168,8 +168,14 @@ const sanitizeTransaction = (raw: ClaraTransaction, idx = 0): ClaraTransaction =
   cuentaContable: raw.cuentaContable ? String(raw.cuentaContable).slice(0, 60) : '',
   indicadorImpuesto: raw.indicadorImpuesto ? String(raw.indicadorImpuesto).slice(0, 60) : '',
   sapSociedad: raw.sapSociedad ? String(raw.sapSociedad).slice(0, 30) : undefined,
+  sapFondo: raw.sapFondo ? String(raw.sapFondo).slice(0, 30) : undefined,
+  sapOperacionContable: raw.sapOperacionContable
+    ? String(raw.sapOperacionContable).slice(0, 60)
+    : undefined,
   sapClaseDoc: raw.sapClaseDoc ? String(raw.sapClaseDoc).slice(0, 12) : undefined,
+  sapFechaContable: raw.sapFechaContable ? String(raw.sapFechaContable).slice(0, 20) : undefined,
   sapCentroCosto: raw.sapCentroCosto ? String(raw.sapCentroCosto).slice(0, 80) : undefined,
+  sapClaseFactura: raw.sapClaseFactura ? String(raw.sapClaseFactura).slice(0, 60) : undefined,
   sapDocContable: raw.sapDocContable ? String(raw.sapDocContable).slice(0, 80) : undefined,
   sapDespachoEstado:
     raw.sapDespachoEstado && VALID_SAP_DISPATCH_STATUSES.has(raw.sapDespachoEstado)
@@ -276,6 +282,10 @@ const sanitizeCostCenterRule = (
     : '',
   diarioOdoo: raw.diarioOdoo ? String(raw.diarioOdoo).trim().slice(0, 100) : '',
   sociedadSap: raw.sociedadSap ? String(raw.sociedadSap).trim().slice(0, 40) : '',
+  fondoDefault: raw.fondoDefault ? String(raw.fondoDefault).trim().slice(0, 30) : '',
+  operacionContableDefault: raw.operacionContableDefault
+    ? String(raw.operacionContableDefault).trim().slice(0, 60)
+    : '',
   activa: raw.activa !== false,
 });
 
@@ -304,8 +314,14 @@ const sanitizeConnectorConfig = (
     raw?.executionMode === 'agente_local' || raw?.executionMode === 'sap_bot'
       ? raw.executionMode
       : 'hibrido_web',
-  sapSociedadDefault: String(raw?.sapSociedadDefault || '1000').slice(0, 20),
+  sapSociedadDefault: String(raw?.sapSociedadDefault || 'CO10').slice(0, 20),
+  sapFondoDefault: String(raw?.sapFondoDefault || 'INTR').slice(0, 20),
+  sapOperacionContableDefault: String(raw?.sapOperacionContableDefault || 'GASTOS TC').slice(0, 60),
   sapClaseDocDefault: String(raw?.sapClaseDocDefault || 'KR').slice(0, 12),
+  sapFechaContableDefault: raw?.sapFechaContableDefault
+    ? String(raw.sapFechaContableDefault).slice(0, 20)
+    : '',
+  sapClaseFacturaDefault: String(raw?.sapClaseFacturaDefault || 'Documento Soporte').slice(0, 60),
   lastServerProbeIso: raw?.lastServerProbeIso ? String(raw.lastServerProbeIso).slice(0, 60) : '',
   lastServerProbeSummary: raw?.lastServerProbeSummary
     ? String(raw.lastServerProbeSummary).slice(0, 260)

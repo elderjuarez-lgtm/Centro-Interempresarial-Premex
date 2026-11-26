@@ -1,3 +1,4 @@
+import { PDFDocument } from 'pdf-lib';
 import { ViaticoCategory, ViaticoCurrency } from '../types';
 import {
   normalizeExtractedCategory,
@@ -25,6 +26,11 @@ export interface ExtractedInvoiceData {
   indicadorImpuestoSugerido?: string;
   codigoGastoSugerido?: string;
   modelUsed?: string;
+  pageStart?: number;
+  pageEnd?: number;
+  extractedPdfDataUrl?: string;
+  extractedPdfFileName?: string;
+  extractedPdfSize?: number;
 }
 
 const IMAGE_EXT_REGEX = /\.(jpe?g|png|webp|heic|heif|gif|bmp|avif)$/i;
@@ -505,11 +511,23 @@ export async function extractInvoiceViaServer(params: {
   }
 
   const raw = payload?.extracted || {};
+  return normalizeSingleExtractedInvoice(
+    raw,
+    params.baseCurrency,
+    typeof payload?.modelUsed === 'string' ? payload.modelUsed : undefined
+  );
+}
+
+function normalizeSingleExtractedInvoice(
+  raw: Record<string, any>,
+  baseCurrency: ViaticoCurrency,
+  modelUsed?: string
+): ExtractedInvoiceData {
   const moneda = normalizeExtractedCurrency(raw.moneda);
   const valorFactura = roundMoney(Math.max(0, parseSafeNumber(raw.valorFactura)));
   const tipoCambioRaw = parseSafeNumber(raw.tipoCambioSugerido);
   const tipoCambioSugerido =
-    moneda === params.baseCurrency
+    moneda === baseCurrency
       ? 1
       : tipoCambioRaw > 0
       ? roundMoney(tipoCambioRaw)
@@ -526,6 +544,17 @@ export async function extractInvoiceViaServer(params: {
   const confRaw = String(raw.confianza || '').toLowerCase();
   const confianza: 'alta' | 'media' | 'baja' =
     confRaw === 'alta' || confRaw === 'baja' ? confRaw : 'media';
+
+  const rawPageStart = Number(raw.pageStart);
+  const rawPageEnd = Number(raw.pageEnd);
+  const pageStart =
+    Number.isFinite(rawPageStart) && rawPageStart >= 1
+      ? Math.floor(rawPageStart)
+      : undefined;
+  const pageEnd =
+    Number.isFinite(rawPageEnd) && rawPageEnd >= 1
+      ? Math.max(pageStart || 1, Math.floor(rawPageEnd))
+      : pageStart;
 
   return {
     fechaDoc: String(raw.fechaDoc || '').trim(),
@@ -552,6 +581,314 @@ export async function extractInvoiceViaServer(params: {
     codigoGastoSugerido: raw.codigoGastoSugerido
       ? String(raw.codigoGastoSugerido).trim()
       : undefined,
-    modelUsed: typeof payload?.modelUsed === 'string' ? payload.modelUsed : undefined,
+    modelUsed,
+    ...(pageStart ? { pageStart, pageEnd } : {}),
   };
+}
+
+function dataUrlToUint8Array(dataUrl: string): Uint8Array {
+  const pureBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+  const binary = atob(pureBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function uint8ArrayToPdfDataUrl(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return `data:application/pdf;base64,${btoa(binary)}`;
+}
+
+async function postMultiInvoicePdfChunk(params: {
+  dataUrl: string;
+  fileName: string;
+  baseCurrency: ViaticoCurrency;
+}): Promise<ExtractedInvoiceData[]> {
+  const requestBody = JSON.stringify({
+    base64Data: params.dataUrl,
+    mimeType: 'application/pdf',
+    fileName: params.fileName,
+    baseCurrency: params.baseCurrency,
+    multiInvoice: true,
+  });
+
+  const maxClientAttempts = 2;
+  let response: Response | null = null;
+  let payload: any = {};
+
+  for (let attempt = 0; attempt < maxClientAttempts; attempt++) {
+    if (attempt > 0) {
+      await waitMs(1300);
+    }
+
+    const controller =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), 59_000)
+      : null;
+
+    try {
+      response = await fetch('/api/viaticos/extract-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: requestBody,
+        signal: controller?.signal,
+      });
+    } catch (err: any) {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (attempt < maxClientAttempts - 1) continue;
+      if (err?.name === 'AbortError') {
+        throw new Error(
+          'La lectura masiva del PDF tardó más de lo esperado. Intenta dividir el PDF en menos páginas.'
+        );
+      }
+      throw new Error(
+        'No se pudo conectar con el servidor de lectura IA para procesar el PDF masivo.'
+      );
+    }
+
+    if (timeoutId) clearTimeout(timeoutId);
+    payload = await response.json().catch(() => ({}));
+
+    if (response.ok) break;
+
+    const isTransient =
+      response.status === 502 ||
+      response.status === 503 ||
+      response.status === 504;
+    if (isTransient && attempt < maxClientAttempts - 1) continue;
+
+    if (response.status === 413) {
+      throw new Error(
+        'Un segmento del PDF supera el límite permitido por el servidor (HTTP 413).'
+      );
+    }
+    throw new Error(
+      payload?.error ||
+        `No se pudo procesar el PDF masivo (HTTP ${response.status}).`
+    );
+  }
+
+  const modelUsed = typeof payload?.modelUsed === 'string' ? payload.modelUsed : undefined;
+  const rawList: Record<string, any>[] = Array.isArray(payload?.invoices)
+    ? payload.invoices
+    : payload?.extracted
+    ? [payload.extracted]
+    : [];
+
+  return rawList.map((raw) =>
+    normalizeSingleExtractedInvoice(raw, params.baseCurrency, modelUsed)
+  );
+}
+
+/**
+ * Splits a multi-page PDF into size/page-safe chunks using pdf-lib and extracts
+ * every individual invoice detected across all pages.
+ */
+export async function extractMultipleInvoicesFromPdfViaServer(params: {
+  dataUrl: string;
+  fileName: string;
+  baseCurrency: ViaticoCurrency;
+  onProgress?: (progress: {
+    currentChunk: number;
+    totalChunks: number;
+    totalPages: number;
+    extractedSoFar: number;
+  }) => void;
+}): Promise<{ invoices: ExtractedInvoiceData[]; totalPages: number }> {
+  const MAX_CHUNK_CHARS = 3_500_000;
+  const DEFAULT_PAGES_PER_CHUNK = 3;
+
+  let chunks: { dataUrl: string; label: string; fromPage: number; toPage: number }[] = [];
+  let totalPages = 1;
+  let srcDoc: PDFDocument | null = null;
+
+  try {
+    const pdfBytes = dataUrlToUint8Array(params.dataUrl);
+    srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    totalPages = Math.max(1, srcDoc.getPageCount());
+
+    if (totalPages <= DEFAULT_PAGES_PER_CHUNK && params.dataUrl.length <= MAX_CHUNK_CHARS) {
+      chunks = [
+        {
+          dataUrl: params.dataUrl,
+          label: params.fileName,
+          fromPage: 1,
+          toPage: totalPages,
+        },
+      ];
+    } else {
+      let pageCursor = 0;
+      while (pageCursor < totalPages) {
+        let span = Math.min(DEFAULT_PAGES_PER_CHUNK, totalPages - pageCursor);
+        let builtDataUrl = '';
+        while (span >= 1) {
+          const chunkDoc = await PDFDocument.create();
+          const indices = Array.from({ length: span }, (_, k) => pageCursor + k);
+          const copiedPages = await chunkDoc.copyPages(srcDoc, indices);
+          copiedPages.forEach((p) => chunkDoc.addPage(p));
+          const bytes = await chunkDoc.save();
+          const candidateUrl = uint8ArrayToPdfDataUrl(bytes);
+          if (candidateUrl.length <= MAX_CHUNK_CHARS || span === 1) {
+            builtDataUrl = candidateUrl;
+            break;
+          }
+          span -= 1;
+        }
+        const fromPage = pageCursor + 1;
+        const toPage = pageCursor + span;
+        chunks.push({
+          dataUrl: builtDataUrl,
+          label: `${params.fileName} (págs. ${fromPage}-${toPage})`,
+          fromPage,
+          toPage,
+        });
+        pageCursor += span;
+      }
+    }
+  } catch {
+    srcDoc = null;
+    if (params.dataUrl.length > MAX_SAFE_PDF_DATAURL_CHARS) {
+      throw new Error(
+        'No se pudo dividir el PDF pesado automáticamente. Comprime el PDF a menos de 3 MB o divídelo en archivos más pequeños.'
+      );
+    }
+    chunks = [
+      {
+        dataUrl: params.dataUrl,
+        label: params.fileName,
+        fromPage: 1,
+        toPage: totalPages,
+      },
+    ];
+  }
+
+  const basePdfName = params.fileName.replace(/\.pdf$/i, '').trim() || 'comprobante';
+  const splitPdfCache = new Map<
+    string,
+    { dataUrl: string; fileName: string; size: number }
+  >();
+
+  const buildSplitPdfForRange = async (
+    globalStart: number,
+    globalEnd: number
+  ): Promise<{ dataUrl: string; fileName: string; size: number } | null> => {
+    if (!srcDoc) return null;
+    const safeStart = Math.max(1, Math.min(totalPages, globalStart));
+    const safeEnd = Math.max(safeStart, Math.min(totalPages, globalEnd));
+    const cacheKey = `${safeStart}-${safeEnd}`;
+    const existing = splitPdfCache.get(cacheKey);
+    if (existing) return existing;
+
+    const pageTag =
+      safeStart === safeEnd ? `p${safeStart}` : `p${safeStart}-${safeEnd}`;
+    const splitName = `${basePdfName}_${pageTag}.pdf`;
+
+    if (
+      safeStart === 1 &&
+      safeEnd === totalPages &&
+      params.dataUrl.length <= MAX_SAFE_PDF_DATAURL_CHARS
+    ) {
+      const approxBytes = Math.round((params.dataUrl.length * 3) / 4);
+      const res = { dataUrl: params.dataUrl, fileName: splitName, size: approxBytes };
+      splitPdfCache.set(cacheKey, res);
+      return res;
+    }
+
+    try {
+      const subDoc = await PDFDocument.create();
+      const indices = Array.from(
+        { length: safeEnd - safeStart + 1 },
+        (_, offset) => safeStart - 1 + offset
+      );
+      const copied = await subDoc.copyPages(srcDoc, indices);
+      copied.forEach((p) => subDoc.addPage(p));
+      const subBytes = await subDoc.save();
+      const subDataUrl = uint8ArrayToPdfDataUrl(subBytes);
+      const res = {
+        dataUrl: subDataUrl,
+        fileName: splitName,
+        size: subBytes.byteLength,
+      };
+      splitPdfCache.set(cacheKey, res);
+      return res;
+    } catch {
+      return null;
+    }
+  };
+
+  const allInvoices: ExtractedInvoiceData[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    params.onProgress?.({
+      currentChunk: i + 1,
+      totalChunks: chunks.length,
+      totalPages,
+      extractedSoFar: allInvoices.length,
+    });
+    const extractedChunk = await postMultiInvoicePdfChunk({
+      dataUrl: chunk.dataUrl,
+      fileName: chunk.label,
+      baseCurrency: params.baseCurrency,
+    });
+
+    const chunkSpan = Math.max(1, chunk.toPage - chunk.fromPage + 1);
+    for (let k = 0; k < extractedChunk.length; k++) {
+      const inv = extractedChunk[k];
+      let globalStart = chunk.fromPage;
+      let globalEnd = chunk.toPage;
+
+      if (inv.pageStart && inv.pageStart >= 1) {
+        const clampedLocalStart = Math.min(Math.max(1, inv.pageStart), chunkSpan);
+        const clampedLocalEnd = Math.min(
+          Math.max(clampedLocalStart, inv.pageEnd || clampedLocalStart),
+          chunkSpan
+        );
+        globalStart = chunk.fromPage + clampedLocalStart - 1;
+        globalEnd = chunk.fromPage + clampedLocalEnd - 1;
+      } else if (extractedChunk.length === chunkSpan) {
+        globalStart = chunk.fromPage + k;
+        globalEnd = globalStart;
+      } else {
+        const noteMatch = inv.notasExtraccion.match(/p[aá]g(?:ina)?\.?\s*(\d+)/i);
+        if (noteMatch) {
+          const parsedPage = Number(noteMatch[1]);
+          if (Number.isFinite(parsedPage) && parsedPage >= 1 && parsedPage <= chunkSpan) {
+            globalStart = chunk.fromPage + parsedPage - 1;
+            globalEnd = globalStart;
+          }
+        }
+      }
+
+      const splitPdf = await buildSplitPdfForRange(globalStart, globalEnd);
+      allInvoices.push({
+        ...inv,
+        pageStart: globalStart,
+        pageEnd: globalEnd,
+        ...(splitPdf
+          ? {
+              extractedPdfDataUrl: splitPdf.dataUrl,
+              extractedPdfFileName: splitPdf.fileName,
+              extractedPdfSize: splitPdf.size,
+            }
+          : {}),
+      });
+    }
+
+    params.onProgress?.({
+      currentChunk: i + 1,
+      totalChunks: chunks.length,
+      totalPages,
+      extractedSoFar: allInvoices.length,
+    });
+  }
+
+  return { invoices: allInvoices, totalPages };
 }

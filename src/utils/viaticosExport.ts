@@ -831,12 +831,19 @@ export async function generateViaticosReceiptsPdfBytes(
     }
   );
 
-  // Append every attached receipt image or PDF page
+  // Append every attached receipt image or PDF page (deduplicated so a bulk/shared document is attached only once)
+  const seenAttachmentIds = new Set<string>();
   for (let idx = 0; idx < liquidation.items.length; idx++) {
     const item = liquidation.items[idx];
     if (!item.attachmentId) continue;
+    if (seenAttachmentIds.has(item.attachmentId)) continue;
     const media = mediaMap[item.attachmentId];
     if (!media || !media.dataUrl) continue;
+    seenAttachmentIds.add(item.attachmentId);
+
+    const matchingItems = liquidation.items
+      .map((it, i) => ({ it, num: i + 1 }))
+      .filter((entry) => entry.it.attachmentId === item.attachmentId);
 
     const mime = (media.mimeType || '').toLowerCase();
 
@@ -863,15 +870,16 @@ export async function generateViaticosReceiptsPdfBytes(
               height: 22,
               color: premexNavy,
             });
+            const pdfBannerText =
+              matchingItems.length > 1
+                ? `Soportes #${matchingItems.map((m) => m.num).join(', #')} (${matchingItems.length} facturas) | ${media.fileName}`
+                : `Soporte #${idx + 1} | ${item.fechaDoc} | ${item.proveedor} | ${item.noDoc} | ${formatViaticoAmount(
+                    item.valorReintegrar,
+                    liquidation.monedaBase,
+                    true
+                  )}`;
             added.drawText(
-              truncateText(
-                `Soporte #${idx + 1} | ${item.fechaDoc} | ${item.proveedor} | ${item.noDoc} | ${formatViaticoAmount(
-                  item.valorReintegrar,
-                  liquidation.monedaBase,
-                  true
-                )}`,
-                92
-              ),
+              truncateText(pdfBannerText, 92),
               {
                 x: 14,
                 y: ph - 15,

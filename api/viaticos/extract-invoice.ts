@@ -22,6 +22,7 @@ export interface ExtractInvoiceRequestBody {
   mimeType?: unknown;
   fileName?: unknown;
   baseCurrency?: unknown;
+  multiInvoice?: unknown;
 }
 
 export interface ExtractInvoiceResult {
@@ -348,6 +349,16 @@ const INVOICE_RESPONSE_SCHEMA = {
       description:
         'Código numérico de cuenta/gasto Odoo de 6 dígitos (ej. 720060, 720013, 720015, 720024, 720027, 720012, 720097, 720107).',
     },
+    pageStart: {
+      type: Type.INTEGER,
+      description:
+        'Número entero base 1 de la primera página del PDF enviado donde aparece esta factura (1 = primera página).',
+    },
+    pageEnd: {
+      type: Type.INTEGER,
+      description:
+        'Número entero base 1 de la última página del PDF enviado donde aparece esta factura (igual a pageStart si es de una sola página).',
+    },
   },
   required: [
     'fechaDoc',
@@ -369,6 +380,32 @@ const INVOICE_RESPONSE_SCHEMA = {
     'indicadorImpuestoSugerido',
     'codigoGastoSugerido',
   ],
+};
+
+function buildMultiInvoiceSystemInstruction(targetBaseCurrency: string): string {
+  return `${buildInvoiceSystemInstruction(targetBaseCurrency)}
+
+MODO CARGA MASIVA MULTI-FACTURA (PDF CON VARIAS FACTURAS):
+- El documento PDF adjunto puede contener MÚLTIPLES facturas, tickets, recibos o comprobantes en sus páginas (una factura por página, varias facturas en una misma página, o una factura larga que ocupe 2 o más páginas).
+- Analiza TODAS las páginas de principio a fin y extrae CADA factura/comprobante distinto como un objeto separado dentro del arreglo JSON "invoices", respetando el orden de aparición.
+- Si una misma factura continúa en la página siguiente (mismo emisor, misma serie/número o continuación de ítems hasta el total final), devuélvela como UN solo elemento consolidado en "invoices".
+- Si hay comprobantes diferentes (distinto proveedor, distinto número de documento o distinto total pagado), crea un elemento independiente en "invoices" por cada uno.
+- En "notasExtraccion" de cada elemento, incluye el número de página aproximado (ej. "Pág. 1 · Factura FEL Guatemala 12% IVA").
+- Si alguna página es solo un anexo sin montos ni factura (ej. portada en blanco), omítela; no omitas ninguna factura o recibo legible.
+- OBLIGATORIO PARA SEPARACIÓN POR PÁGINA: Para CADA factura de "invoices", indica con precisión "pageStart" y "pageEnd" (enteros base 1 dentro del PDF enviado: 1 = primera página del archivo recibido, 2 = segunda página, etc.). Si la factura está solo en la página 2, pon pageStart=2 y pageEnd=2. Si abarca las páginas 2 y 3, pon pageStart=2 y pageEnd=3.`;
+}
+
+const MULTI_INVOICE_RESPONSE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    invoices: {
+      type: Type.ARRAY,
+      description:
+        'Lista ordenada de todas las facturas, tickets o comprobantes individuales detectados dentro del PDF.',
+      items: INVOICE_RESPONSE_SCHEMA,
+    },
+  },
+  required: ['invoices'],
 };
 
 interface ExtractionAttemptSpec {
@@ -402,17 +439,19 @@ async function runInvoiceExtractionWithFailover(params: {
   filePart: { inlineData: { mimeType: string; data: string } };
   promptPart: { text: string };
   systemInstruction: string;
+  multiInvoice?: boolean;
 }): Promise<{ extracted: Record<string, unknown>; modelUsed: string }> {
   const customModel = (process.env.GEMINI_INVOICE_MODEL || '').trim();
   const now = Date.now();
+  const extraTimeoutMs = params.multiInvoice ? 14_000 : 0;
 
   const candidateLadder: ExtractionAttemptSpec[] = [
-    { model: 'gemini-4-hydrogen', useLowThinking: true, useSchema: true, delayBeforeMs: 0, timeoutMs: 16_000 },
-    { model: 'gemini-3.1-flash-lite', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 15_000 },
-    { model: 'gemini-3.6-flash', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 18_000 },
-    { model: 'gemini-3.5-flash', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 18_000 },
-    { model: 'gemini-3.5-flash-lite', useLowThinking: false, useSchema: false, delayBeforeMs: 200, timeoutMs: 16_000 },
-    { model: 'gemini-3.6-flash', useLowThinking: false, useSchema: false, delayBeforeMs: 300, timeoutMs: 18_000 },
+    { model: 'gemini-4-hydrogen', useLowThinking: true, useSchema: true, delayBeforeMs: 0, timeoutMs: 16_000 + extraTimeoutMs },
+    { model: 'gemini-3.1-flash-lite', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 15_000 + extraTimeoutMs },
+    { model: 'gemini-3.6-flash', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 18_000 + extraTimeoutMs },
+    { model: 'gemini-3.5-flash', useLowThinking: false, useSchema: true, delayBeforeMs: 150, timeoutMs: 18_000 + extraTimeoutMs },
+    { model: 'gemini-3.5-flash-lite', useLowThinking: false, useSchema: false, delayBeforeMs: 200, timeoutMs: 16_000 + extraTimeoutMs },
+    { model: 'gemini-3.6-flash', useLowThinking: false, useSchema: false, delayBeforeMs: 300, timeoutMs: 18_000 + extraTimeoutMs },
   ];
 
   const healthyFirst = candidateLadder.filter((a) => (modelCooldownUntil.get(a.model) || 0) <= now);
@@ -421,7 +460,7 @@ async function runInvoiceExtractionWithFailover(params: {
 
   const attempts: ExtractionAttemptSpec[] = customModel
     ? [
-        { model: customModel, useLowThinking: false, useSchema: true, delayBeforeMs: 0, timeoutMs: 18_000 },
+        { model: customModel, useLowThinking: false, useSchema: true, delayBeforeMs: 0, timeoutMs: 18_000 + extraTimeoutMs },
         ...orderedLadder.filter((a) => a.model !== customModel),
       ]
     : orderedLadder;
@@ -450,7 +489,9 @@ async function runInvoiceExtractionWithFailover(params: {
         responseMimeType: 'application/json',
       };
       if (attempt.useSchema) {
-        config.responseSchema = INVOICE_RESPONSE_SCHEMA;
+        config.responseSchema = params.multiInvoice
+          ? MULTI_INVOICE_RESPONSE_SCHEMA
+          : INVOICE_RESPONSE_SCHEMA;
       }
       if (attempt.useLowThinking) {
         config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
@@ -506,7 +547,8 @@ export async function processExtractInvoiceBody(
   body: ExtractInvoiceRequestBody
 ): Promise<ExtractInvoiceResult> {
   try {
-    const { base64Data, mimeType, fileName, baseCurrency } = body ?? {};
+    const { base64Data, mimeType, fileName, baseCurrency, multiInvoice } = body ?? {};
+    const isMultiInvoice = Boolean(multiInvoice);
 
     if (typeof base64Data !== 'string' || !base64Data.trim()) {
       return {
@@ -557,7 +599,9 @@ export async function processExtractInvoiceBody(
         ? baseCurrency.trim()
         : 'Quetzales';
 
-    const systemInstruction = buildInvoiceSystemInstruction(targetBaseCurrency);
+    const systemInstruction = isMultiInvoice
+      ? buildMultiInvoiceSystemInstruction(targetBaseCurrency)
+      : buildInvoiceSystemInstruction(targetBaseCurrency);
 
     const filePart = {
       inlineData: {
@@ -567,9 +611,13 @@ export async function processExtractInvoiceBody(
     };
 
     const promptPart = {
-      text: `Analiza esta factura, recibo o comprobante (${String(
-        fileName || 'documento'
-      )}) e identifica todos los campos solicitados en JSON. Si la foto de celular viene rotada o de lado, léela igualmente en su orientación correcta. Distingue estrictamente entre el EMISOR (proveedor en el encabezado superior) y el RECEPTOR/COMPRADOR (Premex / Premezclas Latinoamericanas / Anitox / CF, que nunca debe ir como proveedor ni NIT). La moneda base de liquidación es "${targetBaseCurrency}".`,
+      text: isMultiInvoice
+        ? `Analiza TODAS las páginas de este PDF (${String(
+            fileName || 'documento.pdf'
+          )}) y extrae en JSON cada factura, recibo o ticket distinto dentro del arreglo "invoices". Distingue estrictamente entre el EMISOR (proveedor) y el RECEPTOR/COMPRADOR (Premex / Premezclas Latinoamericanas / Anitox / CF, nunca usar como proveedor ni NIT). La moneda base de liquidación es "${targetBaseCurrency}".`
+        : `Analiza esta factura, recibo o comprobante (${String(
+            fileName || 'documento'
+          )}) e identifica todos los campos solicitados en JSON. Si la foto de celular viene rotada o de lado, léela igualmente en su orientación correcta. Distingue estrictamente entre el EMISOR (proveedor en el encabezado superior) y el RECEPTOR/COMPRADOR (Premex / Premezclas Latinoamericanas / Anitox / CF, que nunca debe ir como proveedor ni NIT). La moneda base de liquidación es "${targetBaseCurrency}".`,
     };
 
     const { extracted, modelUsed } = await runInvoiceExtractionWithFailover({
@@ -577,7 +625,44 @@ export async function processExtractInvoiceBody(
       filePart,
       promptPart,
       systemInstruction,
+      multiInvoice: isMultiInvoice,
     });
+
+    if (isMultiInvoice) {
+      const rawList = Array.isArray((extracted as any).invoices)
+        ? ((extracted as any).invoices as Record<string, unknown>[])
+        : (extracted as any).proveedor || (extracted as any).valorFactura
+        ? [extracted]
+        : [];
+      const normalizedInvoices = rawList
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => {
+          const rawStart = Number(item.pageStart);
+          const rawEnd = Number(item.pageEnd);
+          const pageStart =
+            Number.isFinite(rawStart) && rawStart >= 1 ? Math.floor(rawStart) : undefined;
+          const pageEnd =
+            Number.isFinite(rawEnd) && rawEnd >= 1
+              ? Math.max(pageStart || 1, Math.floor(rawEnd))
+              : pageStart;
+          return {
+            ...item,
+            fechaDoc: normalizeDateField(item.fechaDoc),
+            ...(pageStart ? { pageStart, pageEnd } : {}),
+          };
+        })
+        .filter(
+          (item: Record<string, unknown>) =>
+            Boolean(String(item.proveedor || '').trim()) ||
+            Number(item.valorFactura || 0) > 0 ||
+            Boolean(String(item.noDoc || '').trim())
+        );
+
+      return {
+        status: 200,
+        body: { invoices: normalizedInvoices, modelUsed },
+      };
+    }
 
     const normalizedExtracted = {
       ...extracted,

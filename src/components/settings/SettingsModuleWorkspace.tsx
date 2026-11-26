@@ -77,7 +77,6 @@ import {
 } from '../../utils/moduleCompanies';
 import {
   findMatchingCostCenterEntry,
-  findMatchingOdooEmployee,
   formatAnalyticDistributionJson,
   mergeOdooCatalogsWithDefaults,
 } from '../../utils/viaticosOdooCatalogs';
@@ -304,7 +303,6 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     useState<FunctionalModuleId>('intercompany');
   const [formActive, setFormActive] = useState(true);
   const [formNotes, setFormNotes] = useState('');
-  const [formOdooEmployeeName, setFormOdooEmployeeName] = useState('');
   const [formAssignedEmployees, setFormAssignedEmployees] = useState<string[]>([]);
   const [employeeAssignSearch, setEmployeeAssignSearch] = useState('');
   const [formCentroCosto, setFormCentroCosto] = useState('');
@@ -512,7 +510,6 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setActiveConfigModule('intercompany');
     setFormActive(true);
     setFormNotes('');
-    setFormOdooEmployeeName('');
     setFormAssignedEmployees([]);
     setEmployeeAssignSearch('');
     setFormCentroCosto('');
@@ -562,37 +559,22 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
     setActiveConfigModule(firstFunctional);
     setFormActive(rec.active);
     setFormNotes(rec.notes || '');
-    const autoEmp =
-      !rec.odooEmployeeName
-        ? findMatchingOdooEmployee({
-            email: rec.email,
-            nombre: rec.displayName,
-            employees: resolvedOdooCatalogs.employees,
-          })
-        : null;
-    setFormOdooEmployeeName(rec.odooEmployeeName || autoEmp?.nombreCompleto || '');
-    const initialAssigned =
-      Array.isArray(rec.assignedEmployees) && rec.assignedEmployees.length > 0
-        ? rec.assignedEmployees.map((n) => String(n || '').trim().toUpperCase()).filter(Boolean)
-        : rec.odooEmployeeName
-        ? [rec.odooEmployeeName.trim().toUpperCase()]
-        : autoEmp?.nombreCompleto
-        ? [autoEmp.nombreCompleto.trim().toUpperCase()]
-        : [];
+    const initialAssigned = Array.isArray(rec.assignedEmployees)
+      ? rec.assignedEmployees.map((n) => String(n || '').trim().toUpperCase()).filter(Boolean)
+      : rec.odooEmployeeName
+      ? [rec.odooEmployeeName.trim().toUpperCase()]
+      : [];
     setFormAssignedEmployees(Array.from(new Set(initialAssigned)));
     setEmployeeAssignSearch('');
-    const initialCC = rec.centroCosto || autoEmp?.centroCosto || '';
+    const initialCC = rec.centroCosto || '';
     setFormCentroCosto(initialCC);
     const matchedCC = findMatchingCostCenterEntry(
       initialCC,
-      rec.odooAnalyticDistribution || autoEmp?.analyticDistribution,
+      rec.odooAnalyticDistribution,
       resolvedOdooCatalogs.costCenters
     );
     setFormOdooAnalyticDistribution(
-      rec.odooAnalyticDistribution ||
-        matchedCC?.analyticDistribution ||
-        autoEmp?.analyticDistribution ||
-        ''
+      rec.odooAnalyticDistribution || matchedCC?.analyticDistribution || ''
     );
     setCompanySearch('');
     setQuickAddCompanyInput('');
@@ -903,10 +885,6 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
           .filter(Boolean)
       )
     );
-    const primaryOdooEmployee =
-      formOdooEmployeeName.trim().toUpperCase() ||
-      cleanedAssignedEmployees[0] ||
-      '';
 
     const nextRecord: UserPermissionRecord = {
       id: emailToPermissionDocId(cleanEmail),
@@ -921,7 +899,7 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
       moduleCompanyAccess: sanitizedAccess,
       active: cleanEmail === SUPER_ADMIN_EMAIL ? true : formActive,
       notes: formNotes.trim() || undefined,
-      odooEmployeeName: primaryOdooEmployee || undefined,
+      odooEmployeeName: undefined,
       assignedEmployees:
         cleanedAssignedEmployees.length > 0 ? cleanedAssignedEmployees : undefined,
       centroCosto: formCentroCosto.trim() || undefined,
@@ -1827,9 +1805,18 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
 
                             <td className="py-3.5 px-4 max-w-[440px]">
                               {rec.role === 'admin' ? (
-                                <div className="text-slate-700 font-medium">
-                                  Todos los módulos y todas las bases de sociedades · Incluye
-                                  Ajustes
+                                <div className="space-y-1">
+                                  <div className="text-slate-700 font-medium">
+                                    Todos los módulos y todas las bases de sociedades · Incluye
+                                    Ajustes
+                                  </div>
+                                  {Array.isArray(rec.assignedEmployees) &&
+                                    rec.assignedEmployees.length > 0 && (
+                                      <div className="text-[10px] font-medium text-[#132B63]">
+                                        Empleados asignados a liquidar ({rec.assignedEmployees.length}):{' '}
+                                        {rec.assignedEmployees.join(', ')}
+                                      </div>
+                                    )}
                                 </div>
                               ) : functionalAssigned.length === 0 ? (
                                 <span className="text-rose-600 font-medium">
@@ -3174,141 +3161,22 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                       })}
                     </div>
 
-                    {/* Linked Odoo Employee & Cost Center Assignment */}
+                    {/* Employee Assignment from Empleados Catalog (No forced principal) */}
                     <div className="pt-3 mt-2 border-t border-[#1E60A8]/15 space-y-2.5">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <div className="text-xs font-bold text-[#132B63]">
-                            Vinculación Odoo (Empleado + Centro de Costo asignado)
-                          </div>
-                          <div className="text-[11px] text-slate-600">
-                            Al ingresar con este correo, sus liquidaciones heredan automáticamente el Empleado Odoo y su Centro de Costo.
-                          </div>
+                      <div>
+                        <div className="text-xs font-bold text-[#132B63]">
+                          Empleados asignados para liquidar (BD Empleados)
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const matched = findMatchingOdooEmployee({
-                              email: formEmail,
-                              nombre: formName,
-                              employees: resolvedOdooCatalogs.employees,
-                            });
-                            if (matched) {
-                              setFormOdooEmployeeName(matched.nombreCompleto);
-                              if (matched.centroCosto) {
-                                setFormCentroCosto(matched.centroCosto);
-                                const ccMatch = findMatchingCostCenterEntry(
-                                  matched.centroCosto,
-                                  matched.analyticDistribution,
-                                  resolvedOdooCatalogs.costCenters
-                                );
-                                setFormOdooAnalyticDistribution(
-                                  ccMatch?.analyticDistribution ||
-                                    matched.analyticDistribution ||
-                                    ''
-                                );
-                              }
-                            }
-                          }}
-                          className="text-[11px] font-semibold text-[#1E60A8] hover:underline cursor-pointer"
-                        >
-                          Auto-vincular desde BD Empleados
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                            Empleado Odoo (`employee_id`)
-                          </label>
-                          <input
-                            type="text"
-                            list="settings-odoo-employees-list"
-                            value={formOdooEmployeeName}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setFormOdooEmployeeName(val);
-                              const matched = resolvedOdooCatalogs.employees.find(
-                                (emp) =>
-                                  emp.nombreCompleto.toUpperCase() ===
-                                  val.trim().toUpperCase()
-                              );
-                              if (matched?.centroCosto && !formCentroCosto) {
-                                setFormCentroCosto(matched.centroCosto);
-                                setFormOdooAnalyticDistribution(
-                                  matched.analyticDistribution || ''
-                                );
-                              }
-                            }}
-                            placeholder="Ej. ELDER YOVANI JUAREZ HERNANDEZ"
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs uppercase focus:outline-hidden focus:border-[#1E60A8]"
-                          />
-                          <datalist id="settings-odoo-employees-list">
-                            {resolvedOdooCatalogs.employees
-                              .filter((e) => e.activo !== false)
-                              .map((emp) => (
-                                <option key={emp.id} value={emp.nombreCompleto} />
-                              ))}
-                          </datalist>
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                            Centro de Costo Asignado
-                          </label>
-                          <select
-                            value={formCentroCosto}
-                            onChange={(e) => {
-                              const nextCC = e.target.value;
-                              setFormCentroCosto(nextCC);
-                              const ccEntry = findMatchingCostCenterEntry(
-                                nextCC,
-                                undefined,
-                                resolvedOdooCatalogs.costCenters
-                              );
-                              if (ccEntry) {
-                                setFormOdooAnalyticDistribution(ccEntry.analyticDistribution);
-                              }
-                            }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs focus:outline-hidden focus:border-[#1E60A8]"
-                          >
-                            <option value="">-- Sin asignar / Heredar BD --</option>
-                            {resolvedOdooCatalogs.costCenters
-                              .filter((cc) => cc.activo !== false)
-                              .map((cc) => (
-                                <option key={cc.id} value={cc.cuentaAnalitica}>
-                                  {cc.cuentaAnalitica} ({cc.analyticDistribution})
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                            C.C. Interno Odoo (`analytic_distribution`)
-                          </label>
-                          <input
-                            type="text"
-                            value={formOdooAnalyticDistribution}
-                            onChange={(e) =>
-                              setFormOdooAnalyticDistribution(e.target.value)
-                            }
-                            placeholder='Ej. {"520": 100.0}'
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono focus:outline-hidden focus:border-[#1E60A8]"
-                          />
+                        <div className="text-[11px] text-slate-600">
+                          Selecciona únicamente los empleados del listado oficial que este usuario podrá elegir en <strong>Nombre / Liquidador</strong> (sin empleado principal sugerido).
                         </div>
                       </div>
 
                       {/* Multi-Employee Assignment Checklist for Liquidaciones */}
-                      <div className="mt-2.5 p-2.5 rounded-xl bg-white border border-slate-200 space-y-2">
+                      <div className="p-2.5 rounded-xl bg-white border border-slate-200 space-y-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <div className="text-[11px] font-bold text-[#132B63]">
-                              Empleados asignados para hacer liquidaciones ({formAssignedEmployees.length})
-                            </div>
-                            <div className="text-[10px] text-slate-500">
-                              Permite a este usuario seleccionar y liquidar viáticos para varios empleados de la base Odoo.
-                            </div>
+                          <div className="text-[11px] font-bold text-[#132B63]">
+                            Asignados ({formAssignedEmployees.length})
                           </div>
                           <div className="flex items-center gap-2">
                             {formAssignedEmployees.length > 0 && (
@@ -3329,12 +3197,12 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                             type="text"
                             value={employeeAssignSearch}
                             onChange={(e) => setEmployeeAssignSearch(e.target.value)}
-                            placeholder="Buscar empleado Odoo por nombre o centro de costo..."
+                            placeholder="Buscar empleado en BD Empleados por nombre o centro de costo..."
                             className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs focus:bg-white focus:outline-hidden focus:border-[#1E60A8]"
                           />
                         </div>
 
-                        <div className="max-h-40 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+                        <div className="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
                           {resolvedOdooCatalogs.employees
                             .filter((emp) => {
                               if (emp.activo === false) return false;
@@ -3379,6 +3247,55 @@ export const SettingsModuleWorkspace: React.FC<SettingsModuleWorkspaceProps> = (
                                 </label>
                               );
                             })}
+                        </div>
+                      </div>
+
+                      {/* Optional Cost Center Override */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            Centro de Costo (Opcional / Hereda del empleado)
+                          </label>
+                          <select
+                            value={formCentroCosto}
+                            onChange={(e) => {
+                              const nextCC = e.target.value;
+                              setFormCentroCosto(nextCC);
+                              const ccEntry = findMatchingCostCenterEntry(
+                                nextCC,
+                                undefined,
+                                resolvedOdooCatalogs.costCenters
+                              );
+                              if (ccEntry) {
+                                setFormOdooAnalyticDistribution(ccEntry.analyticDistribution);
+                              }
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs focus:outline-hidden focus:border-[#1E60A8]"
+                          >
+                            <option value="">-- Heredar de cada empleado --</option>
+                            {resolvedOdooCatalogs.costCenters
+                              .filter((cc) => cc.activo !== false)
+                              .map((cc) => (
+                                <option key={cc.id} value={cc.cuentaAnalitica}>
+                                  {cc.cuentaAnalitica} ({cc.analyticDistribution})
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            C.C. Interno Odoo (`analytic_distribution`)
+                          </label>
+                          <input
+                            type="text"
+                            value={formOdooAnalyticDistribution}
+                            onChange={(e) =>
+                              setFormOdooAnalyticDistribution(e.target.value)
+                            }
+                            placeholder='Opcional: {"520": 100.0}'
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono focus:outline-hidden focus:border-[#1E60A8]"
+                          />
                         </div>
                       </div>
                     </div>

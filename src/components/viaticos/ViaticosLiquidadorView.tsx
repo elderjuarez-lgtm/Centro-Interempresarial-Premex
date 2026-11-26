@@ -26,11 +26,14 @@ import {
   Download,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   SlidersHorizontal,
   ZoomIn,
   ZoomOut,
   Users,
   Search,
+  Layers,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -50,6 +53,7 @@ import {
 import {
   detectInvoiceFileKind,
   extractInvoiceViaServer,
+  extractMultipleInvoicesFromPdfViaServer,
   prepareFileForExtraction,
   readFileAsDataUrl,
   rotateImageDataUrl90,
@@ -107,6 +111,16 @@ interface ViaticosLiquidadorViewProps {
   }) => void;
   resolvedCostCenter: string;
   onAddOrUpdateItem: (item: ViaticoExpenseItem, isEdit: boolean) => void;
+  onAddMultipleItems?: (items: ViaticoExpenseItem[]) => void;
+  onBulkUpdateItems?: (
+    itemIds: string[],
+    patch: Partial<
+      Pick<
+        ViaticoExpenseItem,
+        'clienteContacto' | 'objetivoComercial' | 'descripcionGasto' | 'categoria' | 'kilometraje'
+      >
+    >
+  ) => void;
   onDeleteItem: (itemId: string) => void;
   onOpenCloseConfirmModal: () => void;
   onOpenCloseEmailModal: () => void;
@@ -118,6 +132,22 @@ interface ViaticosLiquidadorViewProps {
   onOpenClosedArchive: () => void;
   zoomPercent?: number;
 }
+
+type InlineEditableField =
+  | 'fechaDoc'
+  | 'serieDoc'
+  | 'noDoc'
+  | 'nit'
+  | 'proveedor'
+  | 'moneda'
+  | 'valorFactura'
+  | 'tipoCambio'
+  | 'categoria'
+  | 'clienteContacto'
+  | 'objetivoComercial'
+  | 'descripcionGasto'
+  | 'kilometraje'
+  | 'impuestos';
 
 interface PendingUploadFile {
   id: string;
@@ -224,6 +254,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   onUpdateHeader,
   resolvedCostCenter,
   onAddOrUpdateItem,
+  onAddMultipleItems,
+  onBulkUpdateItems,
   onDeleteItem,
   onOpenCloseConfirmModal,
   onOpenCloseEmailModal,
@@ -326,9 +358,31 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     media: StoredReceiptMedia;
   } | null>(null);
   const [receiptZoom, setReceiptZoom] = useState<number>(1);
+  const [bulkProgressText, setBulkProgressText] = useState<string | null>(null);
+  const [inlineEditCell, setInlineEditCell] = useState<{
+    itemId: string;
+    field: InlineEditableField;
+  } | null>(null);
+  const [inlineDraftValue, setInlineDraftValue] = useState<string>('');
+  const [inlineTaxDraft, setInlineTaxDraft] = useState<{
+    aplica: boolean;
+    rate: string;
+  }>({ aplica: true, rate: '12' });
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [bulkApplyCliente, setBulkApplyCliente] = useState(false);
+  const [bulkCliente, setBulkCliente] = useState('');
+  const [bulkApplyObjetivo, setBulkApplyObjetivo] = useState(false);
+  const [bulkObjetivo, setBulkObjetivo] = useState('');
+  const [bulkApplyDescripcion, setBulkApplyDescripcion] = useState(false);
+  const [bulkDescripcion, setBulkDescripcion] = useState('');
+  const [bulkApplyCategoria, setBulkApplyCategoria] = useState(false);
+  const [bulkCategoria, setBulkCategoria] = useState<ViaticoCategory>('Alimentación');
+  const [bulkApplyKilometraje, setBulkApplyKilometraje] = useState(false);
+  const [bulkKilometraje, setBulkKilometraje] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const bulkPdfInputRef = useRef<HTMLInputElement>(null);
   const prevLiqIdRef = useRef<string | null>(liquidation?.id || null);
 
   // Reset capture form cleanly whenever the user switches to another liquidation (different week/currency)
@@ -337,6 +391,18 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     if (nextId === prevLiqIdRef.current) return;
     prevLiqIdRef.current = nextId;
     setEditingItemId(null);
+    setInlineEditCell(null);
+    setSelectedItemIds([]);
+    setBulkApplyCliente(false);
+    setBulkCliente('');
+    setBulkApplyObjetivo(false);
+    setBulkObjetivo('');
+    setBulkApplyDescripcion(false);
+    setBulkDescripcion('');
+    setBulkApplyCategoria(false);
+    setBulkApplyKilometraje(false);
+    setBulkKilometraje('');
+    setBulkProgressText(null);
     setActiveMediaPreview(null);
     setUploadQueue([]);
     setAiStatusBanner(null);
@@ -692,6 +758,453 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     }
     setEditingItemId(null);
     await processSingleReceiptFile(first);
+  };
+
+  const handleBulkPdfSelected = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0 || isLocked || !liquidation) return;
+    const file = fileList[0];
+    const detected = detectInvoiceFileKind(file);
+    if (detected.kind !== 'pdf') {
+      setAiStatusBanner({
+        type: 'error',
+        text: 'Para la carga masiva debes seleccionar un archivo PDF que contenga varias facturas.',
+      });
+      return;
+    }
+
+    setIsExtractingAi(true);
+    setAiStatusBanner(null);
+    setFormError(null);
+    setBulkProgressText(`Preparando PDF "${file.name}" para lectura masiva...`);
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const originalFileName = file.name || `facturas-masivas-${Date.now()}.pdf`;
+
+      const { invoices: extractedList, totalPages } =
+        await extractMultipleInvoicesFromPdfViaServer({
+          dataUrl,
+          fileName: originalFileName,
+          baseCurrency: liquidation.monedaBase,
+          onProgress: ({ currentChunk, totalChunks, totalPages: pages, extractedSoFar }) => {
+            setBulkProgressText(
+              `Leyendo bloque ${currentChunk}/${totalChunks} (${pages} pág.) · ${extractedSoFar} factura(s) detectada(s)...`
+            );
+          },
+        });
+
+      const ensureFallbackBulkMedia = async (): Promise<StoredReceiptMedia> => {
+        const mediaId = `rcpt-bulk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const mediaRecord: StoredReceiptMedia = {
+          id: mediaId,
+          fileName: originalFileName,
+          mimeType: 'application/pdf',
+          size: file.size,
+          dataUrl,
+          createdAtIso: new Date().toISOString(),
+        };
+        const saveRes = await saveReceiptMedia(mediaRecord);
+        onMediaSaved(saveRes.media);
+        return saveRes.media;
+      };
+
+      if (extractedList.length === 0) {
+        const fallbackMedia = await ensureFallbackBulkMedia();
+        setActiveMediaPreview(fallbackMedia);
+        setAiStatusBanner({
+          type: 'warning',
+          text: `No se detectaron facturas legibles dentro de "${originalFileName}". El PDF quedó adjunto para revisión o carga individual.`,
+        });
+        return;
+      }
+
+      setBulkProgressText(
+        `Separando soportes PDF individuales para ${extractedList.length} factura(s)...`
+      );
+
+      let fallbackBulkMedia: StoredReceiptMedia | null = null;
+      let firstAssignedMedia: StoredReceiptMedia | null = null;
+      let splitAttachmentCount = 0;
+      const splitMediaByKey = new Map<string, StoredReceiptMedia>();
+
+      const resolveMediaForExtractedInvoice = async (
+        extracted: (typeof extractedList)[number],
+        idx: number
+      ): Promise<StoredReceiptMedia> => {
+        if (extracted.extractedPdfDataUrl) {
+          const splitKey = `${extracted.pageStart || 0}-${extracted.pageEnd || 0}-${
+            extracted.extractedPdfFileName || ''
+          }`;
+          const existing = splitMediaByKey.get(splitKey);
+          if (existing) {
+            return existing;
+          }
+          const splitId = `rcpt-bulk-${Date.now()}-${idx}-${Math.random()
+            .toString(36)
+            .slice(2, 6)}`;
+          const splitRecord: StoredReceiptMedia = {
+            id: splitId,
+            fileName:
+              extracted.extractedPdfFileName ||
+              `${originalFileName.replace(/\.pdf$/i, '')}_fact${idx + 1}.pdf`,
+            mimeType: 'application/pdf',
+            size: extracted.extractedPdfSize || file.size,
+            dataUrl: extracted.extractedPdfDataUrl,
+            createdAtIso: new Date().toISOString(),
+          };
+          const saveRes = await saveReceiptMedia(splitRecord);
+          onMediaSaved(saveRes.media);
+          splitMediaByKey.set(splitKey, saveRes.media);
+          splitAttachmentCount += 1;
+          return saveRes.media;
+        }
+
+        if (!fallbackBulkMedia) {
+          fallbackBulkMedia = await ensureFallbackBulkMedia();
+        }
+        return fallbackBulkMedia;
+      };
+
+      const defaultCliente = form.clienteContacto.trim() || lastCliente;
+      const defaultObjetivo = form.objetivoComercial.trim() || lastObjetivo;
+
+      const itemsToAdd: ViaticoExpenseItem[] = [];
+      for (let idx = 0; idx < extractedList.length; idx++) {
+        const extracted = extractedList[idx];
+        const assignedMedia = await resolveMediaForExtractedInvoice(extracted, idx);
+        if (!firstAssignedMedia) {
+          firstAssignedMedia = assignedMedia;
+        }
+
+        const valorFactura = roundMoney(Math.max(0, extracted.valorFactura));
+        const fx =
+          docExchangeRate && docExchangeRate > 0
+            ? roundExchangeRate(docExchangeRate)
+            : extracted.moneda === liquidation.monedaBase
+            ? 1
+            : roundExchangeRate(
+                extracted.tipoCambioSugerido > 0 ? extracted.tipoCambioSugerido : 1
+              );
+        const valorReintegrar = roundMoney(valorFactura * fx);
+        const aplicaImpuestos = extracted.aplicaImpuestos;
+        const porcentajeImpuesto = aplicaImpuestos
+          ? extracted.porcentajeImpuesto > 0
+            ? roundMoney(extracted.porcentajeImpuesto)
+            : DEFAULT_TAX_RATE_BY_CURRENCY[extracted.moneda] || 12
+          : 0;
+        const taxBreakdown = calculateTaxBreakdown({
+          valorFactura,
+          aplicaImpuestos,
+          porcentajeImpuesto,
+          montoImpuestoOverride:
+            aplicaImpuestos && extracted.montoImpuesto > 0
+              ? extracted.montoImpuesto
+              : undefined,
+        });
+
+        const suggestedDocType =
+          resolveOdooDocTypeByHint(extracted.tipoDocumentoSugerido, catalogs) ||
+          suggestOdooDocTypeForItem(
+            {
+              nit: extracted.nit || '',
+              serieDoc: extracted.serieDoc || '',
+              noDoc: extracted.noDoc || '',
+              aplicaImpuestos,
+              moneda: extracted.moneda,
+              proveedor: extracted.proveedor || '',
+              extractionNotes: extracted.notasExtraccion || '',
+            },
+            catalogs
+          );
+        const suggestedProduct =
+          resolveOdooExpenseCodeByHint(extracted.codigoGastoSugerido, catalogs) ||
+          suggestOdooExpenseCodeForItem(
+            {
+              categoria: extracted.categoriaSugerida || 'Alimentación',
+              descripcionGasto: extracted.descripcionSugerida || '',
+              proveedor: extracted.proveedor || '',
+              moneda: extracted.moneda,
+            },
+            undefined,
+            catalogs
+          );
+        const suggestedTax =
+          resolveOdooTaxIndicatorByHint(extracted.indicadorImpuestoSugerido, catalogs) ||
+          suggestOdooTaxIndicatorForItem(
+            {
+              aplicaImpuestos,
+              categoria: extracted.categoriaSugerida || 'Alimentación',
+              moneda: extracted.moneda,
+              extractionNotes: extracted.notasExtraccion || '',
+              descripcionGasto: extracted.descripcionSugerida || '',
+              proveedor: extracted.proveedor || '',
+            },
+            suggestedDocType,
+            catalogs
+          );
+
+        itemsToAdd.push({
+          id: `viat-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+          fechaDoc: extracted.fechaDoc || getTodayFormatted(),
+          serieDoc: extracted.serieDoc || '',
+          noDoc: extracted.noDoc || '',
+          nit: extracted.nit || '',
+          proveedor: extracted.proveedor || `Proveedor pág. ${idx + 1}`,
+          moneda: extracted.moneda,
+          valorFactura,
+          tipoCambio: fx,
+          valorReintegrar,
+          categoria: extracted.categoriaSugerida || 'Otros Gastos',
+          clienteContacto: defaultCliente,
+          objetivoComercial: defaultObjetivo,
+          descripcionGasto: extracted.descripcionSugerida || '',
+          kilometraje: '',
+          aplicaImpuestos,
+          porcentajeImpuesto,
+          montoImpuesto: taxBreakdown.montoImpuesto,
+          valorSinImpuesto: taxBreakdown.valorSinImpuesto,
+          odooDocType: suggestedDocType || undefined,
+          odooProductId: suggestedProduct || undefined,
+          odooTaxIndicator: suggestedTax || undefined,
+          odooExpenseType: catalogs.defaultExpenseType || 'Gasto',
+          attachmentId: assignedMedia.id,
+          attachmentName: assignedMedia.fileName,
+          attachmentMimeType: assignedMedia.mimeType,
+          attachmentSize: assignedMedia.size,
+          extractedByAi: true,
+          extractionConfidence: extracted.confianza,
+          extractionNotes: extracted.notasExtraccion,
+        });
+      }
+
+      if (firstAssignedMedia) {
+        setActiveMediaPreview(firstAssignedMedia);
+      }
+
+      if (onAddMultipleItems) {
+        onAddMultipleItems(itemsToAdd);
+      } else {
+        itemsToAdd.forEach((it) => onAddOrUpdateItem(it, false));
+      }
+
+      setAiStatusBanner({
+        type: 'success',
+        text: `Carga masiva completada: ${itemsToAdd.length} factura(s) extraída(s) desde "${originalFileName}" (${totalPages} pág.)${
+          splitAttachmentCount > 0
+            ? ` con ${splitAttachmentCount} PDF(s) individuales asignado(s) por línea`
+            : ''
+        }. Haz doble clic en cualquier celda para editar o usa los recuadros para edición masiva.`,
+      });
+    } catch (err: any) {
+      setAiStatusBanner({
+        type: 'error',
+        text:
+          err?.message ||
+          'No se pudo completar la carga masiva del PDF. Verifica el archivo o intenta dividirlo en menos páginas.',
+      });
+    } finally {
+      setBulkProgressText(null);
+      setIsExtractingAi(false);
+    }
+  };
+
+  const startInlineEdit = (item: ViaticoExpenseItem, field: InlineEditableField) => {
+    if (isLocked) return;
+    setInlineEditCell({ itemId: item.id, field });
+    if (field === 'impuestos') {
+      setInlineTaxDraft({
+        aplica: item.aplicaImpuestos,
+        rate: String(
+          item.aplicaImpuestos
+            ? item.porcentajeImpuesto || DEFAULT_TAX_RATE_BY_CURRENCY[item.moneda] || 12
+            : 0
+        ),
+      });
+      return;
+    }
+    const rawVal = item[field];
+    setInlineDraftValue(rawVal !== undefined && rawVal !== null ? String(rawVal) : '');
+  };
+
+  const cancelInlineEdit = () => {
+    setInlineEditCell(null);
+  };
+
+  const commitInlineEdit = (
+    item: ViaticoExpenseItem,
+    field: InlineEditableField,
+    overrideRaw?: string
+  ) => {
+    if (isLocked) {
+      setInlineEditCell(null);
+      return;
+    }
+    const rawStr = overrideRaw !== undefined ? overrideRaw : inlineDraftValue;
+    let nextItem: ViaticoExpenseItem = { ...item };
+
+    if (field === 'impuestos') {
+      const nextAplica = inlineTaxDraft.aplica;
+      const nextRate = nextAplica
+        ? Math.max(0, Math.min(100, Number(inlineTaxDraft.rate) || 0))
+        : 0;
+      const tax = calculateTaxBreakdown({
+        valorFactura: item.valorFactura,
+        aplicaImpuestos: nextAplica,
+        porcentajeImpuesto: nextRate,
+      });
+      nextItem = {
+        ...item,
+        aplicaImpuestos: nextAplica,
+        porcentajeImpuesto: roundMoney(nextRate),
+        montoImpuesto: tax.montoImpuesto,
+        valorSinImpuesto: tax.valorSinImpuesto,
+      };
+    } else if (field === 'valorFactura') {
+      const parsed = Number(rawStr);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setInlineEditCell(null);
+        return;
+      }
+      const nextValor = roundMoney(parsed);
+      const nextReintegrar = roundMoney(nextValor * (item.tipoCambio > 0 ? item.tipoCambio : 1));
+      const tax = calculateTaxBreakdown({
+        valorFactura: nextValor,
+        aplicaImpuestos: item.aplicaImpuestos,
+        porcentajeImpuesto: item.porcentajeImpuesto,
+      });
+      nextItem = {
+        ...item,
+        valorFactura: nextValor,
+        valorReintegrar: nextReintegrar,
+        montoImpuesto: tax.montoImpuesto,
+        valorSinImpuesto: tax.valorSinImpuesto,
+      };
+    } else if (field === 'tipoCambio') {
+      const parsed = Number(rawStr);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setInlineEditCell(null);
+        return;
+      }
+      const nextFx = roundExchangeRate(parsed);
+      nextItem = {
+        ...item,
+        tipoCambio: nextFx,
+        valorReintegrar: roundMoney(item.valorFactura * nextFx),
+      };
+    } else if (field === 'moneda') {
+      const nextCurrency = rawStr as ViaticoCurrency;
+      const nextFx =
+        docExchangeRate && docExchangeRate > 0
+          ? roundExchangeRate(docExchangeRate)
+          : nextCurrency === baseCurrency
+          ? 1
+          : item.tipoCambio > 0
+          ? item.tipoCambio
+          : 7.8;
+      const nextRate = item.aplicaImpuestos
+        ? DEFAULT_TAX_RATE_BY_CURRENCY[nextCurrency] ?? item.porcentajeImpuesto
+        : 0;
+      const nextAplica = item.aplicaImpuestos && nextRate > 0;
+      const tax = calculateTaxBreakdown({
+        valorFactura: item.valorFactura,
+        aplicaImpuestos: nextAplica,
+        porcentajeImpuesto: nextRate,
+      });
+      nextItem = {
+        ...item,
+        moneda: nextCurrency,
+        tipoCambio: nextFx,
+        valorReintegrar: roundMoney(item.valorFactura * nextFx),
+        aplicaImpuestos: nextAplica,
+        porcentajeImpuesto: roundMoney(nextRate),
+        montoImpuesto: tax.montoImpuesto,
+        valorSinImpuesto: tax.valorSinImpuesto,
+      };
+    } else if (field === 'categoria') {
+      nextItem = {
+        ...item,
+        categoria: rawStr as ViaticoCategory,
+      };
+    } else if (field === 'proveedor') {
+      const trimmed = rawStr.trim();
+      if (!trimmed) {
+        setInlineEditCell(null);
+        return;
+      }
+      nextItem = { ...item, proveedor: trimmed };
+    } else {
+      nextItem = {
+        ...item,
+        [field]: rawStr.trim(),
+      };
+    }
+
+    setInlineEditCell(null);
+    onAddOrUpdateItem(nextItem, true);
+  };
+
+  useEffect(() => {
+    const validIds = new Set((liquidation?.items || []).map((it) => it.id));
+    setSelectedItemIds((prev) => {
+      const next = prev.filter((id) => validIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [liquidation?.items]);
+
+  const toggleSelectItem = (itemId: string) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
+    );
+  };
+
+  const toggleSelectAllItems = () => {
+    const allIds = (liquidation?.items || []).map((it) => it.id);
+    if (allIds.length === 0) return;
+    setSelectedItemIds((prev) => (prev.length === allIds.length ? [] : allIds));
+  };
+
+  const resetBulkEditPanel = (clearSelection = false) => {
+    if (clearSelection) setSelectedItemIds([]);
+    setBulkApplyCliente(false);
+    setBulkCliente('');
+    setBulkApplyObjetivo(false);
+    setBulkObjetivo('');
+    setBulkApplyDescripcion(false);
+    setBulkDescripcion('');
+    setBulkApplyCategoria(false);
+    setBulkApplyKilometraje(false);
+    setBulkKilometraje('');
+  };
+
+  const handleApplyBulkEdit = () => {
+    if (isLocked || !liquidation || selectedItemIds.length === 0) return;
+    const patch: Partial<
+      Pick<
+        ViaticoExpenseItem,
+        'clienteContacto' | 'objetivoComercial' | 'descripcionGasto' | 'categoria' | 'kilometraje'
+      >
+    > = {};
+
+    if (bulkApplyCliente) patch.clienteContacto = bulkCliente.trim();
+    if (bulkApplyObjetivo) patch.objetivoComercial = bulkObjetivo.trim();
+    if (bulkApplyDescripcion) patch.descripcionGasto = bulkDescripcion.trim();
+    if (bulkApplyCategoria) patch.categoria = bulkCategoria;
+    if (bulkApplyKilometraje) patch.kilometraje = bulkKilometraje.trim();
+
+    if (Object.keys(patch).length === 0) return;
+
+    if (onBulkUpdateItems) {
+      onBulkUpdateItems(selectedItemIds, patch);
+    } else {
+      const idSet = new Set(selectedItemIds);
+      liquidation.items.forEach((it) => {
+        if (idSet.has(it.id)) {
+          onAddOrUpdateItem({ ...it, ...patch }, true);
+        }
+      });
+    }
+
+    resetBulkEditPanel(true);
   };
 
   const handleRotateCurrentPreview = async () => {
@@ -1409,42 +1922,58 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">
                   Nombre / Liquidador
                 </label>
-                <select
-                  value={liquidation.consultorId}
-                  disabled={isLocked || (isLockedToOwnConsultor && availableConsultores.length <= 1)}
-                  onChange={(e) => {
-                    const chosen = availableConsultores.find((c) => c.id === e.target.value);
-                    if (!chosen) return;
-                    const matchedComp =
-                      moduleCompanies.length > 0
-                        ? moduleCompanies.find(
-                            (c) => normalizeCompanyKey(c.nombre) === normalizeCompanyKey(chosen.empresa)
-                          ) || moduleCompanies[0]
-                        : null;
-                    onUpdateHeader({
-                      consultorId: chosen.id,
-                      consultorNombre: chosen.nombreCompleto,
-                      consultorEmail: chosen.email,
-                      empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
-                      centroCosto: chosen.centroCosto || '',
-                      odooEmployeeName: chosen.odooEmployeeName || '',
-                      odooAnalyticDistribution: chosen.odooAnalyticDistribution || '',
-                      monedaBase: chosen.monedaBase,
-                    });
-                  }}
-                  className="w-full min-h-[3.25rem] px-3.5 py-3 text-base font-semibold text-slate-900 bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
-                >
-                  {!availableConsultores.some((c) => c.id === liquidation.consultorId) && (
-                    <option value={liquidation.consultorId}>
-                      {liquidation.consultorNombre}
-                    </option>
-                  )}
-                  {availableConsultores.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombreCompleto} — {c.empresa}
-                    </option>
-                  ))}
-                </select>
+                {(() => {
+                  const matchedHeaderConsultor =
+                    availableConsultores.find((c) => c.id === liquidation.consultorId) ||
+                    availableConsultores.find(
+                      (c) =>
+                        (c.odooEmployeeName || c.nombreCompleto || '').trim().toUpperCase() ===
+                        (liquidation.odooEmployeeName || liquidation.consultorNombre || '')
+                          .trim()
+                          .toUpperCase()
+                    );
+                  const currentSelectValue = matchedHeaderConsultor?.id || liquidation.consultorId;
+                  return (
+                    <select
+                      value={currentSelectValue}
+                      disabled={isLocked || (isLockedToOwnConsultor && availableConsultores.length <= 1)}
+                      onChange={(e) => {
+                        const chosen = availableConsultores.find((c) => c.id === e.target.value);
+                        if (!chosen) return;
+                        const matchedComp =
+                          moduleCompanies.length > 0
+                            ? moduleCompanies.find(
+                                (c) =>
+                                  normalizeCompanyKey(c.nombre) ===
+                                  normalizeCompanyKey(chosen.empresa)
+                              ) || moduleCompanies[0]
+                            : null;
+                        onUpdateHeader({
+                          consultorId: chosen.id,
+                          consultorNombre: chosen.nombreCompleto,
+                          consultorEmail: chosen.email,
+                          empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
+                          centroCosto: chosen.centroCosto || '',
+                          odooEmployeeName: chosen.odooEmployeeName || chosen.nombreCompleto,
+                          odooAnalyticDistribution: chosen.odooAnalyticDistribution || '',
+                        });
+                      }}
+                      className="w-full min-h-[3.25rem] px-3.5 py-3 text-base font-semibold text-slate-900 bg-white border border-slate-300 rounded-2xl focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:bg-slate-50"
+                    >
+                      {!matchedHeaderConsultor && (
+                        <option value={liquidation.consultorId}>
+                          {liquidation.odooEmployeeName || liquidation.consultorNombre}
+                        </option>
+                      )}
+                      {availableConsultores.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombreCompleto}
+                          {c.centroCosto ? ` · ${c.centroCosto}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
               </div>
 
               <div>
@@ -1881,42 +2410,59 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   </span>
                 )}
               </label>
-              <select
-                value={liquidation.consultorId}
-                disabled={isLocked || (isLockedToOwnConsultor && availableConsultores.length <= 1)}
-                onChange={(e) => {
-                  const chosen = availableConsultores.find((c) => c.id === e.target.value);
-                  if (!chosen) return;
-                  const matchedComp =
-                    moduleCompanies.length > 0
-                      ? moduleCompanies.find(
-                          (c) => normalizeCompanyKey(c.nombre) === normalizeCompanyKey(chosen.empresa)
-                        ) || moduleCompanies[0]
-                      : null;
-                  onUpdateHeader({
-                    consultorId: chosen.id,
-                    consultorNombre: chosen.nombreCompleto,
-                    consultorEmail: chosen.email,
-                    empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
-                    centroCosto: chosen.centroCosto || '',
-                    odooEmployeeName: chosen.odooEmployeeName || '',
-                    odooAnalyticDistribution: chosen.odooAnalyticDistribution || '',
-                    monedaBase: chosen.monedaBase,
-                  });
-                }}
-                className="w-full px-3 py-1.5 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:text-slate-700 disabled:bg-slate-100"
-              >
-                {!availableConsultores.some((c) => c.id === liquidation.consultorId) && (
-                  <option value={liquidation.consultorId}>
-                    {liquidation.consultorNombre}
-                  </option>
-                )}
-                {availableConsultores.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombreCompleto} — {c.empresa}
-                  </option>
-                ))}
-              </select>
+              {(() => {
+                const matchedDesktopConsultor =
+                  availableConsultores.find((c) => c.id === liquidation.consultorId) ||
+                  availableConsultores.find(
+                    (c) =>
+                      (c.odooEmployeeName || c.nombreCompleto || '').trim().toUpperCase() ===
+                      (liquidation.odooEmployeeName || liquidation.consultorNombre || '')
+                        .trim()
+                        .toUpperCase()
+                  );
+                const currentDesktopSelectValue =
+                  matchedDesktopConsultor?.id || liquidation.consultorId;
+                return (
+                  <select
+                    value={currentDesktopSelectValue}
+                    disabled={isLocked || (isLockedToOwnConsultor && availableConsultores.length <= 1)}
+                    onChange={(e) => {
+                      const chosen = availableConsultores.find((c) => c.id === e.target.value);
+                      if (!chosen) return;
+                      const matchedComp =
+                        moduleCompanies.length > 0
+                          ? moduleCompanies.find(
+                              (c) =>
+                                normalizeCompanyKey(c.nombre) ===
+                                normalizeCompanyKey(chosen.empresa)
+                            ) || moduleCompanies[0]
+                          : null;
+                      onUpdateHeader({
+                        consultorId: chosen.id,
+                        consultorNombre: chosen.nombreCompleto,
+                        consultorEmail: chosen.email,
+                        empresa: matchedComp ? matchedComp.nombre : chosen.empresa,
+                        centroCosto: chosen.centroCosto || '',
+                        odooEmployeeName: chosen.odooEmployeeName || chosen.nombreCompleto,
+                        odooAnalyticDistribution: chosen.odooAnalyticDistribution || '',
+                      });
+                    }}
+                    className="w-full px-3 py-1.5 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 disabled:text-slate-700 disabled:bg-slate-100"
+                  >
+                    {!matchedDesktopConsultor && (
+                      <option value={liquidation.consultorId}>
+                        {liquidation.odooEmployeeName || liquidation.consultorNombre}
+                      </option>
+                    )}
+                    {availableConsultores.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombreCompleto}
+                        {c.centroCosto ? ` · ${c.centroCosto}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                );
+              })()}
             </div>
 
             <div className="col-span-6">
@@ -2092,6 +2638,16 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   e.target.value = '';
                 }}
               />
+              <input
+                ref={bulkPdfInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                onChange={(e) => {
+                  void handleBulkPdfSelected(e.target.files);
+                  e.target.value = '';
+                }}
+              />
 
               {/* Dropzone / Active Preview */}
               {activeMediaPreview ? (
@@ -2157,10 +2713,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       <div className="absolute inset-0 z-10 bg-white/90 backdrop-blur-xs flex flex-col items-center justify-center gap-2.5 p-4 text-center">
                         <Loader2 className="w-8 h-8 lg:w-7 lg:h-7 animate-spin text-[#1E60A8]" />
                         <div className="text-base lg:text-xs font-bold text-[#132B63]">
-                          Extrayendo datos de la factura...
+                          {bulkProgressText || 'Extrayendo datos de la factura...'}
                         </div>
                         <div className="text-xs lg:text-[11px] text-slate-500 max-w-xs">
-                          Detectando fecha, serie, número, NIT, proveedor, moneda, valor e impuestos
+                          {bulkProgressText
+                            ? 'Cada factura detectada se agregará automáticamente a la liquidación'
+                            : 'Detectando fecha, serie, número, NIT, proveedor, moneda, valor e impuestos'}
                         </div>
                       </div>
                     )}
@@ -2223,7 +2781,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     <div className="py-6 flex flex-col items-center gap-2.5">
                       <Loader2 className="w-8 h-8 lg:w-7 lg:h-7 animate-spin text-[#1E60A8]" />
                       <div className="text-base lg:text-xs font-bold text-[#132B63]">
-                        Leyendo factura con IA...
+                        {bulkProgressText || 'Leyendo factura con IA...'}
                       </div>
                     </div>
                   ) : (
@@ -2236,14 +2794,14 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         Subir factura o comprobante
                       </p>
                       <p className="text-sm lg:text-[11px] text-slate-500 mt-1">
-                        Foto directa o archivo JPG, PNG, HEIC, PDF
+                        Foto directa, factura individual o PDF masivo con varias facturas
                       </p>
 
-                      <div className="mt-4 flex flex-col lg:flex-row lg:flex-wrap items-stretch lg:items-center justify-center gap-3 lg:gap-2.5">
+                      <div className="mt-4 flex flex-col lg:flex-row lg:flex-wrap items-stretch lg:items-center justify-center gap-3 lg:gap-2">
                         <button
                           type="button"
                           onClick={() => cameraInputRef.current?.click()}
-                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[3.5rem] lg:min-h-0 px-5 lg:px-4 py-3.5 lg:py-2 text-base lg:text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
+                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[3.5rem] lg:min-h-0 px-5 lg:px-3.5 py-3.5 lg:py-2 text-base lg:text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
                         >
                           <Camera className="w-5 h-5 lg:w-3.5 lg:h-3.5" />
                           <span>Tomar Foto de Factura</span>
@@ -2251,10 +2809,20 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[3.25rem] lg:min-h-0 px-5 lg:px-4 py-3 lg:py-2 text-base lg:text-xs font-bold text-[#132B63] bg-white hover:bg-slate-100 border border-slate-300 rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
+                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2.5 min-h-[3.25rem] lg:min-h-0 px-5 lg:px-3.5 py-3 lg:py-2 text-base lg:text-xs font-bold text-[#132B63] bg-white hover:bg-slate-100 border border-slate-300 rounded-2xl lg:rounded-xl transition-colors cursor-pointer"
                         >
                           <Upload className="w-5 h-5 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
                           <span>Subir Galería / PDF</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => bulkPdfInputRef.current?.click()}
+                          disabled={isExtractingAi}
+                          title="Adjunta un único PDF con múltiples facturas para leerlas y agregarlas automáticamente a la liquidación"
+                          className="w-full lg:w-auto inline-flex items-center justify-center gap-2 min-h-[3.25rem] lg:min-h-0 px-5 lg:px-3.5 py-3 lg:py-2 text-base lg:text-xs font-bold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-[#1E60A8]/35 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <Layers className="w-5 h-5 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
+                          <span>Carga Masiva (PDF Varias Facturas)</span>
                         </button>
                       </div>
                     </>
@@ -2264,11 +2832,11 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
               {/* Quick replace buttons when preview exists */}
               {activeMediaPreview && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 lg:gap-2">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 lg:gap-2">
                   <button
                     type="button"
                     onClick={() => cameraInputRef.current?.click()}
-                    className="inline-flex items-center justify-center gap-2 min-h-[3.125rem] lg:min-h-0 px-4 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-[#132B63] bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl cursor-pointer"
+                    className="inline-flex items-center justify-center gap-2 min-h-[3.125rem] lg:min-h-0 px-4 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-[#132B63] bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl cursor-pointer"
                   >
                     <Camera className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8] shrink-0" />
                     <span>Tomar otra foto</span>
@@ -2276,10 +2844,19 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center justify-center gap-2 min-h-[3.125rem] lg:min-h-0 px-4 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl cursor-pointer"
+                    className="inline-flex items-center justify-center gap-2 min-h-[3.125rem] lg:min-h-0 px-4 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl lg:rounded-xl cursor-pointer"
                   >
                     <Upload className="w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0" />
                     <span>Cambiar archivo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => bulkPdfInputRef.current?.click()}
+                    disabled={isExtractingAi}
+                    className="inline-flex items-center justify-center gap-2 min-h-[3.125rem] lg:min-h-0 px-4 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-[#1E60A8]/35 rounded-2xl lg:rounded-xl cursor-pointer disabled:opacity-50"
+                  >
+                    <Layers className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8] shrink-0" />
+                    <span>PDF Masivo</span>
                   </button>
                 </div>
               )}
@@ -3129,18 +3706,222 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           </div>
         </div>
 
-        {/* Mobile swipe hint */}
-        {liquidation.items.length > 0 && (
-          <div className="lg:hidden px-4 py-2 bg-slate-50 border-b border-slate-200/80 text-xs font-semibold text-slate-500">
-            Desliza horizontalmente para ver todas las columnas de la planilla Excel →
+        {/* Inline double-click edit hint */}
+        {!isLocked && liquidation.items.length > 0 && (
+          <div className="px-4 py-2 bg-sky-50/60 border-b border-slate-200/80 text-[11px] font-medium text-[#132B63] flex flex-wrap items-center justify-between gap-2">
+            <span>
+              <strong>Edición rápida en tabla:</strong> Haz <strong>doble clic</strong> sobre cualquier celda para editarla directamente, o marca varias filas con los recuadros para <strong>modificarlas masivamente</strong>.
+            </span>
+            <span className="lg:hidden text-slate-500">
+              Desliza horizontalmente para ver todas las columnas →
+            </span>
           </div>
         )}
 
-        {/* OFFICIAL 14-COLUMN PREMEX EXCEL SUMMARY TABLE (Mobile + Desktop) */}
-        <div className="overflow-x-auto touch-scroll-x">
+        {/* Contextual Bulk Edit Bar when >= 1 invoice row is checked */}
+        {!isLocked && selectedItemIds.length > 0 && (
+          <div className="px-4 py-3.5 bg-[#EFF6FF] border-b border-[#1E60A8]/30 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-extrabold text-[#132B63]">
+                <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-lg bg-[#1E60A8] text-white tabular-nums">
+                  {selectedItemIds.length}
+                </span>
+                <span>
+                  {selectedItemIds.length === 1
+                    ? '1 factura seleccionada para edición masiva'
+                    : `${selectedItemIds.length} facturas seleccionadas para edición masiva`}
+                </span>
+                <span className="font-normal text-slate-600 hidden sm:inline">
+                  — Completa solo los campos que deseas unificar
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => resetBulkEditPanel(true)}
+                className="text-xs font-semibold text-slate-600 hover:text-slate-900 underline cursor-pointer"
+              >
+                Deseleccionar todo
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+              {/* Cliente / Contacto */}
+              <div className="bg-white rounded-xl border border-slate-200 p-2 space-y-1">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkApplyCliente}
+                    onChange={(e) => setBulkApplyCliente(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                  />
+                  <span>Cliente / Contacto</span>
+                </label>
+                <input
+                  type="text"
+                  list="viaticos-cliente-list"
+                  value={bulkCliente}
+                  onChange={(e) => {
+                    setBulkCliente(e.target.value);
+                    if (!bulkApplyCliente && e.target.value.trim()) {
+                      setBulkApplyCliente(true);
+                    }
+                  }}
+                  placeholder="Ej. Agropecuaria..."
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                />
+              </div>
+
+              {/* Objetivo Comercial */}
+              <div className="bg-white rounded-xl border border-slate-200 p-2 space-y-1">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkApplyObjetivo}
+                    onChange={(e) => setBulkApplyObjetivo(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                  />
+                  <span>Objetivo Comercial</span>
+                </label>
+                <input
+                  type="text"
+                  list="viaticos-objetivo-list"
+                  value={bulkObjetivo}
+                  onChange={(e) => {
+                    setBulkObjetivo(e.target.value);
+                    if (!bulkApplyObjetivo && e.target.value.trim()) {
+                      setBulkApplyObjetivo(true);
+                    }
+                  }}
+                  placeholder="Ej. Seguimiento técnica..."
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                />
+              </div>
+
+              {/* Descripción del Gasto */}
+              <div className="bg-white rounded-xl border border-slate-200 p-2 space-y-1">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkApplyDescripcion}
+                    onChange={(e) => setBulkApplyDescripcion(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                  />
+                  <span>Descripción del Gasto</span>
+                </label>
+                <input
+                  type="text"
+                  value={bulkDescripcion}
+                  onChange={(e) => {
+                    setBulkDescripcion(e.target.value);
+                    if (!bulkApplyDescripcion && e.target.value.trim()) {
+                      setBulkApplyDescripcion(true);
+                    }
+                  }}
+                  placeholder="Ej. Gira clientes región..."
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                />
+              </div>
+
+              {/* Categoría */}
+              <div className="bg-white rounded-xl border border-slate-200 p-2 space-y-1">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkApplyCategoria}
+                    onChange={(e) => setBulkApplyCategoria(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                  />
+                  <span>Categoría</span>
+                </label>
+                <select
+                  value={bulkCategoria}
+                  onChange={(e) => {
+                    setBulkCategoria(e.target.value as ViaticoCategory);
+                    setBulkApplyCategoria(true);
+                  }}
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                >
+                  {VIATICO_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Kilometraje */}
+              <div className="bg-white rounded-xl border border-slate-200 p-2 space-y-1">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkApplyKilometraje}
+                    onChange={(e) => setBulkApplyKilometraje(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                  />
+                  <span>Kilometraje</span>
+                </label>
+                <input
+                  type="text"
+                  value={bulkKilometraje}
+                  onChange={(e) => {
+                    setBulkKilometraje(e.target.value);
+                    if (!bulkApplyKilometraje && e.target.value.trim()) {
+                      setBulkApplyKilometraje(true);
+                    }
+                  }}
+                  placeholder="Ej. 140 km"
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => resetBulkEditPanel(false)}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white rounded-lg border border-slate-300 cursor-pointer"
+              >
+                Limpiar campos
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyBulkEdit}
+                disabled={
+                  !bulkApplyCliente &&
+                  !bulkApplyObjetivo &&
+                  !bulkApplyDescripcion &&
+                  !bulkApplyCategoria &&
+                  !bulkApplyKilometraje
+                }
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-45 rounded-lg transition-colors cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Aplicar a {selectedItemIds.length} factura(s)</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* OFFICIAL 14-COLUMN PREMEX EXCEL SUMMARY TABLE (Mobile + Desktop) with Synchronized Top Scrollbar */}
+        <SyncedHorizontalTableScroll>
           <table className="w-full text-left border-collapse text-xs min-w-[1380px]">
             <thead>
               <tr className="bg-[#C4E4EE] text-slate-900 border-b border-slate-300 text-[11px] font-bold">
+                {!isLocked && (
+                  <th className="py-2.5 px-2.5 border-r border-slate-300/80 whitespace-nowrap text-center w-9">
+                    <input
+                      type="checkbox"
+                      checked={
+                        liquidation.items.length > 0 &&
+                        selectedItemIds.length === liquidation.items.length
+                      }
+                      onChange={toggleSelectAllItems}
+                      aria-label="Seleccionar todas las facturas"
+                      title="Seleccionar todas las facturas"
+                      className="w-3.5 h-3.5 rounded border-slate-400 text-[#1E60A8] cursor-pointer"
+                    />
+                  </th>
+                )}
                 <th className="py-2.5 px-2.5 border-r border-slate-300/80 whitespace-nowrap text-center">
                   Fecha Doc.
                 </th>
@@ -3194,80 +3975,447 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             <tbody className="divide-y divide-slate-200">
               {liquidation.items.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="py-10 text-center text-sm lg:text-xs text-slate-500">
-                    Aún no hay facturas registradas en esta liquidación. Sube una foto o PDF arriba para comenzar.
+                  <td colSpan={!isLocked ? 17 : 16} className="py-10 text-center text-sm lg:text-xs text-slate-500">
+                    Aún no hay facturas registradas en esta liquidación. Sube una foto, factura individual o PDF masivo arriba para comenzar.
                   </td>
                 </tr>
               ) : (
                 liquidation.items.map((item) => {
                   const media = item.attachmentId ? mediaMap[item.attachmentId] : undefined;
                   const isBeingEdited = editingItemId === item.id;
+                  const isEditingCell = (field: InlineEditableField) =>
+                    inlineEditCell?.itemId === item.id && inlineEditCell.field === field;
+                  const cellEditTitle = !isLocked
+                    ? 'Doble clic para editar este campo'
+                    : undefined;
+                  const editableCellClass = !isLocked
+                    ? 'cursor-text hover:bg-sky-50/70 transition-colors'
+                    : '';
+
+                  const handleInlineKeyDown = (
+                    e: React.KeyboardEvent,
+                    field: InlineEditableField
+                  ) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitInlineEdit(item, field);
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelInlineEdit();
+                    }
+                  };
+
+                  const isSelected = selectedItemIds.includes(item.id);
                   return (
                     <tr
                       key={item.id}
                       className={`transition-colors ${
-                        isBeingEdited
+                        isBeingEdited || isSelected
                           ? 'bg-sky-50/90'
                           : 'hover:bg-slate-50/90'
                       }`}
                     >
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-center font-mono tabular-nums text-slate-700">
-                        {item.fechaDoc || '—'}
+                      {!isLocked && (
+                        <td className="py-2 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectItem(item.id)}
+                            aria-label={`Seleccionar factura de ${item.proveedor}`}
+                            className="w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8] cursor-pointer"
+                          />
+                        </td>
+                      )}
+                      {/* Fecha Doc. */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'fechaDoc')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap text-center font-mono tabular-nums text-slate-700 ${editableCellClass}`}
+                      >
+                        {isEditingCell('fechaDoc') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'fechaDoc')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'fechaDoc')}
+                            placeholder="DD/MM/YYYY"
+                            className="w-24 px-1.5 py-1 text-xs text-center font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.fechaDoc || '—'
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap font-mono text-slate-700">
-                        {item.serieDoc || ''}
+
+                      {/* Serie Doc. */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'serieDoc')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap font-mono text-slate-700 ${editableCellClass}`}
+                      >
+                        {isEditingCell('serieDoc') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'serieDoc')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'serieDoc')}
+                            className="w-24 px-1.5 py-1 text-xs font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.serieDoc || ''
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap font-mono text-slate-800">
-                        {item.noDoc || ''}
+
+                      {/* No. Doc. */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'noDoc')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap font-mono text-slate-800 ${editableCellClass}`}
+                      >
+                        {isEditingCell('noDoc') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'noDoc')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'noDoc')}
+                            className="w-28 px-1.5 py-1 text-xs font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.noDoc || ''
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap font-mono text-slate-700">
-                        {item.nit || ''}
+
+                      {/* NIT */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'nit')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap font-mono text-slate-700 ${editableCellClass}`}
+                      >
+                        {isEditingCell('nit') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'nit')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'nit')}
+                            className="w-24 px-1.5 py-1 text-xs font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.nit || ''
+                        )}
                       </td>
-                      <td className="py-2.5 px-3 border-r border-slate-200/80 font-medium text-slate-900 max-w-[200px]">
-                        {item.proveedor}
+
+                      {/* Proveedor */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'proveedor')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2.5 border-r border-slate-200/80 font-medium text-slate-900 max-w-[200px] ${editableCellClass}`}
+                      >
+                        {isEditingCell('proveedor') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'proveedor')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'proveedor')}
+                            className="w-44 px-1.5 py-1 text-xs bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.proveedor
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-center text-slate-700">
-                        {item.moneda}
+
+                      {/* Moneda */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'moneda')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap text-center text-slate-700 ${editableCellClass}`}
+                      >
+                        {isEditingCell('moneda') ? (
+                          <select
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => commitInlineEdit(item, 'moneda', e.target.value)}
+                            onBlur={() => cancelInlineEdit()}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') cancelInlineEdit();
+                            }}
+                            className="px-1.5 py-1 text-xs bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          >
+                            {VIATICO_CURRENCIES.map((cur) => (
+                              <option key={cur} value={cur}>
+                                {cur}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          item.moneda
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-right font-mono tabular-nums text-slate-800">
-                        {formatViaticoAmount(item.valorFactura)}
+
+                      {/* Valor Factura */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'valorFactura')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap text-right font-mono tabular-nums text-slate-800 ${editableCellClass}`}
+                      >
+                        {isEditingCell('valorFactura') ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'valorFactura')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'valorFactura')}
+                            className="w-24 px-1.5 py-1 text-xs text-right font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          formatViaticoAmount(item.valorFactura)
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-right font-mono tabular-nums text-slate-600">
-                        {formatViaticoAmount(item.tipoCambio)}
+
+                      {/* Tipo de Cambio */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'tipoCambio')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap text-right font-mono tabular-nums text-slate-600 ${editableCellClass}`}
+                      >
+                        {isEditingCell('tipoCambio') ? (
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min="0.0001"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'tipoCambio')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'tipoCambio')}
+                            className="w-20 px-1.5 py-1 text-xs text-right font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          formatViaticoAmount(item.tipoCambio)
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-right font-mono font-bold tabular-nums text-slate-900 bg-slate-50/60">
+
+                      {/* Valor Reintegrar */}
+                      <td className="py-2 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-right font-mono font-bold tabular-nums text-slate-900 bg-slate-50/60">
                         {formatViaticoAmount(item.valorReintegrar)}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-slate-800">
-                        {item.categoria}
+
+                      {/* Categoría */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'categoria')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap text-slate-800 ${editableCellClass}`}
+                      >
+                        {isEditingCell('categoria') ? (
+                          <select
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => commitInlineEdit(item, 'categoria', e.target.value)}
+                            onBlur={() => cancelInlineEdit()}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') cancelInlineEdit();
+                            }}
+                            className="px-1.5 py-1 text-xs bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          >
+                            {VIATICO_CATEGORIES.map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          item.categoria
+                        )}
                       </td>
-                      <td className="py-2.5 px-3 border-r border-slate-200/80 font-bold text-slate-900 max-w-[190px]">
-                        {item.clienteContacto}
+
+                      {/* Cliente / Contacto */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'clienteContacto')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2.5 border-r border-slate-200/80 font-bold text-slate-900 max-w-[190px] ${editableCellClass}`}
+                      >
+                        {isEditingCell('clienteContacto') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            list="viaticos-cliente-list"
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'clienteContacto')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'clienteContacto')}
+                            className="w-44 px-1.5 py-1 text-xs font-normal bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.clienteContacto || (
+                            <span className="text-slate-300 font-normal italic">Doble clic...</span>
+                          )
+                        )}
                       </td>
-                      <td className="py-2.5 px-3 border-r border-slate-200/80 text-slate-700 max-w-[200px]">
-                        {item.objetivoComercial}
+
+                      {/* Objetivo Comercial */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'objetivoComercial')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2.5 border-r border-slate-200/80 text-slate-700 max-w-[200px] ${editableCellClass}`}
+                      >
+                        {isEditingCell('objetivoComercial') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            list="viaticos-objetivo-list"
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'objetivoComercial')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'objetivoComercial')}
+                            className="w-44 px-1.5 py-1 text-xs bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.objetivoComercial || (
+                            <span className="text-slate-300 italic">Doble clic...</span>
+                          )
+                        )}
                       </td>
-                      <td className="py-2.5 px-3 border-r border-slate-200/80 text-slate-700 max-w-[230px]">
-                        {item.descripcionGasto}
+
+                      {/* Descripción del Gasto */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'descripcionGasto')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2.5 border-r border-slate-200/80 text-slate-700 max-w-[230px] ${editableCellClass}`}
+                      >
+                        {isEditingCell('descripcionGasto') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'descripcionGasto')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'descripcionGasto')}
+                            className="w-48 px-1.5 py-1 text-xs bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.descripcionGasto || (
+                            <span className="text-slate-300 italic">Doble clic...</span>
+                          )
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-center tabular-nums text-slate-700">
-                        {item.kilometraje}
+
+                      {/* Kilometraje */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'kilometraje')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap text-center tabular-nums text-slate-700 ${editableCellClass}`}
+                      >
+                        {isEditingCell('kilometraje') ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'kilometraje')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'kilometraje')}
+                            placeholder="Ej. 140 km"
+                            className="w-24 px-1.5 py-1 text-xs text-center bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          item.kilometraje || (
+                            <span className="text-slate-300">—</span>
+                          )
+                        )}
                       </td>
-                      <td className="py-2.5 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-center">
-                        <span
-                          title={
-                            item.aplicaImpuestos
-                              ? `Impuesto ${item.porcentajeImpuesto}%: ${formatViaticoAmount(
-                                  item.montoImpuesto
-                                )} | Base: ${formatViaticoAmount(item.valorSinImpuesto)}`
-                              : 'Sin impuestos'
-                          }
-                          className={`text-[11px] font-semibold tabular-nums ${
-                            item.aplicaImpuestos ? 'text-[#1E60A8]' : 'text-slate-400'
-                          }`}
-                        >
-                          {item.aplicaImpuestos ? `Sí (${item.porcentajeImpuesto}%)` : 'No'}
-                        </span>
+
+                      {/* Impuestos */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'impuestos')}
+                        title={cellEditTitle}
+                        className={`py-2 px-2 border-r border-slate-200/80 whitespace-nowrap text-center ${editableCellClass}`}
+                      >
+                        {isEditingCell('impuestos') ? (
+                          <div
+                            className="inline-flex items-center gap-1 bg-white p-1 rounded border border-[#1E60A8]"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                commitInlineEdit(item, 'impuestos');
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                cancelInlineEdit();
+                              }
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={inlineTaxDraft.aplica}
+                              onChange={(e) =>
+                                setInlineTaxDraft((prev) => ({
+                                  aplica: e.target.checked,
+                                  rate: e.target.checked
+                                    ? Number(prev.rate) > 0
+                                      ? prev.rate
+                                      : String(DEFAULT_TAX_RATE_BY_CURRENCY[item.moneda] || 12)
+                                    : '0',
+                                }))
+                              }
+                              title="¿Aplica impuestos?"
+                              className="w-3.5 h-3.5"
+                            />
+                            {inlineTaxDraft.aplica && (
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="100"
+                                autoFocus
+                                value={inlineTaxDraft.rate}
+                                onChange={(e) =>
+                                  setInlineTaxDraft((prev) => ({ ...prev, rate: e.target.value }))
+                                }
+                                className="w-12 px-1 py-0.5 text-xs text-right font-mono border border-slate-300 rounded"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => commitInlineEdit(item, 'impuestos')}
+                              title="Guardar impuesto"
+                              className="p-0.5 text-emerald-700 hover:bg-emerald-50 rounded cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelInlineEdit}
+                              title="Cancelar"
+                              className="p-0.5 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span
+                            title={
+                              item.aplicaImpuestos
+                                ? `Impuesto ${item.porcentajeImpuesto}%: ${formatViaticoAmount(
+                                    item.montoImpuesto
+                                  )} | Base: ${formatViaticoAmount(item.valorSinImpuesto)}`
+                                : 'Sin impuestos (doble clic para editar)'
+                            }
+                            className={`text-[11px] font-semibold tabular-nums ${
+                              item.aplicaImpuestos ? 'text-[#1E60A8]' : 'text-slate-400'
+                            }`}
+                          >
+                            {item.aplicaImpuestos ? `Sí (${item.porcentajeImpuesto}%)` : 'No'}
+                          </span>
+                        )}
                       </td>
                       <td className="py-2.5 px-2.5 whitespace-nowrap text-center">
                         <div className="inline-flex items-center gap-1">
@@ -3352,7 +4500,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             {/* Official Footer Total Row */}
             <tfoot>
               <tr className="border-t-2 border-slate-800 bg-slate-50">
-                <td colSpan={5} className="py-3 px-3 text-[11px] font-medium text-slate-500">
+                <td colSpan={!isLocked ? 6 : 5} className="py-3 px-3 text-[11px] font-medium text-slate-500">
                   Premex Corp · Planilla de Liquidación
                 </td>
                 <td
@@ -3375,7 +4523,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               </tr>
             </tfoot>
           </table>
-        </div>
+        </SyncedHorizontalTableScroll>
       </section>
 
       {/* Receipt Lightbox Viewer */}
@@ -3507,6 +4655,154 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+interface SyncedHorizontalTableScrollProps {
+  children: React.ReactNode;
+}
+
+const SyncedHorizontalTableScroll: React.FC<SyncedHorizontalTableScrollProps> = ({
+  children,
+}) => {
+  const topBarRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const syncingSourceRef = useRef<'top' | 'body' | null>(null);
+  const [metrics, setMetrics] = useState({
+    scrollWidth: 0,
+    clientWidth: 0,
+    scrollLeft: 0,
+  });
+
+  useEffect(() => {
+    const bodyEl = bodyRef.current;
+    if (!bodyEl) return;
+
+    const updateMetrics = () => {
+      setMetrics({
+        scrollWidth: bodyEl.scrollWidth,
+        clientWidth: bodyEl.clientWidth,
+        scrollLeft: bodyEl.scrollLeft,
+      });
+    };
+
+    updateMetrics();
+
+    const ro = new ResizeObserver(updateMetrics);
+    ro.observe(bodyEl);
+    if (bodyEl.firstElementChild) {
+      ro.observe(bodyEl.firstElementChild);
+    }
+    window.addEventListener('resize', updateMetrics);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateMetrics);
+    };
+  }, [children]);
+
+  const hasOverflow = metrics.scrollWidth > metrics.clientWidth + 2;
+  const maxBodyScroll = Math.max(0, metrics.scrollWidth - metrics.clientWidth);
+
+  const handleBodyScroll = () => {
+    const bodyEl = bodyRef.current;
+    const topEl = topBarRef.current;
+    if (!bodyEl) return;
+
+    setMetrics((prev) => ({
+      ...prev,
+      scrollLeft: bodyEl.scrollLeft,
+      scrollWidth: bodyEl.scrollWidth,
+      clientWidth: bodyEl.clientWidth,
+    }));
+
+    if (syncingSourceRef.current === 'top') {
+      syncingSourceRef.current = null;
+      return;
+    }
+
+    if (topEl) {
+      const topMax = Math.max(1, topEl.scrollWidth - topEl.clientWidth);
+      const bodyMax = Math.max(1, bodyEl.scrollWidth - bodyEl.clientWidth);
+      syncingSourceRef.current = 'body';
+      topEl.scrollLeft = (bodyEl.scrollLeft / bodyMax) * topMax;
+      requestAnimationFrame(() => {
+        if (syncingSourceRef.current === 'body') {
+          syncingSourceRef.current = null;
+        }
+      });
+    }
+  };
+
+  const handleTopScroll = () => {
+    const bodyEl = bodyRef.current;
+    const topEl = topBarRef.current;
+    if (!bodyEl || !topEl) return;
+
+    if (syncingSourceRef.current === 'body') {
+      syncingSourceRef.current = null;
+      return;
+    }
+
+    const topMax = Math.max(1, topEl.scrollWidth - topEl.clientWidth);
+    const bodyMax = Math.max(1, bodyEl.scrollWidth - bodyEl.clientWidth);
+    syncingSourceRef.current = 'top';
+    bodyEl.scrollLeft = (topEl.scrollLeft / topMax) * bodyMax;
+    setMetrics((prev) => ({ ...prev, scrollLeft: bodyEl.scrollLeft }));
+    requestAnimationFrame(() => {
+      if (syncingSourceRef.current === 'top') {
+        syncingSourceRef.current = null;
+      }
+    });
+  };
+
+  const scrollByStep = (delta: number) => {
+    const bodyEl = bodyRef.current;
+    if (!bodyEl) return;
+    bodyEl.scrollBy({ left: delta, behavior: 'smooth' });
+  };
+
+  return (
+    <div>
+      {hasOverflow && (
+        <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur-xs border-b border-slate-200 px-3 py-1.5 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => scrollByStep(-360)}
+            disabled={metrics.scrollLeft <= 1}
+            title="Desplazar tabla hacia la izquierda"
+            className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold text-[#132B63] bg-white hover:bg-sky-50 disabled:opacity-40 border border-slate-300 rounded-lg cursor-pointer shrink-0"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span>Izq.</span>
+          </button>
+
+          <div
+            ref={topBarRef}
+            onScroll={handleTopScroll}
+            aria-label="Barra superior de desplazamiento horizontal"
+            className="flex-1 overflow-x-auto overflow-y-hidden h-4 rounded bg-slate-200/70 touch-scroll-x [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/90 [&::-webkit-scrollbar-track]:bg-slate-200/80"
+          >
+            <div style={{ width: `${Math.max(metrics.scrollWidth, 1)}px`, height: '1px' }} />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => scrollByStep(360)}
+            disabled={metrics.scrollLeft >= maxBodyScroll - 1}
+            title="Desplazar tabla hacia la derecha"
+            className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold text-[#132B63] bg-white hover:bg-sky-50 disabled:opacity-40 border border-slate-300 rounded-lg cursor-pointer shrink-0"
+          >
+            <span>Der.</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      <div ref={bodyRef} onScroll={handleBodyScroll} className="overflow-x-auto touch-scroll-x">
+        {children}
+      </div>
     </div>
   );
 };

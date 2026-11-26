@@ -504,7 +504,12 @@ export function findMatchingOdooEmployee(params: {
 export function resolveEmployeeAndCostCenterForLiquidation(params: {
   liquidation: Pick<
     ViaticoLiquidation,
-    'centroCosto' | 'consultorId' | 'consultorEmail' | 'consultorNombre'
+    | 'centroCosto'
+    | 'consultorId'
+    | 'consultorEmail'
+    | 'consultorNombre'
+    | 'odooEmployeeName'
+    | 'odooAnalyticDistribution'
   >;
   consultores: ViaticoConsultor[];
   catalogs: ViaticoOdooCatalogs;
@@ -521,34 +526,37 @@ export function resolveEmployeeAndCostCenterForLiquidation(params: {
 
   const linkedConsultor =
     consultores.find((c) => c.id === liquidation.consultorId) ||
-    (cleanEmail
-      ? consultores.find((c) => normalizeEmail(c.email) === cleanEmail)
-      : undefined) ||
     consultores.find(
       (c) =>
-        normalizeTextToken(c.nombreCompleto) ===
-        normalizeTextToken(liquidation.consultorNombre)
-    );
+        normalizeTextToken(c.odooEmployeeName || c.nombreCompleto) ===
+        normalizeTextToken(liquidation.odooEmployeeName || liquidation.consultorNombre)
+    ) ||
+    (cleanEmail
+      ? consultores.find((c) => normalizeEmail(c.email) === cleanEmail)
+      : undefined);
 
   const matchedPerm = cleanEmail
     ? permissionRecords.find((p) => normalizeEmail(p.email) === cleanEmail)
     : undefined;
 
+  const preferredEmpName =
+    String(liquidation.odooEmployeeName || '').trim() ||
+    String(liquidation.consultorNombre || '').trim() ||
+    String(linkedConsultor?.odooEmployeeName || '').trim();
+
   const matchedEmployee = findMatchingOdooEmployee({
-    email: cleanEmail || linkedConsultor?.email,
-    nombre:
-      linkedConsultor?.odooEmployeeName ||
-      matchedPerm?.odooEmployeeName ||
-      liquidation.consultorNombre,
+    email: preferredEmpName ? linkedConsultor?.email : cleanEmail || linkedConsultor?.email,
+    nombre: preferredEmpName || matchedPerm?.odooEmployeeName,
     employees: catalogs.employees,
     permissionRecords,
   });
 
   const employeeName = (
-    linkedConsultor?.odooEmployeeName ||
-    matchedPerm?.odooEmployeeName ||
+    liquidation.odooEmployeeName ||
     matchedEmployee?.nombreCompleto ||
+    linkedConsultor?.odooEmployeeName ||
     liquidation.consultorNombre ||
+    matchedPerm?.odooEmployeeName ||
     'EMPLEADO'
   )
     .trim()
@@ -556,14 +564,15 @@ export function resolveEmployeeAndCostCenterForLiquidation(params: {
 
   const rawCostCenter =
     String(liquidation.centroCosto || '').trim() ||
+    String(matchedEmployee?.centroCosto || '').trim() ||
     String(linkedConsultor?.centroCosto || '').trim() ||
-    String(matchedPerm?.centroCosto || '').trim() ||
-    String(matchedEmployee?.centroCosto || '').trim();
+    String(matchedPerm?.centroCosto || '').trim();
 
   const rawAnalytic =
+    String(liquidation.odooAnalyticDistribution || '').trim() ||
+    String(matchedEmployee?.analyticDistribution || '').trim() ||
     String(linkedConsultor?.odooAnalyticDistribution || '').trim() ||
-    String(matchedPerm?.odooAnalyticDistribution || '').trim() ||
-    String(matchedEmployee?.analyticDistribution || '').trim();
+    String(matchedPerm?.odooAnalyticDistribution || '').trim();
 
   const matchedCostCenter = findMatchingCostCenterEntry(
     rawCostCenter,

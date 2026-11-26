@@ -1030,8 +1030,12 @@ export interface ClaraTransaction {
   cuentaContable?: string;
   indicadorImpuesto?: string;
   sapSociedad?: string;
+  sapFondo?: string;
+  sapOperacionContable?: string;
   sapClaseDoc?: string;
+  sapFechaContable?: string; // YYYY-MM-DD
   sapCentroCosto?: string;
+  sapClaseFactura?: string;
   sapDocContable?: string;
   sapDespachoEstado?: ClaraSapDispatchStatus;
   sapMensaje?: string;
@@ -1086,6 +1090,8 @@ export interface ClaraCostCenterRule {
   cuentaContableDefault?: string;
   diarioOdoo?: string;
   sociedadSap?: string;
+  fondoDefault?: string;
+  operacionContableDefault?: string;
   activa: boolean;
 }
 
@@ -1106,7 +1112,11 @@ export interface ClaraConnectorConfig {
   agentUrl?: string;
   executionMode?: ClaraAutomationExecutionMode;
   sapSociedadDefault?: string;
+  sapFondoDefault?: string;
+  sapOperacionContableDefault?: string;
   sapClaseDocDefault?: string;
+  sapFechaContableDefault?: string;
+  sapClaseFacturaDefault?: string;
   lastServerProbeIso?: string;
   lastServerProbeSummary?: string;
 }

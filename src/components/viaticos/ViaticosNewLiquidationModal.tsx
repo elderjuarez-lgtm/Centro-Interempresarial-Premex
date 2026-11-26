@@ -323,9 +323,13 @@ export const ViaticosNewLiquidationModal: React.FC<ViaticosNewLiquidationModalPr
               onChange={(e) => handleConsultorChange(e.target.value)}
               className="w-full min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-2 text-base sm:text-xs font-semibold text-slate-900 bg-white rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8] disabled:bg-slate-50 disabled:text-slate-600"
             >
+              {availableConsultores.length === 0 && (
+                <option value="">Sin empleados asignados en Permisos</option>
+              )}
               {availableConsultores.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.nombreCompleto} — {c.empresa}
+                  {c.nombreCompleto}
+                  {c.centroCosto ? ` · ${c.centroCosto}` : ''}
                 </option>
               ))}
             </select>

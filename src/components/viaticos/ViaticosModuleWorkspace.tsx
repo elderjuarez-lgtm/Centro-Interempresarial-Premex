@@ -699,12 +699,124 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     );
   };
 
+  const handleAddMultipleItems = (items: ViaticoExpenseItem[]) => {
+    if (!activeLiquidation || !permissions.canOperate || items.length === 0) return;
+    const targetLiqId = activeLiquidation.id;
+    const stamp = resolveOperatingUserPermissionsStamp(
+      permissions,
+      currentUser?.email || undefined,
+      currentUser?.displayName || undefined
+    );
+    const stampedItems: ViaticoExpenseItem[] = items.map((item) => ({
+      ...item,
+      registeredByEmail: item.registeredByEmail || stamp.email,
+      registeredByName: item.registeredByName || stamp.name,
+      updatedAtIso: stamp.atIso,
+    }));
+
+    const attachmentIdsToSync = Array.from(
+      new Set(
+        stampedItems
+          .map((it) => it.attachmentId)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+    if (currentUser && attachmentIdsToSync.length > 0) {
+      attachmentIdsToSync.forEach((attId) => {
+        const localMedia = mediaMapRef.current[attId];
+        if (localMedia && !localMedia.cloudSynced) {
+          void uploadReceiptMediaToCloud(localMedia).then((res) => {
+            if (res.cloudSynced) {
+              setMediaMap((prev) => ({ ...prev, [attId]: res.media }));
+            }
+          });
+        }
+      });
+    }
+
+    mutateAndAutoSync(
+      (prev) => {
+        const nextList = prev.liquidaciones.map((l) => {
+          if (l.id !== targetLiqId) return l;
+          return recalculateLiquidationTotals({
+            ...l,
+            items: [...l.items, ...stampedItems],
+            updatedAtIso: stamp.atIso,
+          });
+        });
+        return { ...prev, liquidaciones: nextList };
+      },
+      {
+        successMessage: `${stampedItems.length} factura(s) agregada(s) desde PDF masivo y sincronizadas en la nube.`,
+        offlineMessage: `${stampedItems.length} factura(s) agregada(s) localmente desde PDF masivo.`,
+        errorPrefix: `Se agregaron ${stampedItems.length} factura(s) localmente, pero falló la sincronización en la nube`,
+      }
+    );
+  };
+
+  const handleBulkUpdateItems = (
+    itemIds: string[],
+    patch: Partial<
+      Pick<
+        ViaticoExpenseItem,
+        'clienteContacto' | 'objetivoComercial' | 'descripcionGasto' | 'categoria' | 'kilometraje'
+      >
+    >
+  ) => {
+    if (!activeLiquidation || !permissions.canOperate || itemIds.length === 0) return;
+    const targetLiqId = activeLiquidation.id;
+    const idSet = new Set(itemIds);
+    const stamp = resolveOperatingUserPermissionsStamp(
+      permissions,
+      currentUser?.email || undefined,
+      currentUser?.displayName || undefined
+    );
+
+    let updatedCount = 0;
+    mutateAndAutoSync(
+      (prev) => {
+        const nextList = prev.liquidaciones.map((l) => {
+          if (l.id !== targetLiqId) return l;
+          const nextItems = l.items.map((existing) => {
+            if (!idSet.has(existing.id)) return existing;
+            updatedCount += 1;
+            return {
+              ...existing,
+              ...patch,
+              updatedAtIso: stamp.atIso,
+            };
+          });
+          return recalculateLiquidationTotals({
+            ...l,
+            items: nextItems,
+            updatedAtIso: stamp.atIso,
+          });
+        });
+        return { ...prev, liquidaciones: nextList };
+      },
+      {
+        successMessage: `${Math.max(updatedCount, itemIds.length)} factura(s) actualizada(s) masivamente y sincronizada(s) en la nube.`,
+        offlineMessage: `${Math.max(updatedCount, itemIds.length)} factura(s) actualizada(s) masivamente de forma local.`,
+        errorPrefix: 'Cambios masivos guardados localmente, pero falló la sincronización en la nube',
+      }
+    );
+  };
+
   const handleDeleteItem = (itemId: string) => {
     if (!activeLiquidation || !permissions.canOperate) return;
     const targetLiqId = activeLiquidation.id;
     const target = activeLiquidation.items.find((i) => i.id === itemId);
     if (target?.attachmentId) {
-      void deleteReceiptMedia(target.attachmentId);
+      const stillReferencedElsewhere = latestDataRef.current.liquidaciones.some((l) =>
+        l.items.some(
+          (it) =>
+            it.attachmentId === target.attachmentId &&
+            !(l.id === targetLiqId && it.id === itemId)
+        )
+      );
+      if (!stillReferencedElsewhere) {
+        void deleteReceiptMedia(target.attachmentId);
+      }
     }
     mutateAndAutoSync(
       (prev) => {
@@ -733,7 +845,15 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     if (target && target.estado !== 'borrador' && !permissions.isAdmin) return;
 
     target?.items.forEach((it) => {
-      if (it.attachmentId) void deleteReceiptMedia(it.attachmentId);
+      if (!it.attachmentId) return;
+      const stillReferencedElsewhere = latestDataRef.current.liquidaciones.some(
+        (l) =>
+          l.id !== liqId &&
+          l.items.some((other) => other.attachmentId === it.attachmentId)
+      );
+      if (!stillReferencedElsewhere) {
+        void deleteReceiptMedia(it.attachmentId);
+      }
     });
 
     mutateAndAutoSync(
@@ -1412,6 +1532,8 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
                   : ''
               }
               onAddOrUpdateItem={handleAddOrUpdateItem}
+              onAddMultipleItems={handleAddMultipleItems}
+              onBulkUpdateItems={handleBulkUpdateItems}
               onDeleteItem={handleDeleteItem}
               onOpenCloseConfirmModal={() => {
                 if (activeLiquidation) setCloseConfirmLiqId(activeLiquidation.id);

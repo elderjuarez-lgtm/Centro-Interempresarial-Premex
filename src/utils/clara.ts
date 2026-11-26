@@ -30,8 +30,12 @@ export const INITIAL_CLARA_CONNECTOR_CONFIG: ClaraConnectorConfig = {
   workManagerUrl: 'https://pan.iluma.bio:8037/Account/Login',
   agentUrl: 'http://127.0.0.1:4780',
   executionMode: 'hibrido_web',
-  sapSociedadDefault: '1000',
+  sapSociedadDefault: 'CO10',
+  sapFondoDefault: 'INTR',
+  sapOperacionContableDefault: 'GASTOS TC',
   sapClaseDocDefault: 'KR',
+  sapFechaContableDefault: '',
+  sapClaseFacturaDefault: 'Documento Soporte',
 };
 
 export const INITIAL_CLARA_COST_CENTER_RULES: ClaraCostCenterRule[] = [
@@ -40,9 +44,11 @@ export const INITIAL_CLARA_COST_CENTER_RULES: ClaraCostCenterRule[] = [
     sociedad: 'PREMEX',
     centroCostoClara: 'CC-COM-01 Ventas',
     erpDestino: 'SAP',
-    codigoCentroCostoErp: '1000-COM01',
+    codigoCentroCostoErp: 'CO10001500',
     cuentaContableDefault: '5195250001',
-    sociedadSap: '1000',
+    sociedadSap: 'CO10',
+    fondoDefault: 'INTR',
+    operacionContableDefault: 'GASTOS TC',
     activa: true,
   },
   {
@@ -50,9 +56,11 @@ export const INITIAL_CLARA_COST_CENTER_RULES: ClaraCostCenterRule[] = [
     sociedad: 'PREMEX',
     centroCostoClara: 'CC-TI-04 Tecnología',
     erpDestino: 'SAP',
-    codigoCentroCostoErp: '1000-TI004',
+    codigoCentroCostoErp: 'CO10001500',
     cuentaContableDefault: '5135700002',
-    sociedadSap: '1000',
+    sociedadSap: 'CO10',
+    fondoDefault: 'INTR',
+    operacionContableDefault: 'GASTOS TC',
     activa: true,
   },
   {
@@ -60,9 +68,11 @@ export const INITIAL_CLARA_COST_CENTER_RULES: ClaraCostCenterRule[] = [
     sociedad: 'ADIQUIM',
     centroCostoClara: 'CC-OPS-02 Planta',
     erpDestino: 'SAP',
-    codigoCentroCostoErp: '2000-OPS02',
+    codigoCentroCostoErp: 'CO20001500',
     cuentaContableDefault: '5295200005',
-    sociedadSap: '2000',
+    sociedadSap: 'CO20',
+    fondoDefault: 'INTR',
+    operacionContableDefault: 'GASTOS TC',
     activa: true,
   },
   {
@@ -1172,64 +1182,267 @@ export const downloadWorkManagerImportTemplate = () => {
   XLSX.writeFile(wb, 'Plantilla_Carga_WorkManager_Premex.xlsx');
 };
 
+export const formatDateDdMmYyyy = (rawDate?: string): string => {
+  const s = String(rawDate || '').trim();
+  if (!s) {
+    const now = new Date();
+    return `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+  }
+  const iso = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (iso) {
+    return `${iso[3].padStart(2, '0')}/${iso[2].padStart(2, '0')}/${iso[1]}`;
+  }
+  const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmy) {
+    return `${dmy[1].padStart(2, '0')}/${dmy[2].padStart(2, '0')}/${dmy[3]}`;
+  }
+  return s;
+};
+
+export const sanitizeNitSinGuion = (rawNit?: string): string => {
+  return String(rawNit || '')
+    .trim()
+    .replace(/[-\s.]/g, '')
+    .toUpperCase();
+};
+
+export const resolveSapSociedadCode = (
+  tx: ClaraTransaction,
+  rule?: ClaraCostCenterRule,
+  connectorConfig?: ClaraConnectorConfig
+): string => {
+  if (tx.sapSociedad?.trim()) return tx.sapSociedad.trim().toUpperCase();
+  if (rule?.sociedadSap?.trim()) return rule.sociedadSap.trim().toUpperCase();
+  const socKey = normalizeTextKey(tx.sociedad);
+  if (socKey.includes('ADIQUIM')) return 'CO20';
+  if (socKey.includes('NUTREO')) return 'CO60';
+  if (socKey.includes('PREMEX CORP')) return 'CO90';
+  if (socKey.includes('PREMEX')) return 'CO10';
+  return (connectorConfig?.sapSociedadDefault || 'CO10').trim().toUpperCase();
+};
+
+export interface SapBotExcelRow {
+  Sociedad: string;
+  Fondo: string;
+  'Operación contable': string;
+  Importe: number;
+  Indicador: string;
+  'Fecha Doc': string;
+  'Fecha contable': string;
+  'NIT/Asignacion': string;
+  Referencia: string;
+  'Detalle/TXT': string;
+  'Centro de costos': string;
+  'Clase factura': string;
+}
+
+export const buildSapBotExcelRows = (params: {
+  transactions: ClaraTransaction[];
+  vendors: ClaraVendor[];
+  rules: ClaraCostCenterRule[];
+  connectorConfig?: ClaraConnectorConfig;
+}): SapBotExcelRow[] => {
+  const { transactions, vendors, rules, connectorConfig } = params;
+
+  return transactions.map((tx) => {
+    const vendor = findMatchingVendor(tx, vendors);
+    const rule = rules.find(
+      (r) =>
+        normalizeTextKey(r.sociedad) === normalizeTextKey(tx.sociedad) &&
+        (normalizeTextKey(r.centroCostoClara) === normalizeTextKey(tx.centroCosto) ||
+          normalizeTextKey(tx.centroCosto).includes(normalizeTextKey(r.centroCostoClara)))
+    );
+
+    const sociedad = resolveSapSociedadCode(tx, rule, connectorConfig);
+    const fondo = (
+      tx.sapFondo ||
+      rule?.fondoDefault ||
+      connectorConfig?.sapFondoDefault ||
+      'INTR'
+    )
+      .trim()
+      .toUpperCase();
+    const operacion = (
+      tx.sapOperacionContable ||
+      rule?.operacionContableDefault ||
+      connectorConfig?.sapOperacionContableDefault ||
+      'GASTOS TC'
+    )
+      .trim()
+      .toUpperCase();
+
+    const rawTotal = Number(tx.facturaTotal || tx.valor || 0);
+    const moneda = String(tx.facturaMoneda || tx.moneda || 'COP').toUpperCase();
+    const importe =
+      moneda === 'COP'
+        ? Math.round(rawTotal)
+        : Math.round(rawTotal * 100) / 100;
+
+    const indicador = (
+      tx.indicadorImpuesto?.trim().split(/\s+/)[0] ||
+      (tx.origenGasto === 'exterior' ? 'S0' : 'V19')
+    ).toUpperCase();
+
+    const fechaDoc = formatDateDdMmYyyy(tx.facturaFecha || tx.fecha);
+    const fechaContable = formatDateDdMmYyyy(
+      tx.sapFechaContable ||
+        connectorConfig?.sapFechaContableDefault ||
+        tx.facturaFecha ||
+        tx.fecha
+    );
+
+    const nitAsignacion = sanitizeNitSinGuion(
+      vendor?.nitTaxId || tx.facturaNit || tx.nitComercio || ''
+    );
+
+    const referencia = String(
+      tx.facturaNumero ||
+        tx.wmRadicacionNumero ||
+        tx.workManagerNumeroFactura ||
+        tx.claraTxId ||
+        tx.id
+    ).trim();
+
+    const rawDesc = String(tx.observacion || tx.categoria || tx.comercio || '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .trim()
+      .toUpperCase();
+    const detalleTxt = rawDesc.startsWith(`${referencia.toUpperCase()}-`)
+      ? rawDesc
+      : rawDesc
+      ? `${referencia}-${rawDesc}`
+      : referencia;
+
+    const centroCostos = String(
+      tx.sapCentroCosto || rule?.codigoCentroCostoErp || tx.centroCosto || ''
+    )
+      .trim()
+      .toUpperCase();
+
+    const claseFactura = String(
+      tx.sapClaseFactura ||
+        connectorConfig?.sapClaseFacturaDefault ||
+        (tx.origenGasto === 'exterior' ? 'Documento Soporte' : 'Factura Electrónica')
+    ).trim();
+
+    return {
+      Sociedad: sociedad,
+      Fondo: fondo,
+      'Operación contable': operacion,
+      Importe: importe,
+      Indicador: indicador,
+      'Fecha Doc': fechaDoc,
+      'Fecha contable': fechaContable,
+      'NIT/Asignacion': nitAsignacion,
+      Referencia: referencia,
+      'Detalle/TXT': detalleTxt,
+      'Centro de costos': centroCostos,
+      'Clase factura': claseFactura,
+    };
+  });
+};
+
+export const exportSapBotExcel = (params: {
+  transactions: ClaraTransaction[];
+  vendors: ClaraVendor[];
+  rules: ClaraCostCenterRule[];
+  connectorConfig?: ClaraConnectorConfig;
+  userName: string;
+}): ClaraBatchExportLog => {
+  const { transactions, vendors, rules, connectorConfig, userName } = params;
+  const wb = XLSX.utils.book_new();
+  const dateTag = new Date().toISOString().slice(0, 10);
+  const rows = buildSapBotExcelRows({ transactions, vendors, rules, connectorConfig });
+
+  const headers: (keyof SapBotExcelRow)[] = [
+    'Sociedad',
+    'Fondo',
+    'Operación contable',
+    'Importe',
+    'Indicador',
+    'Fecha Doc',
+    'Fecha contable',
+    'NIT/Asignacion',
+    'Referencia',
+    'Detalle/TXT',
+    'Centro de costos',
+    'Clase factura',
+  ];
+
+  const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
+
+  // Preservar ceros iniciales y referencias largas como texto (@) evitando notación científica
+  const textColIndexes = [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11];
+  for (let r = 1; r <= rows.length; r += 1) {
+    textColIndexes.forEach((c) => {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[addr];
+      if (cell) {
+        cell.t = 's';
+        cell.v = String(cell.v ?? '');
+        cell.z = '@';
+      }
+    });
+    const amountAddr = XLSX.utils.encode_cell({ r, c: 3 });
+    if (ws[amountAddr]) {
+      ws[amountAddr].t = 'n';
+    }
+  }
+
+  ws['!cols'] = [
+    { wch: 10 }, // Sociedad
+    { wch: 9 },  // Fondo
+    { wch: 20 }, // Operación contable
+    { wch: 14 }, // Importe
+    { wch: 10 }, // Indicador
+    { wch: 13 }, // Fecha Doc
+    { wch: 15 }, // Fecha contable
+    { wch: 16 }, // NIT/Asignacion
+    { wch: 20 }, // Referencia
+    { wch: 44 }, // Detalle/TXT
+    { wch: 16 }, // Centro de costos
+    { wch: 20 }, // Clase factura
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Bot_SAP_Contabilizacion');
+  const fileName = `Archivo_Bot_SAP_Clara_${dateTag}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+
+  return {
+    id: `batch-sap-${Date.now()}`,
+    createdAtIso: new Date().toISOString(),
+    createdBy: userName,
+    erp: 'SAP',
+    tipo: 'sap_bot',
+    cantidadRegistros: transactions.length,
+    totalMonto: transactions.reduce((s, t) => s + (Number(t.facturaTotal || t.valor) || 0), 0),
+    moneda: transactions[0]?.moneda || 'COP',
+    archivoNombre: fileName,
+  };
+};
+
 export const exportAccountingBatchExcel = (params: {
   erp: 'SAP' | 'Odoo';
   transactions: ClaraTransaction[];
   vendors: ClaraVendor[];
   rules: ClaraCostCenterRule[];
+  connectorConfig?: ClaraConnectorConfig;
   userName: string;
 }): ClaraBatchExportLog => {
-  const { erp, transactions, vendors, rules, userName } = params;
-  const wb = XLSX.utils.book_new();
-  const dateTag = new Date().toISOString().slice(0, 10);
+  const { erp, transactions, vendors, rules, connectorConfig, userName } = params;
 
   if (erp === 'SAP') {
-    const rows = transactions.map((tx) => {
-      const vendor = findMatchingVendor(tx, vendors);
-      const rule = rules.find(
-        (r) =>
-          normalizeTextKey(r.sociedad) === normalizeTextKey(tx.sociedad) &&
-          normalizeTextKey(r.centroCostoClara) === normalizeTextKey(tx.centroCosto)
-      );
-      return {
-        Sociedad_SAP: rule?.sociedadSap || tx.sociedad,
-        Fecha_Contabilizacion: tx.fecha,
-        Fecha_Documento: tx.fecha,
-        Clase_Doc: tx.origenGasto === 'exterior' ? 'KR' : 'KR',
-        Referencia_Clara: tx.claraTxId || tx.id,
-        Factura_WorkManager:
-          tx.origenGasto === 'exterior'
-            ? 'EXENTO_EXTERIOR'
-            : tx.workManagerNumeroFactura || 'SIN_FACTURA',
-        Codigo_Acreedor_SAP: vendor?.codigoTerceroSap || 'PENDIENTE',
-        NIT_Tercero: vendor?.nitTaxId || tx.nitComercio || '',
-        Nombre_Tercero: vendor?.razonSocial || tx.comercio,
-        Cuenta_Mayor: tx.cuentaContable || rule?.cuentaContableDefault || '',
-        Centro_Costo_SAP: rule?.codigoCentroCostoErp || tx.centroCosto,
-        Moneda: tx.moneda,
-        Importe: tx.valor,
-        Indicador_Impuesto: tx.indicadorImpuesto || (tx.origenGasto === 'exterior' ? 'S0' : 'V19'),
-        Texto_Observacion_Clara: tx.observacion,
-        Tarjetahabiente: tx.tarjetahabiente,
-      };
+    return exportSapBotExcel({
+      transactions,
+      vendors,
+      rules,
+      connectorConfig,
+      userName,
     });
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, 'Lote_SAP_Gastos_TC');
-    const fileName = `Lote_Contable_SAP_Clara_${dateTag}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-
-    return {
-      id: `batch-sap-${Date.now()}`,
-      createdAtIso: new Date().toISOString(),
-      createdBy: userName,
-      erp: 'SAP',
-      tipo: 'gastos',
-      cantidadRegistros: transactions.length,
-      totalMonto: transactions.reduce((s, t) => s + (Number(t.valor) || 0), 0),
-      moneda: transactions[0]?.moneda || 'COP',
-      archivoNombre: fileName,
-    };
   }
+
+  const wb = XLSX.utils.book_new();
+  const dateTag = new Date().toISOString().slice(0, 10);
 
   // Odoo format
   const rows = transactions.map((tx) => {
@@ -1484,13 +1697,19 @@ export interface SapBotDispatchItem {
   txId: string;
   claraTxId: string;
   sociedadSap: string;
+  fondo: string;
+  operacionContable: string;
   claseDoc: string;
+  claseFactura: string;
   fechaClara: string;
   fechaFactura: string;
+  fechaDocDdMmYyyy: string;
+  fechaContableDdMmYyyy: string;
   numeroFactura: string;
   cufe: string;
   codigoAcreedorSap: string;
   nitTercero: string;
+  nitAsignacionSinGuion: string;
   nombreTercero: string;
   cuentaMayor: string;
   centroCostoSap: string;
@@ -1500,6 +1719,7 @@ export interface SapBotDispatchItem {
   total: number;
   indicadorImpuesto: string;
   textoPosicion: string;
+  detalleTxt: string;
   tarjetahabiente: string;
   estadoWorkManager: string;
 }
@@ -1538,32 +1758,73 @@ export const buildSapBotDispatchPackage = (params: {
         ? Number(tx.facturaSubtotal)
         : Math.max(0, Math.round((total - impuesto) * 100) / 100);
 
-    return {
-      txId: tx.id,
-      claraTxId: tx.claraTxId || tx.id,
-      sociedadSap: tx.sapSociedad || rule?.sociedadSap || connectorConfig.sapSociedadDefault || '1000',
-      claseDoc: tx.sapClaseDoc || connectorConfig.sapClaseDocDefault || 'KR',
-      fechaClara: tx.fecha,
-      fechaFactura: tx.facturaFecha || tx.fecha,
-      numeroFactura:
-        tx.facturaNumero ||
+    const numeroFactura = String(
+      tx.facturaNumero ||
         tx.wmRadicacionNumero ||
         tx.workManagerNumeroFactura ||
         tx.claraTxId ||
-        tx.id,
+        tx.id
+    ).trim();
+    const rawNit = vendor?.nitTaxId || tx.facturaNit || tx.nitComercio || '';
+    const rawObs = String(tx.observacion || tx.categoria || tx.comercio || '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .trim()
+      .toUpperCase();
+    const detalleTxt = rawObs.startsWith(`${numeroFactura.toUpperCase()}-`)
+      ? rawObs
+      : rawObs
+      ? `${numeroFactura}-${rawObs}`
+      : numeroFactura;
+
+    const fechaDocIso = tx.facturaFecha || tx.fecha;
+    const fechaContIso =
+      tx.sapFechaContable || connectorConfig.sapFechaContableDefault || fechaDocIso;
+
+    return {
+      txId: tx.id,
+      claraTxId: tx.claraTxId || tx.id,
+      sociedadSap: resolveSapSociedadCode(tx, rule, connectorConfig),
+      fondo: (tx.sapFondo || rule?.fondoDefault || connectorConfig.sapFondoDefault || 'INTR')
+        .trim()
+        .toUpperCase(),
+      operacionContable: (
+        tx.sapOperacionContable ||
+        rule?.operacionContableDefault ||
+        connectorConfig.sapOperacionContableDefault ||
+        'GASTOS TC'
+      )
+        .trim()
+        .toUpperCase(),
+      claseDoc: tx.sapClaseDoc || connectorConfig.sapClaseDocDefault || 'KR',
+      claseFactura: String(
+        tx.sapClaseFactura ||
+          connectorConfig.sapClaseFacturaDefault ||
+          (tx.origenGasto === 'exterior' ? 'Documento Soporte' : 'Factura Electrónica')
+      ).trim(),
+      fechaClara: tx.fecha,
+      fechaFactura: fechaDocIso,
+      fechaDocDdMmYyyy: formatDateDdMmYyyy(fechaDocIso),
+      fechaContableDdMmYyyy: formatDateDdMmYyyy(fechaContIso),
+      numeroFactura,
       cufe: tx.facturaCufe || '',
       codigoAcreedorSap: vendor?.codigoTerceroSap || '',
-      nitTercero: vendor?.nitTaxId || tx.facturaNit || tx.nitComercio || '',
+      nitTercero: rawNit,
+      nitAsignacionSinGuion: sanitizeNitSinGuion(rawNit),
       nombreTercero: vendor?.razonSocial || tx.facturaProveedor || tx.comercio,
       cuentaMayor: tx.cuentaContable || rule?.cuentaContableDefault || vendor?.cuentaGastoDefault || '',
-      centroCostoSap: tx.sapCentroCosto || rule?.codigoCentroCostoErp || tx.centroCosto,
+      centroCostoSap: String(
+        tx.sapCentroCosto || rule?.codigoCentroCostoErp || tx.centroCosto || ''
+      )
+        .trim()
+        .toUpperCase(),
       moneda: tx.facturaMoneda || tx.moneda || 'COP',
       subtotal,
       impuesto,
       total,
       indicadorImpuesto:
-        tx.indicadorImpuesto?.split(' ')[0] || (tx.origenGasto === 'exterior' ? 'S0' : 'V19'),
+        tx.indicadorImpuesto?.trim().split(/\s+/)[0] || (tx.origenGasto === 'exterior' ? 'S0' : 'V19'),
       textoPosicion: `${tx.tarjetahabiente}: ${tx.observacion}`.trim().slice(0, 50),
+      detalleTxt,
       tarjetahabiente: tx.tarjetahabiente,
       estadoWorkManager: tx.wmRadicacionStatus || tx.workManagerStatus,
     };
@@ -1596,38 +1857,36 @@ export const downloadSapBotPackageJson = (pkg: SapBotDispatchPackage): string =>
 };
 
 export const downloadSapBotPackageTxt = (pkg: SapBotDispatchPackage): string => {
-  const fileName = `plano_sap_fb60_${new Date().toISOString().slice(0, 10)}.txt`;
+  const fileName = `plano_sap_bot_${new Date().toISOString().slice(0, 10)}.txt`;
   const header = [
-    'SOCIEDAD',
-    'CLASE_DOC',
-    'FECHA_DOC',
-    'REFERENCIA',
-    'ACREEDOR_SAP',
-    'NIT',
-    'MONEDA',
-    'TOTAL',
-    'IMPUESTO',
-    'IND_IMP',
-    'CUENTA_MAYOR',
-    'CENTRO_COSTO',
-    'TEXTO_POSICION',
+    'Sociedad',
+    'Fondo',
+    'Operación contable',
+    'Importe',
+    'Indicador',
+    'Fecha Doc',
+    'Fecha contable',
+    'NIT/Asignacion',
+    'Referencia',
+    'Detalle/TXT',
+    'Centro de costos',
+    'Clase factura',
   ].join('\t');
 
   const lines = pkg.items.map((i) =>
     [
       i.sociedadSap,
-      i.claseDoc,
-      i.fechaFactura,
-      i.numeroFactura,
-      i.codigoAcreedorSap || 'PENDIENTE',
-      i.nitTercero,
-      i.moneda,
-      i.total,
-      i.impuesto,
+      i.fondo,
+      i.operacionContable,
+      i.moneda === 'COP' ? Math.round(i.total) : i.total,
       i.indicadorImpuesto,
-      i.cuentaMayor,
+      i.fechaDocDdMmYyyy,
+      i.fechaContableDdMmYyyy,
+      i.nitAsignacionSinGuion,
+      i.numeroFactura,
+      i.detalleTxt.replace(/\t/g, ' '),
       i.centroCostoSap,
-      i.textoPosicion.replace(/\t/g, ' '),
+      i.claseFactura,
     ].join('\t')
   );
 
