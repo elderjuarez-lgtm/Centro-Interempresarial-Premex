@@ -759,7 +759,15 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     patch: Partial<
       Pick<
         ViaticoExpenseItem,
-        'clienteContacto' | 'objetivoComercial' | 'descripcionGasto' | 'categoria' | 'kilometraje'
+        | 'clienteContacto'
+        | 'objetivoComercial'
+        | 'descripcionGasto'
+        | 'categoria'
+        | 'kilometraje'
+        | 'odooCostCenterCode'
+        | 'odooAnalyticDistribution'
+        | 'splitByEmployeesCount'
+        | 'splitEmployeeNames'
       >
     >
   ) => {

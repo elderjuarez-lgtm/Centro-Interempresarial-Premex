@@ -424,6 +424,89 @@ export function findMatchingCostCenterEntry(
   );
 }
 
+const IGNORED_DETECTED_CECO_TOKENS = new Set([
+  'guatemala',
+  'premex',
+  'premezclas',
+  'premezclas latinoamericanas',
+  'anitox',
+  'consumidor final',
+  'contado',
+  'credito',
+  'factura',
+  'recibo',
+  'ciudad',
+  'ninguno',
+  'na',
+  'n/a',
+]);
+
+/**
+ * Strictly validates an AI-detected cost center annotation from a receipt
+ * against active Odoo cost centers. Returns null if not explicitly matched
+ * so the liquidation's origin cost center is preserved safely.
+ */
+export function resolveDetectedCostCenterFromCatalog(
+  detectedText: string | undefined,
+  costCenters: OdooCostCenterEntry[]
+): OdooCostCenterEntry | null {
+  const raw = String(detectedText || '').trim();
+  if (raw.length < 3) return null;
+
+  const active = costCenters.filter((cc) => cc.activo !== false);
+  if (active.length === 0) return null;
+
+  const cleanedRaw = raw
+    .replace(/^(?:ceco|c\.?\s*c\.?|centro\s+de\s+costo|cuenta\s+anal[ií]tica|proyecto)\s*[:#\-]?\s*/i, '')
+    .trim();
+  if (cleanedRaw.length < 3) return null;
+
+  const normCleaned = normalizeTextToken(cleanedRaw);
+  if (!normCleaned || IGNORED_DETECTED_CECO_TOKENS.has(normCleaned)) {
+    return null;
+  }
+
+  const upperRaw = raw.toUpperCase();
+  const upperCleaned = cleanedRaw.toUpperCase();
+
+  // 1) Exact label or exact code match
+  const exact = active.find(
+    (cc) =>
+      cc.cuentaAnalitica.toUpperCase() === upperCleaned ||
+      cc.cuentaAnalitica.toUpperCase() === upperRaw ||
+      cc.codigo.toUpperCase() === upperCleaned
+  );
+  if (exact) return exact;
+
+  // 2) Code token match with boundary (e.g. GT10000601 or 400180 inside "CECO 400180 NUTREO")
+  const byCodeToken = active.find((cc) => {
+    const code = cc.codigo.trim().toUpperCase();
+    if (code.length < 4) return false;
+    const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`).test(upperRaw);
+  });
+  if (byCodeToken) return byCodeToken;
+
+  // 3) Descriptive name match (only meaningful descriptors >= 5 chars, never matching short noise)
+  if (normCleaned.length >= 5) {
+    const byDesc = active.find((cc) => {
+      const descOnly = cc.cuentaAnalitica
+        .replace(new RegExp(`^${cc.codigo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '')
+        .trim();
+      const normDesc = normalizeTextToken(descOnly);
+      if (normDesc.length < 5) return false;
+      return (
+        normDesc === normCleaned ||
+        (normCleaned.length >= 6 && normDesc.includes(normCleaned)) ||
+        (normDesc.length >= 6 && normCleaned.includes(normDesc))
+      );
+    });
+    if (byDesc) return byDesc;
+  }
+
+  return null;
+}
+
 export function findMatchingOdooEmployee(params: {
   email?: string | null;
   nombre?: string | null;

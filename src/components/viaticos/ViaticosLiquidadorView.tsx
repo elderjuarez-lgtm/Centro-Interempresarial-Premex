@@ -72,6 +72,7 @@ import { normalizeCompanyKey } from '../../utils/permissions';
 import {
   findMatchingCostCenterEntry,
   mergeOdooCatalogsWithDefaults,
+  resolveDetectedCostCenterFromCatalog,
   resolveOdooDocTypeByHint,
   resolveOdooExpenseCodeByHint,
   resolveOdooTaxIndicatorByHint,
@@ -117,7 +118,15 @@ interface ViaticosLiquidadorViewProps {
     patch: Partial<
       Pick<
         ViaticoExpenseItem,
-        'clienteContacto' | 'objetivoComercial' | 'descripcionGasto' | 'categoria' | 'kilometraje'
+        | 'clienteContacto'
+        | 'objetivoComercial'
+        | 'descripcionGasto'
+        | 'categoria'
+        | 'kilometraje'
+        | 'odooCostCenterCode'
+        | 'odooAnalyticDistribution'
+        | 'splitByEmployeesCount'
+        | 'splitEmployeeNames'
       >
     >
   ) => void;
@@ -147,7 +156,8 @@ type InlineEditableField =
   | 'objetivoComercial'
   | 'descripcionGasto'
   | 'kilometraje'
-  | 'impuestos';
+  | 'impuestos'
+  | 'odooCostCenterCode';
 
 interface PendingUploadFile {
   id: string;
@@ -271,6 +281,13 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     () => mergeOdooCatalogsWithDefaults(odooCatalogs),
     [odooCatalogs]
   );
+  const activeCostCenterLabels = useMemo(
+    () =>
+      catalogs.costCenters
+        .filter((cc) => cc.activo !== false)
+        .map((cc) => cc.cuentaAnalitica),
+    [catalogs.costCenters]
+  );
   const [showOdooDocFields, setShowOdooDocFields] = useState(false);
   const [splitEmployeeSearch, setSplitEmployeeSearch] = useState('');
   const isZoomHigh = zoomPercent >= 120;
@@ -379,6 +396,19 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   const [bulkCategoria, setBulkCategoria] = useState<ViaticoCategory>('Alimentación');
   const [bulkApplyKilometraje, setBulkApplyKilometraje] = useState(false);
   const [bulkKilometraje, setBulkKilometraje] = useState('');
+  const [bulkApplyCeco, setBulkApplyCeco] = useState(false);
+  const [bulkCeco, setBulkCeco] = useState('');
+  const [bulkApplySplit, setBulkApplySplit] = useState(false);
+  const [bulkSplitMode, setBulkSplitMode] = useState<'set' | 'clear'>('set');
+  const [bulkSplitCount, setBulkSplitCount] = useState('2');
+  const [bulkSplitEmployeeNames, setBulkSplitEmployeeNames] = useState<string[]>([]);
+  const [bulkSplitSearch, setBulkSplitSearch] = useState('');
+  const [bulkEditError, setBulkEditError] = useState<string | null>(null);
+  const [splitModalItem, setSplitModalItem] = useState<ViaticoExpenseItem | null>(null);
+  const [splitModalCount, setSplitModalCount] = useState('2');
+  const [splitModalNames, setSplitModalNames] = useState<string[]>([]);
+  const [splitModalSearch, setSplitModalSearch] = useState('');
+  const [splitModalError, setSplitModalError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -402,6 +432,16 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     setBulkApplyCategoria(false);
     setBulkApplyKilometraje(false);
     setBulkKilometraje('');
+    setBulkApplyCeco(false);
+    setBulkCeco('');
+    setBulkApplySplit(false);
+    setBulkSplitMode('set');
+    setBulkSplitCount('2');
+    setBulkSplitEmployeeNames([]);
+    setBulkSplitSearch('');
+    setBulkEditError(null);
+    setSplitModalItem(null);
+    setSplitModalError(null);
     setBulkProgressText(null);
     setActiveMediaPreview(null);
     setUploadQueue([]);
@@ -613,7 +653,13 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         mimeType: prepared.mimeType,
         fileName: mediaRecord.fileName,
         baseCurrency: liquidation.monedaBase,
+        availableCostCenters: activeCostCenterLabels,
       });
+
+      const detectedCeco = resolveDetectedCostCenterFromCatalog(
+        extracted.centroCostoDetectado,
+        catalogs.costCenters
+      );
 
       const suggestedTaxRate = extracted.aplicaImpuestos
         ? extracted.porcentajeImpuesto > 0
@@ -691,6 +737,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         odooProductId: suggestedProduct,
         odooTaxIndicator: suggestedTax,
         odooExpenseType: prev.odooExpenseType || catalogs.defaultExpenseType || 'Gasto',
+        odooCostCenterCode: detectedCeco ? detectedCeco.cuentaAnalitica : prev.odooCostCenterCode,
+        odooAnalyticDistribution: detectedCeco
+          ? detectedCeco.analyticDistribution
+          : prev.odooAnalyticDistribution,
         attachmentId: mediaRecord.id,
         attachmentName: mediaRecord.fileName,
         attachmentMimeType: mediaRecord.mimeType,
@@ -700,12 +750,16 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         extractionNotes: extracted.notasExtraccion,
       }));
 
+      const detectedCecoNote = detectedCeco
+        ? ` · CECO detectado: ${detectedCeco.cuentaAnalitica}`
+        : '';
+
       setAiStatusBanner({
         type: extracted.confianza === 'baja' ? 'warning' : 'success',
         text:
           extracted.confianza === 'baja'
-            ? `Lectura parcial (${extracted.notasExtraccion || 'imagen con baja nitidez'}). Verifica y completa los campos antes de agregar.`
-            : `Factura leída (${extracted.proveedor || 'proveedor detectado'} · ${extracted.moneda})${
+            ? `Lectura parcial (${extracted.notasExtraccion || 'imagen con baja nitidez'}). Verifica y completa los campos antes de agregar.${detectedCecoNote}`
+            : `Factura leída (${extracted.proveedor || 'proveedor detectado'} · ${extracted.moneda})${detectedCecoNote}${
                 extracted.notasExtraccion ? ` — ${extracted.notasExtraccion}` : ''
               }`,
       });
@@ -786,6 +840,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           dataUrl,
           fileName: originalFileName,
           baseCurrency: liquidation.monedaBase,
+          availableCostCenters: activeCostCenterLabels,
           onProgress: ({ currentChunk, totalChunks, totalPages: pages, extractedSoFar }) => {
             setBulkProgressText(
               `Leyendo bloque ${currentChunk}/${totalChunks} (${pages} pág.) · ${extractedSoFar} factura(s) detectada(s)...`
@@ -869,11 +924,20 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       const defaultObjetivo = form.objetivoComercial.trim() || lastObjetivo;
 
       const itemsToAdd: ViaticoExpenseItem[] = [];
+      let detectedCecoCount = 0;
       for (let idx = 0; idx < extractedList.length; idx++) {
         const extracted = extractedList[idx];
         const assignedMedia = await resolveMediaForExtractedInvoice(extracted, idx);
         if (!firstAssignedMedia) {
           firstAssignedMedia = assignedMedia;
+        }
+
+        const detectedCeco = resolveDetectedCostCenterFromCatalog(
+          extracted.centroCostoDetectado,
+          catalogs.costCenters
+        );
+        if (detectedCeco) {
+          detectedCecoCount += 1;
         }
 
         const valorFactura = roundMoney(Math.max(0, extracted.valorFactura));
@@ -967,6 +1031,8 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           odooProductId: suggestedProduct || undefined,
           odooTaxIndicator: suggestedTax || undefined,
           odooExpenseType: catalogs.defaultExpenseType || 'Gasto',
+          odooCostCenterCode: detectedCeco?.cuentaAnalitica || undefined,
+          odooAnalyticDistribution: detectedCeco?.analyticDistribution || undefined,
           attachmentId: assignedMedia.id,
           attachmentName: assignedMedia.fileName,
           attachmentMimeType: assignedMedia.mimeType,
@@ -992,6 +1058,10 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         text: `Carga masiva completada: ${itemsToAdd.length} factura(s) extraída(s) desde "${originalFileName}" (${totalPages} pág.)${
           splitAttachmentCount > 0
             ? ` con ${splitAttachmentCount} PDF(s) individuales asignado(s) por línea`
+            : ''
+        }${
+          detectedCecoCount > 0
+            ? ` · ${detectedCecoCount} con CECO detectado en el documento`
             : ''
         }. Haz doble clic en cualquier celda para editar o usa los recuadros para edición masiva.`,
       });
@@ -1125,6 +1195,22 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         ...item,
         categoria: rawStr as ViaticoCategory,
       };
+    } else if (field === 'odooCostCenterCode') {
+      const ccVal = rawStr.trim();
+      if (!ccVal) {
+        nextItem = {
+          ...item,
+          odooCostCenterCode: undefined,
+          odooAnalyticDistribution: undefined,
+        };
+      } else {
+        const matched = findMatchingCostCenterEntry(ccVal, '', catalogs.costCenters);
+        nextItem = {
+          ...item,
+          odooCostCenterCode: matched?.cuentaAnalitica || ccVal,
+          odooAnalyticDistribution: matched?.analyticDistribution || undefined,
+        };
+      }
     } else if (field === 'proveedor') {
       const trimmed = rawStr.trim();
       if (!trimmed) {
@@ -1174,14 +1260,32 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     setBulkApplyCategoria(false);
     setBulkApplyKilometraje(false);
     setBulkKilometraje('');
+    setBulkApplyCeco(false);
+    setBulkCeco('');
+    setBulkApplySplit(false);
+    setBulkSplitMode('set');
+    setBulkSplitCount('2');
+    setBulkSplitEmployeeNames([]);
+    setBulkSplitSearch('');
+    setBulkEditError(null);
   };
 
   const handleApplyBulkEdit = () => {
     if (isLocked || !liquidation || selectedItemIds.length === 0) return;
+    setBulkEditError(null);
+
     const patch: Partial<
       Pick<
         ViaticoExpenseItem,
-        'clienteContacto' | 'objetivoComercial' | 'descripcionGasto' | 'categoria' | 'kilometraje'
+        | 'clienteContacto'
+        | 'objetivoComercial'
+        | 'descripcionGasto'
+        | 'categoria'
+        | 'kilometraje'
+        | 'odooCostCenterCode'
+        | 'odooAnalyticDistribution'
+        | 'splitByEmployeesCount'
+        | 'splitEmployeeNames'
       >
     > = {};
 
@@ -1190,6 +1294,39 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     if (bulkApplyDescripcion) patch.descripcionGasto = bulkDescripcion.trim();
     if (bulkApplyCategoria) patch.categoria = bulkCategoria;
     if (bulkApplyKilometraje) patch.kilometraje = bulkKilometraje.trim();
+    if (bulkApplyCeco) {
+      const ccVal = bulkCeco.trim();
+      if (!ccVal) {
+        patch.odooCostCenterCode = undefined;
+        patch.odooAnalyticDistribution = undefined;
+      } else {
+        const matched = findMatchingCostCenterEntry(ccVal, '', catalogs.costCenters);
+        patch.odooCostCenterCode = matched?.cuentaAnalitica || ccVal;
+        patch.odooAnalyticDistribution = matched?.analyticDistribution || undefined;
+      }
+    }
+    if (bulkApplySplit) {
+      if (bulkSplitMode === 'clear') {
+        patch.splitByEmployeesCount = undefined;
+        patch.splitEmployeeNames = undefined;
+      } else {
+        const parsedCount = Math.floor(Number(bulkSplitCount) || 0);
+        if (!Number.isFinite(parsedCount) || parsedCount < 2) {
+          setBulkEditError(
+            'En "Dividir gasto", indica una cantidad de personas mayor o igual a 2.'
+          );
+          return;
+        }
+        if (bulkSplitEmployeeNames.length !== parsedCount) {
+          setBulkEditError(
+            `En "Dividir gasto", debes seleccionar exactamente ${parsedCount} empleados (${bulkSplitEmployeeNames.length} de ${parsedCount} seleccionados).`
+          );
+          return;
+        }
+        patch.splitByEmployeesCount = parsedCount;
+        patch.splitEmployeeNames = [...bulkSplitEmployeeNames];
+      }
+    }
 
     if (Object.keys(patch).length === 0) return;
 
@@ -1205,6 +1342,63 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
     }
 
     resetBulkEditPanel(true);
+  };
+
+  const openSplitModalForItem = (item: ViaticoExpenseItem) => {
+    if (isLocked) return;
+    const existingNames = Array.isArray(item.splitEmployeeNames)
+      ? item.splitEmployeeNames.map((n) => String(n || '').trim().toUpperCase()).filter(Boolean)
+      : [];
+    const existingCount =
+      item.splitByEmployeesCount && item.splitByEmployeesCount >= 2
+        ? item.splitByEmployeesCount
+        : existingNames.length >= 2
+        ? existingNames.length
+        : 2;
+    setSplitModalItem(item);
+    setSplitModalCount(String(existingCount));
+    setSplitModalNames(existingNames);
+    setSplitModalSearch('');
+    setSplitModalError(null);
+  };
+
+  const handleSaveRowSplitModal = () => {
+    if (!splitModalItem || isLocked) return;
+    const parsedCount = Math.floor(Number(splitModalCount) || 0);
+    if (!Number.isFinite(parsedCount) || parsedCount < 2) {
+      setSplitModalError('Indica una cantidad de personas mayor o igual a 2.');
+      return;
+    }
+    if (splitModalNames.length !== parsedCount) {
+      setSplitModalError(
+        `Debes seleccionar exactamente ${parsedCount} empleados (${splitModalNames.length} de ${parsedCount} seleccionados).`
+      );
+      return;
+    }
+    onAddOrUpdateItem(
+      {
+        ...splitModalItem,
+        splitByEmployeesCount: parsedCount,
+        splitEmployeeNames: [...splitModalNames],
+      },
+      true
+    );
+    setSplitModalItem(null);
+    setSplitModalError(null);
+  };
+
+  const handleClearRowSplitModal = () => {
+    if (!splitModalItem || isLocked) return;
+    onAddOrUpdateItem(
+      {
+        ...splitModalItem,
+        splitByEmployeesCount: undefined,
+        splitEmployeeNames: undefined,
+      },
+      true
+    );
+    setSplitModalItem(null);
+    setSplitModalError(null);
   };
 
   const handleRotateCurrentPreview = async () => {
@@ -1256,7 +1450,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         mimeType: activeMediaPreview.mimeType,
         fileName: activeMediaPreview.fileName,
         baseCurrency: liquidation.monedaBase,
+        availableCostCenters: activeCostCenterLabels,
       });
+      const detectedCeco = resolveDetectedCostCenterFromCatalog(
+        extracted.centroCostoDetectado,
+        catalogs.costCenters
+      );
       const suggestedTaxRate = extracted.aplicaImpuestos
         ? extracted.porcentajeImpuesto > 0
           ? extracted.porcentajeImpuesto
@@ -1330,13 +1529,19 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         odooProductId: suggestedProduct,
         odooTaxIndicator: suggestedTax,
         odooExpenseType: prev.odooExpenseType || catalogs.defaultExpenseType || 'Gasto',
+        odooCostCenterCode: detectedCeco ? detectedCeco.cuentaAnalitica : prev.odooCostCenterCode,
+        odooAnalyticDistribution: detectedCeco
+          ? detectedCeco.analyticDistribution
+          : prev.odooAnalyticDistribution,
         extractedByAi: true,
         extractionConfidence: extracted.confianza,
         extractionNotes: extracted.notasExtraccion,
       }));
       setAiStatusBanner({
         type: 'success',
-        text: 'Datos actualizados nuevamente mediante lectura IA.',
+        text: detectedCeco
+          ? `Datos actualizados nuevamente mediante lectura IA · CECO detectado: ${detectedCeco.cuentaAnalitica}.`
+          : 'Datos actualizados nuevamente mediante lectura IA.',
       });
     } catch (err: any) {
       setAiStatusBanner({
@@ -3744,7 +3949,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {/* Cliente / Contacto */}
               <div className="bg-white rounded-xl border border-slate-200 p-2 space-y-1">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer">
@@ -3873,7 +4078,224 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
                 />
               </div>
+
+              {/* Centro de Costo (CECO) */}
+              <div className="bg-white rounded-xl border border-slate-200 p-2 space-y-1">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkApplyCeco}
+                    onChange={(e) => setBulkApplyCeco(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                  />
+                  <span>Centro de Costo (CECO)</span>
+                </label>
+                <select
+                  value={bulkCeco}
+                  onChange={(e) => {
+                    setBulkCeco(e.target.value);
+                    setBulkApplyCeco(true);
+                  }}
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30"
+                >
+                  <option value="">
+                    Heredar de empleado ({resolvedCostCenter || 'sin asignar'})
+                  </option>
+                  {catalogs.costCenters
+                    .filter((cc) => cc.activo !== false)
+                    .map((cc) => (
+                      <option key={cc.id} value={cc.cuentaAnalitica}>
+                        {cc.cuentaAnalitica} ({cc.analyticDistribution})
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
+
+            {/* Bulk Split Expense Card */}
+            <div className="bg-white rounded-xl border border-slate-200 p-2.5 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="inline-flex items-center gap-2 text-[11px] font-bold text-[#132B63] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkApplySplit}
+                    onChange={(e) => {
+                      setBulkApplySplit(e.target.checked);
+                      setBulkEditError(null);
+                    }}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                  />
+                  <Users className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  <span>Dividir gasto entre empleados (aplicar a seleccionadas)</span>
+                </label>
+
+                {bulkApplySplit && (
+                  <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBulkSplitMode('set');
+                        setBulkEditError(null);
+                      }}
+                      className={`px-2.5 py-1 cursor-pointer transition-colors ${
+                        bulkSplitMode === 'set'
+                          ? 'bg-[#1E60A8] text-white'
+                          : 'bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      Asignar división
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBulkSplitMode('clear');
+                        setBulkEditError(null);
+                      }}
+                      className={`px-2.5 py-1 cursor-pointer transition-colors ${
+                        bulkSplitMode === 'clear'
+                          ? 'bg-rose-600 text-white'
+                          : 'bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      Quitar división
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {bulkApplySplit && bulkSplitMode === 'set' && (
+                <div className="space-y-2 pt-1 border-t border-slate-100">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                    <div className="sm:col-span-3">
+                      <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                        Cantidad personas *
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={2}
+                        max={30}
+                        step={1}
+                        value={bulkSplitCount}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const parsed = Math.floor(Number(raw) || 0);
+                          setBulkSplitCount(raw);
+                          setBulkEditError(null);
+                          if (parsed >= 2 && bulkSplitEmployeeNames.length > parsed) {
+                            setBulkSplitEmployeeNames((prev) => prev.slice(0, parsed));
+                          }
+                        }}
+                        className="w-full px-2.5 py-1 text-xs font-mono font-bold text-[#132B63] rounded-lg border border-slate-300"
+                      />
+                    </div>
+                    <div className="sm:col-span-6">
+                      <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                        Buscar empleado Odoo
+                      </label>
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={bulkSplitSearch}
+                          onChange={(e) => setBulkSplitSearch(e.target.value)}
+                          placeholder="Filtrar por nombre o CECO..."
+                          className="w-full pl-8 pr-2.5 py-1 text-xs rounded-lg border border-slate-300 bg-slate-50 focus:bg-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="sm:col-span-3 flex items-center sm:justify-end">
+                      <span
+                        className={`text-[11px] font-bold px-2 py-1 rounded-lg ${
+                          bulkSplitEmployeeNames.length ===
+                          Math.max(2, Math.floor(Number(bulkSplitCount) || 2))
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border border-amber-200'
+                        }`}
+                      >
+                        {bulkSplitEmployeeNames.length} de{' '}
+                        {Math.max(2, Math.floor(Number(bulkSplitCount) || 2))} selec.
+                      </span>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const targetMax = Math.max(
+                      2,
+                      Math.min(30, Math.floor(Number(bulkSplitCount) || 2))
+                    );
+                    const q = bulkSplitSearch.trim().toLowerCase();
+                    const activeEmployees = catalogs.employees.filter((emp) => {
+                      if (emp.activo === false) return false;
+                      if (!q) return true;
+                      return (
+                        emp.nombreCompleto.toLowerCase().includes(q) ||
+                        (emp.centroCosto || '').toLowerCase().includes(q)
+                      );
+                    });
+                    const limitReached = bulkSplitEmployeeNames.length >= targetMax;
+
+                    return (
+                      <div className="max-h-36 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 pr-1">
+                        {activeEmployees.map((emp) => {
+                          const upperName = emp.nombreCompleto.trim().toUpperCase();
+                          const isChecked = bulkSplitEmployeeNames.includes(upperName);
+                          const isEmpDisabled = !isChecked && limitReached;
+                          return (
+                            <label
+                              key={emp.id}
+                              className={`flex items-start gap-2 p-1.5 rounded-lg border text-[11px] transition-colors ${
+                                isChecked
+                                  ? 'bg-[#1E60A8]/10 border-[#1E60A8]/50 text-[#132B63] cursor-pointer'
+                                  : isEmpDisabled
+                                  ? 'bg-slate-50 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={isEmpDisabled}
+                                onChange={() => {
+                                  setBulkEditError(null);
+                                  setBulkSplitEmployeeNames((prev) => {
+                                    if (prev.includes(upperName)) {
+                                      return prev.filter((x) => x !== upperName);
+                                    }
+                                    if (prev.length >= targetMax) return prev;
+                                    return [...prev, upperName];
+                                  });
+                                }}
+                                className="mt-0.5 w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold truncate">{emp.nombreCompleto}</div>
+                                <div className="text-[10px] text-slate-500 truncate">
+                                  {emp.centroCosto || 'Sin CECO'}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {bulkApplySplit && bulkSplitMode === 'clear' && (
+                <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">
+                  Al aplicar, se quitará la división entre empleados de todas las facturas seleccionadas.
+                </div>
+              )}
+            </div>
+
+            {bulkEditError && (
+              <div className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{bulkEditError}</span>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
@@ -3891,7 +4313,9 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   !bulkApplyObjetivo &&
                   !bulkApplyDescripcion &&
                   !bulkApplyCategoria &&
-                  !bulkApplyKilometraje
+                  !bulkApplyKilometraje &&
+                  !bulkApplyCeco &&
+                  !bulkApplySplit
                 }
                 className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] disabled:opacity-45 rounded-lg transition-colors cursor-pointer"
               >
@@ -3904,7 +4328,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
 
         {/* OFFICIAL 14-COLUMN PREMEX EXCEL SUMMARY TABLE (Mobile + Desktop) with Synchronized Top Scrollbar */}
         <SyncedHorizontalTableScroll>
-          <table className="w-full text-left border-collapse text-xs min-w-[1380px]">
+          <table className="w-full text-left border-collapse text-xs min-w-[1640px]">
             <thead>
               <tr className="bg-[#C4E4EE] text-slate-900 border-b border-slate-300 text-[11px] font-bold">
                 {!isLocked && (
@@ -3967,6 +4391,12 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 <th className="py-2.5 px-2.5 border-r border-slate-300/80 whitespace-nowrap text-center">
                   Imp.
                 </th>
+                <th className="py-2.5 px-3 border-r border-slate-300/80 whitespace-nowrap">
+                  CECO
+                </th>
+                <th className="py-2.5 px-3 border-r border-slate-300/80 whitespace-nowrap text-center">
+                  Dividir Gasto
+                </th>
                 <th className="py-2.5 px-2.5 whitespace-nowrap text-center">
                   Soporte / Acc.
                 </th>
@@ -3975,7 +4405,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             <tbody className="divide-y divide-slate-200">
               {liquidation.items.length === 0 ? (
                 <tr>
-                  <td colSpan={!isLocked ? 17 : 16} className="py-10 text-center text-sm lg:text-xs text-slate-500">
+                  <td colSpan={!isLocked ? 19 : 18} className="py-10 text-center text-sm lg:text-xs text-slate-500">
                     Aún no hay facturas registradas en esta liquidación. Sube una foto, factura individual o PDF masivo arriba para comenzar.
                   </td>
                 </tr>
@@ -4417,6 +4847,120 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                           </span>
                         )}
                       </td>
+
+                      {/* CECO (Centro de Costo por línea) */}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'odooCostCenterCode')}
+                        title={
+                          !isLocked
+                            ? `${
+                                item.odooCostCenterCode
+                                  ? `CECO asignado: ${item.odooCostCenterCode}`
+                                  : `Heredado: ${resolvedCostCenter || 'Sin asignar'}`
+                              } · Doble clic para cambiar CECO`
+                            : item.odooCostCenterCode || resolvedCostCenter || ''
+                        }
+                        className={`py-2 px-2.5 border-r border-slate-200/80 max-w-[180px] ${
+                          !isLocked ? 'cursor-pointer hover:bg-sky-50/70 transition-colors' : ''
+                        }`}
+                      >
+                        {isEditingCell('odooCostCenterCode') ? (
+                          <select
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) =>
+                              commitInlineEdit(item, 'odooCostCenterCode', e.target.value)
+                            }
+                            onBlur={() => cancelInlineEdit()}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') cancelInlineEdit();
+                            }}
+                            className="w-44 px-1.5 py-1 text-xs bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          >
+                            <option value="">
+                              Heredar ({resolvedCostCenter || 'sin asignar'})
+                            </option>
+                            {catalogs.costCenters
+                              .filter((cc) => cc.activo !== false)
+                              .map((cc) => (
+                                <option key={cc.id} value={cc.cuentaAnalitica}>
+                                  {cc.cuentaAnalitica} ({cc.analyticDistribution})
+                                </option>
+                              ))}
+                          </select>
+                        ) : item.odooCostCenterCode ? (
+                          <button
+                            type="button"
+                            disabled={isLocked}
+                            onClick={() => startInlineEdit(item, 'odooCostCenterCode')}
+                            className="text-left w-full truncate font-semibold text-[#132B63] disabled:cursor-default cursor-pointer"
+                          >
+                            {item.odooCostCenterCode}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isLocked}
+                            onClick={() => startInlineEdit(item, 'odooCostCenterCode')}
+                            className="text-left w-full truncate text-[11px] text-slate-400 italic disabled:cursor-default cursor-pointer"
+                          >
+                            Heredado{resolvedCostCenter ? ` (${resolvedCostCenter.split(' ')[0]})` : ''}
+                          </button>
+                        )}
+                      </td>
+
+                      {/* Dividir Gasto entre empleados */}
+                      <td
+                        onDoubleClick={() => openSplitModalForItem(item)}
+                        title={
+                          Array.isArray(item.splitEmployeeNames) &&
+                          item.splitEmployeeNames.length >= 2
+                            ? `Dividido entre ${item.splitEmployeeNames.length}: ${item.splitEmployeeNames.join(', ')}`
+                            : !isLocked
+                            ? 'Clic o doble clic para dividir este gasto entre varios empleados'
+                            : 'Sin dividir'
+                        }
+                        className="py-2 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-center"
+                      >
+                        {(() => {
+                          const splitNames = Array.isArray(item.splitEmployeeNames)
+                            ? item.splitEmployeeNames.filter(Boolean)
+                            : [];
+                          const hasSplit =
+                            (item.splitByEmployeesCount || 0) >= 2 && splitNames.length >= 2;
+                          if (hasSplit) {
+                            return (
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={() => openSplitModalForItem(item)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-colors ${
+                                  isLocked
+                                    ? 'bg-sky-50 text-[#132B63] border-sky-200 cursor-default'
+                                    : 'bg-[#EFF6FF] hover:bg-sky-100 text-[#132B63] border-[#1E60A8]/35 cursor-pointer'
+                                }`}
+                              >
+                                <Users className="w-3 h-3 text-[#1E60A8]" />
+                                <span>÷ {splitNames.length} pers.</span>
+                              </button>
+                            );
+                          }
+                          if (isLocked) {
+                            return <span className="text-[11px] text-slate-300">—</span>;
+                          }
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => openSplitModalForItem(item)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold text-slate-500 hover:text-[#132B63] hover:bg-sky-50 border border-slate-200 hover:border-[#1E60A8]/35 transition-colors cursor-pointer"
+                            >
+                              <Users className="w-3 h-3" />
+                              <span>Dividir</span>
+                            </button>
+                          );
+                        })()}
+                      </td>
+
                       <td className="py-2.5 px-2.5 whitespace-nowrap text-center">
                         <div className="inline-flex items-center gap-1">
                           {media ? (
@@ -4512,7 +5056,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                 <td className="py-3 px-2.5 text-right text-sm font-extrabold font-mono tabular-nums text-[#132B63] bg-[#DCEEF5] border-r-2 border-slate-800">
                   {formatViaticoAmount(liquidation.totalLiquidacion)}
                 </td>
-                <td colSpan={7} className="py-3 px-3 text-[11px] font-semibold text-slate-600">
+                <td colSpan={9} className="py-3 px-3 text-[11px] font-semibold text-slate-600">
                   {formatViaticoAmount(
                     liquidation.totalLiquidacion,
                     liquidation.monedaBase,
@@ -4651,6 +5195,219 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                   />
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Row-level Split Expense Modal ("Dividir gasto entre empleados") */}
+      {splitModalItem && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end lg:items-center justify-center p-0 lg:p-4"
+          onClick={() => {
+            setSplitModalItem(null);
+            setSplitModalError(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-t-3xl lg:rounded-2xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col pb-safe"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3.5 bg-[#132B63] text-white flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-bold flex items-center gap-2 truncate">
+                  <Users className="w-4 h-4 text-sky-300 shrink-0" />
+                  <span className="truncate">
+                    Dividir Gasto · {splitModalItem.proveedor || 'Factura'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-sky-200 truncate mt-0.5">
+                  Total:{' '}
+                  {formatViaticoAmount(splitModalItem.valorReintegrar, baseCurrency, true)} · Doc:{' '}
+                  {[splitModalItem.serieDoc, splitModalItem.noDoc].filter(Boolean).join('-') ||
+                    'S/N'}{' '}
+                  · Mantiene al liquidador principal en Odoo
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSplitModalItem(null);
+                  setSplitModalError(null);
+                }}
+                aria-label="Cerrar división de gasto"
+                className="p-1.5 text-sky-200 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    Cantidad de personas *
+                  </label>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={2}
+                    max={30}
+                    step={1}
+                    value={splitModalCount}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const parsed = Math.floor(Number(raw) || 0);
+                      setSplitModalCount(raw);
+                      setSplitModalError(null);
+                      if (parsed >= 2 && splitModalNames.length > parsed) {
+                        setSplitModalNames((prev) => prev.slice(0, parsed));
+                      }
+                    }}
+                    className="w-full px-3 py-1.5 text-sm font-mono font-bold text-[#132B63] rounded-lg border border-slate-300"
+                  />
+                </div>
+
+                <div className="sm:col-span-5">
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    Buscar empleado Odoo ({splitModalNames.length}/
+                    {Math.max(2, Math.floor(Number(splitModalCount) || 2))})
+                  </label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={splitModalSearch}
+                      onChange={(e) => setSplitModalSearch(e.target.value)}
+                      placeholder="Nombre o centro de costo..."
+                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-slate-50 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="sm:col-span-3 flex sm:justify-end">
+                  <div className="text-right">
+                    <div className="text-[10px] font-semibold uppercase text-slate-500">
+                      Monto aprox. c/u
+                    </div>
+                    <div className="text-xs font-extrabold font-mono text-[#132B63]">
+                      {formatViaticoAmount(
+                        roundMoney(
+                          splitModalItem.valorReintegrar /
+                            Math.max(2, Math.floor(Number(splitModalCount) || 2))
+                        ),
+                        baseCurrency,
+                        true
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {(() => {
+                const targetMax = Math.max(
+                  2,
+                  Math.min(30, Math.floor(Number(splitModalCount) || 2))
+                );
+                const q = splitModalSearch.trim().toLowerCase();
+                const activeEmployees = catalogs.employees.filter((emp) => {
+                  if (emp.activo === false) return false;
+                  if (!q) return true;
+                  return (
+                    emp.nombreCompleto.toLowerCase().includes(q) ||
+                    (emp.centroCosto || '').toLowerCase().includes(q)
+                  );
+                });
+                const limitReached = splitModalNames.length >= targetMax;
+
+                return (
+                  <div className="max-h-60 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 pr-1">
+                    {activeEmployees.map((emp) => {
+                      const upperName = emp.nombreCompleto.trim().toUpperCase();
+                      const isChecked = splitModalNames.includes(upperName);
+                      const isEmpDisabled = !isChecked && limitReached;
+                      return (
+                        <label
+                          key={emp.id}
+                          className={`flex items-start gap-2 p-2 rounded-lg border text-[11px] transition-colors ${
+                            isChecked
+                              ? 'bg-[#1E60A8]/10 border-[#1E60A8]/50 text-[#132B63] cursor-pointer'
+                              : isEmpDisabled
+                              ? 'bg-slate-50 border-slate-200 text-slate-400 opacity-60 cursor-not-allowed'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={isEmpDisabled}
+                            onChange={() => {
+                              setSplitModalError(null);
+                              setSplitModalNames((prev) => {
+                                if (prev.includes(upperName)) {
+                                  return prev.filter((x) => x !== upperName);
+                                }
+                                if (prev.length >= targetMax) return prev;
+                                return [...prev, upperName];
+                              });
+                            }}
+                            className="mt-0.5 w-3.5 h-3.5 rounded border-slate-300 text-[#1E60A8]"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold truncate">{emp.nombreCompleto}</div>
+                            <div className="text-[10px] text-slate-500 truncate">
+                              {emp.centroCosto || 'Sin CECO'}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {splitModalError && (
+                <div className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{splitModalError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                {(splitModalItem.splitByEmployeesCount || 0) >= 2 &&
+                  Array.isArray(splitModalItem.splitEmployeeNames) &&
+                  splitModalItem.splitEmployeeNames.length >= 2 && (
+                    <button
+                      type="button"
+                      onClick={handleClearRowSplitModal}
+                      className="px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-lg cursor-pointer"
+                    >
+                      Quitar división
+                    </button>
+                  )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSplitModalItem(null);
+                    setSplitModalError(null);
+                  }}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white border border-slate-300 rounded-lg cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveRowSplitModal}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-lg cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Guardar división</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

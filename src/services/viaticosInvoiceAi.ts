@@ -25,6 +25,7 @@ export interface ExtractedInvoiceData {
   tipoDocumentoSugerido?: string;
   indicadorImpuestoSugerido?: string;
   codigoGastoSugerido?: string;
+  centroCostoDetectado?: string;
   modelUsed?: string;
   pageStart?: number;
   pageEnd?: number;
@@ -425,6 +426,7 @@ export async function extractInvoiceViaServer(params: {
   mimeType: string;
   fileName: string;
   baseCurrency: ViaticoCurrency;
+  availableCostCenters?: string[];
 }): Promise<ExtractedInvoiceData> {
   const safeMedia = await ensureDataUrlWithinLimit(params.dataUrl, params.mimeType);
 
@@ -442,6 +444,9 @@ export async function extractInvoiceViaServer(params: {
     mimeType: safeMedia.mimeType,
     fileName: params.fileName,
     baseCurrency: params.baseCurrency,
+    ...(params.availableCostCenters?.length
+      ? { availableCostCenters: params.availableCostCenters }
+      : {}),
   });
 
   const maxClientAttempts = 2;
@@ -581,6 +586,7 @@ function normalizeSingleExtractedInvoice(
     codigoGastoSugerido: raw.codigoGastoSugerido
       ? String(raw.codigoGastoSugerido).trim()
       : undefined,
+    centroCostoDetectado: String(raw.centroCostoDetectado || '').trim() || undefined,
     modelUsed,
     ...(pageStart ? { pageStart, pageEnd } : {}),
   };
@@ -610,6 +616,7 @@ async function postMultiInvoicePdfChunk(params: {
   dataUrl: string;
   fileName: string;
   baseCurrency: ViaticoCurrency;
+  availableCostCenters?: string[];
 }): Promise<ExtractedInvoiceData[]> {
   const requestBody = JSON.stringify({
     base64Data: params.dataUrl,
@@ -617,6 +624,9 @@ async function postMultiInvoicePdfChunk(params: {
     fileName: params.fileName,
     baseCurrency: params.baseCurrency,
     multiInvoice: true,
+    ...(params.availableCostCenters?.length
+      ? { availableCostCenters: params.availableCostCenters }
+      : {}),
   });
 
   const maxClientAttempts = 2;
@@ -696,6 +706,7 @@ export async function extractMultipleInvoicesFromPdfViaServer(params: {
   dataUrl: string;
   fileName: string;
   baseCurrency: ViaticoCurrency;
+  availableCostCenters?: string[];
   onProgress?: (progress: {
     currentChunk: number;
     totalChunks: number;
@@ -837,6 +848,7 @@ export async function extractMultipleInvoicesFromPdfViaServer(params: {
       dataUrl: chunk.dataUrl,
       fileName: chunk.label,
       baseCurrency: params.baseCurrency,
+      availableCostCenters: params.availableCostCenters,
     });
 
     const chunkSpan = Math.max(1, chunk.toPage - chunk.fromPage + 1);

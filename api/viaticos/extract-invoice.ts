@@ -23,6 +23,7 @@ export interface ExtractInvoiceRequestBody {
   fileName?: unknown;
   baseCurrency?: unknown;
   multiInvoice?: unknown;
+  availableCostCenters?: unknown;
 }
 
 export interface ExtractInvoiceResult {
@@ -199,7 +200,17 @@ function inferMimeType(rawMime: unknown, base64Data: string, fileName: unknown):
   return 'image/jpeg';
 }
 
-function buildInvoiceSystemInstruction(targetBaseCurrency: string): string {
+function buildInvoiceSystemInstruction(
+  targetBaseCurrency: string,
+  availableCostCenters: string[] = []
+): string {
+  const cecoCatalogSection =
+    availableCostCenters.length > 0
+      ? `\n\nCATÁLOGO DE CENTROS DE COSTO (CECO) VÁLIDOS DE PREMEX:\n${availableCostCenters
+          .slice(0, 120)
+          .map((c) => `- ${c}`)
+          .join('\n')}`
+      : '';
   return `Eres un auditor contable senior especializado en lectura y extracción de datos de CUALQUIER tipo de factura, recibo, ticket térmico, factura tamaño carta/oficio o comprobante electrónico de viaje de cualquier país y formato (todas las facturas son diferentes en diseño, idioma, orientación y estructura).
 
 Tu trabajo es analizar cuidadosamente la imagen o PDF adjunto — INCLUSO SI LA FOTO FUE TOMADA CON TELÉFONO CELULAR Y VIENE ROTADA 90°/180°/270°, INCLINADA, CON SOMBRAS, ARRUAGAS, SELLOS ENCIMA ("FACTURA ORIGINAL", "PAGADO", "CANCELADO"), LETRA PEQUEÑA O EN PAPEL TÉRMICO — y extraer los campos solicitados con máxima precisión.
@@ -267,7 +278,10 @@ INSTRUCCIONES CRÍTICAS POR CAMPO:
    - "XB": Compra de BIENES locales exentos 0% (recibos o bienes sin IVA local).
    - "XO": Servicios locales exentos 0% (recibos de servicios sin IVA, peajes exentos).
 18. codigoGastoSugerido: código de gasto Odoo de 6 dígitos que mejor corresponde al concepto escaneado:
-   - "720060" (COMBUSTIBLES), "720013" (ALIMENTACION VIAJES), "720051" (ALIMENTACION), "720015" (ALOJAMIENTO/HOTELES), "720012" (TIQUETE INTERNACIONAL), "720014" (TIQUETE NACIONAL), "720024" (TAXIS Y BUSES), "720041" (ARRENDAMIENTO VEHICULOS), "720027" (PEAJES), "720009" (ARRENDAMIENTO PARQUEADERO), "720097" (GASTOS DE REPRESENTACION / atención clientes), "720003" (MANTENIMIENTO FLOTA Y EQUIPO TRANSPORTE), "720000" (MANTENIMIENTO CONSTRUCCIONES Y EDIFICIO), "720028" (PAPELERÍA Y UTILES), "720055" (SUMINISTROS OFICINA/PAPELERIA), "720044" (ELEMENTOS ASEO Y CAFETERIA), "720042" (GASTOS MEDICOS, MEDICAMENTOS Y VACUNAS), "720050" (CORREO / ENCOMIENDAS), "720017" (SERVICIO CORREO), "720019" (SERVICIO LAVANDERIA), "720085" (FLETES NACIONALES), "720132" (TELEFONIA MOVIL), "720135" (HONORARIOS PROFESIONALES), "720184" (DONACIONES), "720185" (IMPUESTO TURISMO), "720107" (LICENCIAS-TRAMITES / otros gastos).`;
+   - "720060" (COMBUSTIBLES), "720013" (ALIMENTACION VIAJES), "720051" (ALIMENTACION), "720015" (ALOJAMIENTO/HOTELES), "720012" (TIQUETE INTERNACIONAL), "720014" (TIQUETE NACIONAL), "720024" (TAXIS Y BUSES), "720041" (ARRENDAMIENTO VEHICULOS), "720027" (PEAJES), "720009" (ARRENDAMIENTO PARQUEADERO), "720097" (GASTOS DE REPRESENTACION / atención clientes), "720003" (MANTENIMIENTO FLOTA Y EQUIPO TRANSPORTE), "720000" (MANTENIMIENTO CONSTRUCCIONES Y EDIFICIO), "720028" (PAPELERÍA Y UTILES), "720055" (SUMINISTROS OFICINA/PAPELERIA), "720044" (ELEMENTOS ASEO Y CAFETERIA), "720042" (GASTOS MEDICOS, MEDICAMENTOS Y VACUNAS), "720050" (CORREO / ENCOMIENDAS), "720017" (SERVICIO CORREO), "720019" (SERVICIO LAVANDERIA), "720085" (FLETES NACIONALES), "720132" (TELEFONIA MOVIL), "720135" (HONORARIOS PROFESIONALES), "720184" (DONACIONES), "720185" (IMPUESTO TURISMO), "720107" (LICENCIAS-TRAMITES / otros gastos).
+19. centroCostoDetectado: SOLO si en el documento aparece escrito, anotado a mano, sellado o impreso explícitamente un Centro de Costo / CECO / C.C. / Cuenta Analítica / Proyecto (ej. "CECO: GT10000601", "CC 400180", "C.C. Nutreo", "Camión Mitsubishi", "Laboratorio", "Contabilidad", "Producción").
+   - Si existe coincidencia con el catálogo de Centros de Costo válidos de Premex, devuelve exactamente la etiqueta del catálogo correspondiente (ej. "400180 NUTREO" o "GT10000601 CONTABILIDAD"); si aparece un código/texto de CECO sin catálogo, devuélvelo tal cual se lee.
+   - REGLA ESTRICTA: NO deduzcas ni inventes un centro de costo por el país/ciudad ("Guatemala"), por el nombre del proveedor ni por la categoría del gasto si no hay una anotación explícita de CECO/C.C./Centro de Costo en el comprobante. Si NO aparece ningún centro de costo escrito en el documento, devuelve exactamente "".${cecoCatalogSection}`;
 }
 
 const INVOICE_RESPONSE_SCHEMA = {
@@ -359,6 +373,11 @@ const INVOICE_RESPONSE_SCHEMA = {
       description:
         'Número entero base 1 de la última página del PDF enviado donde aparece esta factura (igual a pageStart si es de una sola página).',
     },
+    centroCostoDetectado: {
+      type: Type.STRING,
+      description:
+        'Centro de costo / CECO escrito, sellado o impreso explícitamente en el documento (ej. "400180 NUTREO" o "GT10000601 CONTABILIDAD"), o "" si no aparece ninguno.',
+    },
   },
   required: [
     'fechaDoc',
@@ -382,8 +401,11 @@ const INVOICE_RESPONSE_SCHEMA = {
   ],
 };
 
-function buildMultiInvoiceSystemInstruction(targetBaseCurrency: string): string {
-  return `${buildInvoiceSystemInstruction(targetBaseCurrency)}
+function buildMultiInvoiceSystemInstruction(
+  targetBaseCurrency: string,
+  availableCostCenters: string[] = []
+): string {
+  return `${buildInvoiceSystemInstruction(targetBaseCurrency, availableCostCenters)}
 
 MODO CARGA MASIVA MULTI-FACTURA (PDF CON VARIAS FACTURAS):
 - El documento PDF adjunto puede contener MÚLTIPLES facturas, tickets, recibos o comprobantes en sus páginas (una factura por página, varias facturas en una misma página, o una factura larga que ocupe 2 o más páginas).
@@ -547,8 +569,14 @@ export async function processExtractInvoiceBody(
   body: ExtractInvoiceRequestBody
 ): Promise<ExtractInvoiceResult> {
   try {
-    const { base64Data, mimeType, fileName, baseCurrency, multiInvoice } = body ?? {};
+    const { base64Data, mimeType, fileName, baseCurrency, multiInvoice, availableCostCenters } = body ?? {};
     const isMultiInvoice = Boolean(multiInvoice);
+    const cleanCostCentersList = Array.isArray(availableCostCenters)
+      ? availableCostCenters
+          .map((c) => String(c || '').trim())
+          .filter(Boolean)
+          .slice(0, 120)
+      : [];
 
     if (typeof base64Data !== 'string' || !base64Data.trim()) {
       return {
@@ -600,8 +628,8 @@ export async function processExtractInvoiceBody(
         : 'Quetzales';
 
     const systemInstruction = isMultiInvoice
-      ? buildMultiInvoiceSystemInstruction(targetBaseCurrency)
-      : buildInvoiceSystemInstruction(targetBaseCurrency);
+      ? buildMultiInvoiceSystemInstruction(targetBaseCurrency, cleanCostCentersList)
+      : buildInvoiceSystemInstruction(targetBaseCurrency, cleanCostCentersList);
 
     const filePart = {
       inlineData: {
