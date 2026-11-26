@@ -61,7 +61,15 @@ export const roundMoney = (val: number): number => {
 
 export const roundExchangeRate = (val: number): number => {
   if (!Number.isFinite(val)) return 1;
-  return Math.round((val + Number.EPSILON) * 10000) / 10000;
+  return Math.round((val + Number.EPSILON) * 100000000) / 100000000;
+};
+
+export const formatExchangeRate = (rate: number): string => {
+  const safe = Number.isFinite(rate) && rate > 0 ? roundExchangeRate(rate) : 1;
+  return safe.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 8,
+  });
 };
 
 export const formatViaticoAmount = (

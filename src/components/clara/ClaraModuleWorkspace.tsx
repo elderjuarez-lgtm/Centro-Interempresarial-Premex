@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  Code2,
+  Copy,
   Cpu,
   Download,
   ExternalLink,
@@ -33,6 +36,7 @@ import {
   ClaraVendor,
   ClaraWorkManagerInvoice,
   ClaraWorkManagerRadicacionStatus,
+  ClaraWorkManagerStatus,
   ClaraWorkspaceData,
   EffectivePermissions,
   ModuleCompanyEntry,
@@ -45,6 +49,7 @@ import {
   downloadClaraImportTemplate,
   downloadSapBotPackageJson,
   downloadSapBotPackageTxt,
+  downloadWmPendingForPythonJson,
   downloadWorkManagerImportTemplate,
   evaluateClaraInvoiceCuadre,
   evaluateTransactionReadiness,
@@ -54,6 +59,7 @@ import {
   findMatchingVendor,
   formatClaraMoney,
   normalizeTextKey,
+  parseClaraPythonPayload,
   parseClaraSpreadsheetFile,
   parseWorkManagerSpreadsheetFile,
   reconcileClaraState,
@@ -69,7 +75,11 @@ import {
   runLocalAgentWmCheck,
   ServerConnectivityProbeResult,
 } from '../../services/claraAi';
-import { downloadAgentTemplateFile } from '../../utils/claraAgentTemplates';
+import {
+  AgentDownloadKey,
+  downloadAgentTemplateFile,
+  getAgentTemplateSpec,
+} from '../../utils/claraAgentTemplates';
 import { ClaraSidebar } from './ClaraSidebar';
 import { ClaraHeader } from './ClaraHeader';
 
@@ -172,11 +182,17 @@ export const ClaraModuleWorkspace: React.FC<ClaraModuleWorkspaceProps> = ({
   const [probeResults, setProbeResults] = useState<ServerConnectivityProbeResult[]>([]);
   const [isProbingServer, setIsProbingServer] = useState(false);
 
+  // Python RPA kit preview / copy modal
+  const [showPythonKitModal, setShowPythonKitModal] = useState(false);
+  const [selectedPythonKey, setSelectedPythonKey] = useState<AgentDownloadKey>('python_agent_py');
+  const [copiedPythonCode, setCopiedPythonCode] = useState(false);
+
   const claraFileInputRef = useRef<HTMLInputElement>(null);
   const wmFileInputRef = useRef<HTMLInputElement>(null);
   const batchInvoicesInputRef = useRef<HTMLInputElement>(null);
   const singleInvoiceInputRef = useRef<HTMLInputElement>(null);
   const sapResultsInputRef = useRef<HTMLInputElement>(null);
+  const pythonJsonInputRef = useRef<HTMLInputElement>(null);
 
   const actorName = permissions.displayName || currentUser?.email || 'Usuario Premex';
 
@@ -729,28 +745,156 @@ export const ClaraModuleWorkspace: React.FC<ClaraModuleWorkspaceProps> = ({
     setAgentBusyAction('clara_extract');
     try {
       const res = await runLocalAgentClaraExtract(agentUrl, agentBearerToken, data.selectedPeriod);
-      appendLogAndReconcile((prev) => ({
-        next: prev,
-        log: {
-          erp: 'Clara',
-          tipo: 'rpa_clara',
-          cantidadRegistros: res.rawTableRowsCount,
-          totalMonto: 0,
-          moneda: 'COP',
-          archivoNombre: 'Lectura DOM Clara vía Agente Local',
-          estado: res.rawTableRowsCount > 0 ? 'ok' : 'alerta',
-          detalle: `${res.rawTableRowsCount} fila(s) detectadas en la tabla activa de Clara.`,
-        },
-      }));
+      const parsed = parseClaraPythonPayload(
+        { transactions: res.transactions, rows: res.rows },
+        {
+          defaultSociedad: moduleCompanies[0]?.nombre || 'PREMEX',
+          detectExteriorAuto: data.connectorConfig.detectarExteriorAutomatico,
+        }
+      );
+
+      let addedCount = 0;
+      appendLogAndReconcile((prev) => {
+        const existingIds = new Set(prev.transactions.map((t) => t.claraTxId).filter(Boolean));
+        const newTxs = parsed.transactions.filter(
+          (t) => !t.claraTxId || !existingIds.has(t.claraTxId)
+        );
+        addedCount = newTxs.length;
+        return {
+          next: {
+            ...prev,
+            transactions: [...newTxs, ...prev.transactions],
+          },
+          log: {
+            erp: 'Clara',
+            tipo: 'rpa_clara',
+            cantidadRegistros: addedCount || res.rawTableRowsCount,
+            totalMonto: newTxs.reduce((s, t) => s + t.valor, 0),
+            moneda: newTxs[0]?.moneda || 'COP',
+            archivoNombre: `Extracción Clara vía Agente (${res.engine || 'Playwright'})`,
+            estado: addedCount > 0 || res.rawTableRowsCount > 0 ? 'ok' : 'alerta',
+            detalle:
+              addedCount > 0
+                ? `${addedCount} movimiento(s) nuevos importados desde Clara vía Agente Local.`
+                : `${res.rawTableRowsCount} fila(s) detectadas en tabla Clara.`,
+          },
+        };
+      });
+
       setBannerFeedback({
-        type: 'info',
-        text: `Agente detectó ${res.rawTableRowsCount} fila(s) en la vista actual de Clara. Si descargaste Excel/CSV oficial desde Clara, cárgalo en "Importar Excel Clara".`,
+        type: addedCount > 0 ? 'ok' : 'info',
+        text:
+          addedCount > 0
+            ? `Agente (${res.engine || 'RPA'}) extrajo e importó ${addedCount} movimiento(s) de Clara automáticamente.`
+            : `Agente detectó ${res.rawTableRowsCount} fila(s) en la vista de Clara (sin registros nuevos por importar).`,
       });
     } catch (err: any) {
       setBannerFeedback({ type: 'error', text: err?.message || 'Error extrayendo desde Clara.' });
     } finally {
       setAgentBusyAction(null);
     }
+  };
+
+  // Import JSON generated by standalone Python script (clara_wm_extraccion.json / wm_resultados_python.json)
+  const handleImportPythonJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const rawText = await file.text();
+      const jsonObj = JSON.parse(rawText);
+      const parsed = parseClaraPythonPayload(jsonObj, {
+        defaultSociedad: moduleCompanies[0]?.nombre || 'PREMEX',
+        detectExteriorAuto: data.connectorConfig.detectarExteriorAutomatico,
+      });
+
+      if (parsed.transactions.length === 0 && parsed.wmResults.length === 0) {
+        setBannerFeedback({
+          type: 'error',
+          text: 'El JSON no contiene transactions[], rows[] ni results[] de Python válidos.',
+        });
+        return;
+      }
+
+      let addedTxs = 0;
+      let updatedWm = 0;
+
+      appendLogAndReconcile((prev) => {
+        const existingIds = new Set(prev.transactions.map((t) => t.claraTxId).filter(Boolean));
+        const newTxs = parsed.transactions.filter(
+          (t) => !t.claraTxId || !existingIds.has(t.claraTxId)
+        );
+        addedTxs = newTxs.length;
+
+        const wmByTxId = new Map(
+          parsed.wmResults.filter((r) => r.txId).map((r) => [String(r.txId), r])
+        );
+        const wmByFactura = new Map(
+          parsed.wmResults
+            .filter((r) => r.numeroFactura)
+            .map((r) => [String(r.numeroFactura).toUpperCase(), r])
+        );
+
+        const mergedTxs = [...newTxs, ...prev.transactions].map((tx): ClaraTransaction => {
+          const match =
+            wmByTxId.get(tx.id) ||
+            (tx.facturaNumero ? wmByFactura.get(tx.facturaNumero.toUpperCase()) : undefined);
+          if (!match) return tx;
+          updatedWm += 1;
+          const nextWorkManagerStatus: ClaraWorkManagerStatus =
+            match.estado === 'radicada'
+              ? 'validada'
+              : match.estado === 'inconsistencia'
+              ? 'diferencia_valor'
+              : match.estado === 'exenta_exterior'
+              ? 'exenta_exterior'
+              : 'pendiente_factura';
+          return {
+            ...tx,
+            wmRadicacionStatus: match.estado,
+            wmRadicacionNumero: match.numeroFactura || tx.wmRadicacionNumero,
+            wmRadicacionFecha: match.radicacionFecha || tx.wmRadicacionFecha,
+            wmMensajeValidacion: match.mensaje || tx.wmMensajeValidacion,
+            workManagerStatus: nextWorkManagerStatus,
+          };
+        });
+
+        return {
+          next: {
+            ...prev,
+            transactions: mergedTxs,
+          },
+          log: {
+            erp: updatedWm > 0 && addedTxs === 0 ? 'WorkManager' : 'Clara',
+            tipo: updatedWm > 0 && addedTxs === 0 ? 'rpa_wm' : 'rpa_clara',
+            cantidadRegistros: addedTxs + updatedWm,
+            totalMonto: newTxs.reduce((s, t) => s + t.valor, 0),
+            moneda: newTxs[0]?.moneda || 'COP',
+            archivoNombre: file.name,
+            estado: 'ok',
+            detalle: `Importación Python: ${addedTxs} movimiento(s) Clara, ${updatedWm} estado(s) WM aplicados.`,
+          },
+        };
+      });
+
+      setBannerFeedback({
+        type: 'ok',
+        text: `JSON Python importado (${file.name}): ${addedTxs} movimiento(s) agregado(s) y ${updatedWm} factura(s) actualizadas en Work Manager.`,
+      });
+    } catch {
+      setBannerFeedback({
+        type: 'error',
+        text: 'Archivo JSON inválido. Usa el formato generado por clara_wm_standalone.py.',
+      });
+    }
+  };
+
+  const handleDownloadWmPendingPython = () => {
+    const res = downloadWmPendingForPythonJson(scopedTransactions);
+    setBannerFeedback({
+      type: 'ok',
+      text: `Descargado ${res.fileName} (${res.count} facturas) para procesarlo con clara_wm_standalone.py.`,
+    });
   };
 
   // SAP Bot Dispatch Builders & Exporters
@@ -1097,6 +1241,13 @@ export const ClaraModuleWorkspace: React.FC<ClaraModuleWorkspaceProps> = ({
           className="hidden"
           onChange={handleImportSapResultsJson}
         />
+        <input
+          ref={pythonJsonInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={handleImportPythonJson}
+        />
 
         <main className="flex-1 p-4 lg:p-6 max-w-7xl w-full mx-auto space-y-5 pb-16">
           {bannerFeedback && (
@@ -1238,13 +1389,33 @@ export const ClaraModuleWorkspace: React.FC<ClaraModuleWorkspaceProps> = ({
 
                     <button
                       type="button"
+                      disabled={!permissions.canOperate}
+                      onClick={() => pythonJsonInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-45"
+                      title="Importar JSON generado por clara_wm_standalone.py"
+                    >
+                      <FileJson className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Importar JSON Python</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPythonKitModal(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#132B63] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Code2 className="w-3.5 h-3.5 text-[#1E60A8]" />
+                      <span>Programar / Kit Python</span>
+                    </button>
+
+                    <button
+                      type="button"
                       disabled={!permissions.canOperate || agentBusyAction === 'clara_extract'}
                       onClick={() => {
                         if (!agentHealth?.ok) {
                           setActiveTab('conectores');
                           setBannerFeedback({
                             type: 'info',
-                            text: 'Conecta el Agente Puente Local en "Conectores RPA" para leer la tabla de Clara directo desde Chromium.',
+                            text: 'Inicia clara_wm_agent.py (o agent.mjs) y conéctalo en "Conectores RPA" para leer Clara en vivo.',
                           });
                           return;
                         }
@@ -1523,13 +1694,34 @@ export const ClaraModuleWorkspace: React.FC<ClaraModuleWorkspaceProps> = ({
 
                   <button
                     type="button"
+                    onClick={handleDownloadWmPendingPython}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl cursor-pointer"
+                    title="Descarga wm_pendientes_python.json para procesarlo con tu script Python"
+                  >
+                    <Download className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Exportar JSON Python</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!permissions.canOperate}
+                    onClick={() => pythonJsonInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl cursor-pointer disabled:opacity-45"
+                    title="Cargar wm_resultados_python.json devuelto por Python"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Importar Resultados Python</span>
+                  </button>
+
+                  <button
+                    type="button"
                     disabled={!permissions.canOperate || agentBusyAction === 'wm_check'}
                     onClick={() => {
                       if (!agentHealth?.ok) {
                         setActiveTab('conectores');
                         setBannerFeedback({
                           type: 'info',
-                          text: 'Para consultar el puerto :8037 en vivo desde tu red interna/VPN, conecta primero el Agente Local en Conectores RPA.',
+                          text: 'Para consultar el puerto :8037 en vivo desde tu equipo/VPN, inicia clara_wm_agent.py y conéctalo en Conectores RPA.',
                         });
                         return;
                       }
@@ -2511,35 +2703,80 @@ export const ClaraModuleWorkspace: React.FC<ClaraModuleWorkspaceProps> = ({
                   </div>
                 </div>
 
-                {/* Downloadable RPA Agent & SAP Bot Kit */}
-                <div className="bg-white rounded-xl border border-slate-200 p-4 lg:p-5 space-y-3">
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Kit Descargable: Agente Puente Local & Bots SAP
-                  </h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Para superar 2FA en Clara, acceso VPN al puerto <code className="font-mono">:8037</code> de Work Manager y automatizar SAP Logon sin límites de Vercel serverless, descarga y ejecuta estos componentes en un equipo o VM corporativa:
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                    {(
-                      [
-                        { key: 'agent_mjs', label: 'agent.mjs (Servidor Puente RPA)' },
-                        { key: 'agent_package_json', label: 'package.json (Agente Playwright)' },
-                        { key: 'agent_env_example', label: '.env.example (Variables Agente)' },
-                        { key: 'sap_python_bot', label: 'sap_posting_bot.py (SAP GUI FB60)' },
-                        { key: 'sap_odata_bot', label: 'sap_odata_poster.mjs (SAP OData)' },
-                        { key: 'agent_readme', label: 'README_AGENT_PREMEX.md (Guía)' },
-                      ] as const
-                    ).map((item) => (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => downloadAgentTemplateFile(item.key)}
-                        className="flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl cursor-pointer text-left"
-                      >
-                        <span className="truncate">{item.label}</span>
-                        <Download className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
-                      </button>
-                    ))}
+                {/* Downloadable RPA Agent & SAP Bot Kit (Python & Node.js) */}
+                <div className="bg-white rounded-xl border border-slate-200 p-4 lg:p-5 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                        <Code2 className="w-4 h-4 text-[#1E60A8]" />
+                        <span>Automatización en Python (Clara + Work Manager :8037) y Bots SAP</span>
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                        Programa y ejecuta tu extractor directamente en <strong>Python</strong> (igual a tu acceso a WM): usa <code className="font-mono">clara_wm_agent.py</code> como puente en vivo en <code className="font-mono">:4780</code> o <code className="font-mono">clara_wm_standalone.py</code> para generar el JSON e importarlo.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowPythonKitModal(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#132B63] hover:bg-[#1E60A8] rounded-lg cursor-pointer shrink-0"
+                    >
+                      <Code2 className="w-3.5 h-3.5" />
+                      <span>Ver / Copiar Código Python</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Kit Python RPA (Playwright + Requests · Clara & Work Manager)
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {(
+                        [
+                          { key: 'python_agent_py', label: 'clara_wm_agent.py (Puente HTTP Python)' },
+                          { key: 'python_standalone_py', label: 'clara_wm_standalone.py (Extractor CLI)' },
+                          { key: 'python_requirements', label: 'requirements_clara_wm.txt' },
+                          { key: 'python_env_example', label: '.env.python.example (Credenciales/URLs)' },
+                          { key: 'python_readme', label: 'README_PYTHON_RPA.md (Guía Python)' },
+                          { key: 'sap_python_bot', label: 'sap_posting_bot.py (SAP GUI FB60)' },
+                        ] as const
+                      ).map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => downloadAgentTemplateFile(item.key)}
+                          className="flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-800 bg-sky-50/70 hover:bg-sky-100/80 border border-sky-200 rounded-xl cursor-pointer text-left"
+                        >
+                          <span className="truncate">{item.label}</span>
+                          <Download className="w-3.5 h-3.5 text-[#1E60A8] shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Alternativa Node.js (Agente Puente & SAP OData)
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {(
+                        [
+                          { key: 'agent_mjs', label: 'agent.mjs (Servidor Node.js)' },
+                          { key: 'agent_package_json', label: 'package.json (Node.js)' },
+                          { key: 'sap_odata_bot', label: 'sap_odata_poster.mjs (SAP OData)' },
+                          { key: 'agent_readme', label: 'README_AGENT_PREMEX.md' },
+                        ] as const
+                      ).map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => downloadAgentTemplateFile(item.key)}
+                          className="flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl cursor-pointer text-left"
+                        >
+                          <span className="truncate">{item.label}</span>
+                          <Download className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2997,6 +3234,122 @@ export const ClaraModuleWorkspace: React.FC<ClaraModuleWorkspaceProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      )}
+      {/* Python RPA Code Viewer & Downloader Modal */}
+      {showPythonKitModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setShowPythonKitModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 max-w-4xl w-full shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[#1E60A8]">
+                  Automatización Python · Clara + Work Manager (:8037)
+                </div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Scripts Python Listos para Usar y Personalizar
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPythonKitModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(
+                  [
+                    { key: 'python_agent_py', label: 'clara_wm_agent.py (Puente HTTP)' },
+                    { key: 'python_standalone_py', label: 'clara_wm_standalone.py (CLI)' },
+                    { key: 'python_requirements', label: 'requirements.txt' },
+                    { key: 'python_env_example', label: '.env.python.example' },
+                    { key: 'python_readme', label: 'README_PYTHON_RPA.md' },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedPythonKey(tab.key);
+                      setCopiedPythonCode(false);
+                    }}
+                    className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                      selectedPythonKey === tab.key
+                        ? 'bg-[#132B63] text-white'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const spec = getAgentTemplateSpec(selectedPythonKey);
+                    await navigator.clipboard?.writeText(spec.content).catch(() => {});
+                    setCopiedPythonCode(true);
+                    setTimeout(() => setCopiedPythonCode(false), 2000);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer"
+                >
+                  {copiedPythonCode ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5 text-[#1E60A8]" />
+                  )}
+                  <span>{copiedPythonCode ? 'Copiado' : 'Copiar código'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadAgentTemplateFile(selectedPythonKey)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#1E60A8] hover:bg-[#132B63] rounded-lg cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Descargar archivo</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 overflow-auto bg-[#0B1736] text-slate-100 flex-1">
+              <pre className="text-[11px] leading-relaxed font-mono whitespace-pre-wrap">
+                {getAgentTemplateSpec(selectedPythonKey).content}
+              </pre>
+            </div>
+
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+              <span>
+                Tip: Puedes usar <strong>clara_wm_agent.py</strong> en vivo en{' '}
+                <code className="font-mono">http://127.0.0.1:4780</code> o importar el JSON generado con{' '}
+                <strong>Importar JSON Python</strong>.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  downloadAgentTemplateFile('python_agent_py');
+                  downloadAgentTemplateFile('python_standalone_py');
+                  downloadAgentTemplateFile('python_requirements');
+                  downloadAgentTemplateFile('python_env_example');
+                  downloadAgentTemplateFile('python_readme');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-[#132B63] bg-sky-100 hover:bg-sky-200 rounded-lg cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Descargar los 5 archivos Python</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

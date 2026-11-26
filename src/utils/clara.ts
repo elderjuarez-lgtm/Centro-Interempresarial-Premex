@@ -8,6 +8,7 @@ import {
   ClaraVendor,
   ClaraVendorSyncStatus,
   ClaraWorkManagerInvoice,
+  ClaraWorkManagerRadicacionStatus,
   ClaraWorkManagerStatus,
   EffectivePermissions,
 } from '../types';
@@ -1903,4 +1904,288 @@ export const downloadSapBotPackageTxt = (pkg: SapBotDispatchPackage): string => 
   URL.revokeObjectURL(url);
   return fileName;
 };
+
+// ============================================================================
+// Python RPA Exchange Helpers (JSON Import / Export for Python Scripts)
+// ============================================================================
+
+export interface PythonWmCheckResultItem {
+  txId?: string;
+  numeroFactura?: string;
+  estado: ClaraWorkManagerRadicacionStatus;
+  radicacionFecha?: string;
+  mensaje?: string;
+}
+
+export interface ParsedClaraPythonPayload {
+  transactions: ClaraTransaction[];
+  wmResults: PythonWmCheckResultItem[];
+}
+
+function normalizePythonWmEstado(raw: unknown): ClaraWorkManagerRadicacionStatus {
+  const s = normalizeTextKey(String(raw || ''));
+  if (s.includes('inconsist') || s.includes('rechaz') || s.includes('reclamo') || s.includes('diferenc')) {
+    return 'inconsistencia';
+  }
+  if (s.includes('exenta') || s.includes('exterior')) {
+    return 'exenta_exterior';
+  }
+  if (s.includes('no radicad') || s.includes('no_radicad') || s.includes('no encontrad')) {
+    return 'no_radicada';
+  }
+  if (s.includes('radicad') || s.includes('validad') || s.includes('aprobad')) {
+    return 'radicada';
+  }
+  return 'pendiente';
+}
+
+function mapRawTableRowToClaraTx(
+  cols: string[],
+  index: number,
+  defaultSociedad: string,
+  detectExteriorAuto: boolean
+): ClaraTransaction | null {
+  const cleaned = cols.map((c) => String(c || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (cleaned.length < 2) return null;
+
+  let fecha = new Date().toISOString().slice(0, 10);
+  let valor = 0;
+  let moneda = 'COP';
+  const textCols: string[] = [];
+
+  for (const cell of cleaned) {
+    const iso = cell.match(/\b(\d{4})[-/](\d{2})[-/](\d{2})\b/);
+    const dmy = cell.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
+    if (iso) {
+      fecha = `${iso[1]}-${iso[2]}-${iso[3]}`;
+      continue;
+    }
+    if (dmy) {
+      fecha = `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+      continue;
+    }
+
+    const currMatch = cell.match(/\b(COP|USD|GTQ|MXN|EUR)\b/i);
+    const hasMoneyDigits = /[$€£]|\b(COP|USD|GTQ|MXN|EUR)\b/i.test(cell) || /^\d[\d.,]+$/.test(cell);
+    if (hasMoneyDigits && /\d/.test(cell)) {
+      const parsedVal = parseSpreadsheetNumber(cell);
+      if (parsedVal > 0 && valor === 0) {
+        valor = parsedVal;
+        if (currMatch) moneda = currMatch[1].toUpperCase();
+        continue;
+      }
+    }
+    textCols.push(cell);
+  }
+
+  const comercio = textCols[0] || cleaned[0] || `Movimiento Clara #${index + 1}`;
+  if (!comercio && valor <= 0) return null;
+
+  const tarjetahabiente = textCols[1] || 'Usuario Clara';
+  const centroCosto = textCols[2] || '';
+  const observacion = textCols.slice(3).join(' · ') || `Extraído Python en ${comercio}`;
+  const autoForeign = detectExteriorAuto
+    ? detectIsForeignExpense({ moneda, comercio, sociedad: defaultSociedad })
+    : { isForeign: false };
+
+  return {
+    id: `clara-py-${Date.now()}-${index}`,
+    claraTxId: `PY-DOM-${Date.now().toString().slice(-4)}-${index + 1}`,
+    fecha,
+    sociedad: defaultSociedad,
+    tarjetahabiente,
+    comercio,
+    nitComercio: '',
+    pais: autoForeign.isForeign ? 'Exterior' : 'Colombia',
+    moneda,
+    valor,
+    centroCosto,
+    observacion,
+    estadoClara: 'Autorizada',
+    origenGasto: autoForeign.isForeign ? 'exterior' : 'nacional',
+    motivoExterior: autoForeign.reason,
+    workManagerStatus: autoForeign.isForeign ? 'exenta_exterior' : 'pendiente_factura',
+    wmRadicacionStatus: autoForeign.isForeign ? 'exenta_exterior' : 'pendiente',
+    erpDestino: 'SAP',
+    estadoContable: 'borrador',
+    origenRegistro: 'api_clara',
+  };
+}
+
+export const parseClaraPythonPayload = (
+  rawInput: unknown,
+  options?: { defaultSociedad?: string; detectExteriorAuto?: boolean }
+): ParsedClaraPythonPayload => {
+  const defaultSociedad = options?.defaultSociedad || 'PREMEX';
+  const detectExteriorAuto = options?.detectExteriorAuto ?? true;
+
+  const root: Record<string, unknown> = Array.isArray(rawInput)
+    ? { transactions: rawInput }
+    : rawInput && typeof rawInput === 'object'
+    ? (rawInput as Record<string, unknown>)
+    : {};
+
+  const rawTxs = Array.isArray(root.transactions)
+    ? root.transactions
+    : Array.isArray(root.items)
+    ? root.items
+    : [];
+  const rawRows = Array.isArray(root.rows) ? root.rows : [];
+  const rawResults = Array.isArray(root.results)
+    ? root.results
+    : Array.isArray(root.wmResults)
+    ? root.wmResults
+    : [];
+
+  const transactions: ClaraTransaction[] = [];
+
+  rawTxs.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object') return;
+    const obj = entry as Record<string, unknown>;
+    const comercio = String(
+      obj.comercio ?? obj.merchant ?? obj.merchantName ?? obj.proveedor ?? ''
+    ).trim();
+    const valor = parseSpreadsheetNumber(obj.valor ?? obj.amount ?? obj.total ?? obj.importe ?? 0);
+    if (!comercio && valor <= 0) return;
+
+    const fecha = parseSpreadsheetDate(obj.fecha ?? obj.date ?? obj.createdAt ?? obj.fechaFactura);
+    const moneda = String(obj.moneda ?? obj.currency ?? 'COP').trim().toUpperCase() || 'COP';
+    const sociedad = String(obj.sociedad ?? obj.company ?? obj.legalEntity ?? defaultSociedad).trim();
+    const pais = String(obj.pais ?? obj.country ?? 'Colombia').trim();
+    const autoForeign = detectExteriorAuto
+      ? detectIsForeignExpense({ pais, moneda, comercio, sociedad })
+      : { isForeign: false };
+    const isExterior =
+      obj.origenGasto === 'exterior' ||
+      Boolean(obj.esExterior) ||
+      autoForeign.isForeign;
+
+    const facturaNumero = String(obj.facturaNumero ?? obj.numeroFactura ?? obj.invoiceNumber ?? '').trim();
+    const wmRaw = obj.wmRadicacionStatus ?? obj.estadoWm ?? obj.estado;
+    const wmStatus: ClaraWorkManagerRadicacionStatus = isExterior
+      ? 'exenta_exterior'
+      : wmRaw
+      ? normalizePythonWmEstado(wmRaw)
+      : facturaNumero
+      ? 'no_radicada'
+      : 'pendiente';
+
+    transactions.push({
+      id: `clara-py-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 5)}`,
+      claraTxId: String(obj.claraTxId ?? obj.id ?? `PY-${Date.now().toString().slice(-4)}-${index + 1}`).trim(),
+      fecha,
+      sociedad: sociedad || defaultSociedad,
+      tarjetahabiente: String(
+        obj.tarjetahabiente ?? obj.cardholder ?? obj.usuario ?? obj.titular ?? 'Usuario Clara'
+      ).trim(),
+      comercio: comercio || 'Comercio Clara',
+      nitComercio: String(obj.nitComercio ?? obj.nit ?? obj.taxId ?? '').trim(),
+      pais: isExterior && pais === 'Colombia' ? 'Exterior' : pais,
+      moneda,
+      valor,
+      centroCosto: String(obj.centroCosto ?? obj.costCenter ?? '').trim(),
+      observacion: String(
+        obj.observacion ?? obj.description ?? obj.memo ?? `Gasto Clara en ${comercio}`
+      ).trim(),
+      categoria: String(obj.categoria ?? obj.category ?? '').trim(),
+      estadoClara: 'Autorizada',
+      origenGasto: isExterior ? 'exterior' : 'nacional',
+      motivoExterior: isExterior ? autoForeign.reason || 'Detectado como exterior en Python' : undefined,
+      workManagerStatus:
+        wmStatus === 'exenta_exterior'
+          ? 'exenta_exterior'
+          : wmStatus === 'radicada'
+          ? 'validada'
+          : wmStatus === 'inconsistencia'
+          ? 'diferencia_valor'
+          : 'pendiente_factura',
+      wmRadicacionStatus: wmStatus,
+      wmRadicacionNumero: String(obj.wmRadicacionNumero ?? facturaNumero).trim() || undefined,
+      wmRadicacionFecha: String(obj.wmRadicacionFecha ?? obj.radicacionFecha ?? '').trim() || undefined,
+      wmMensajeValidacion: String(obj.wmMensajeValidacion ?? obj.mensaje ?? '').trim() || undefined,
+      facturaNumero: facturaNumero || undefined,
+      facturaFecha: obj.facturaFecha ? parseSpreadsheetDate(obj.facturaFecha) : undefined,
+      facturaNit: String(obj.facturaNit ?? '').trim() || undefined,
+      facturaTotal:
+        obj.facturaTotal !== undefined ? parseSpreadsheetNumber(obj.facturaTotal) : undefined,
+      facturaSubtotal:
+        obj.facturaSubtotal !== undefined ? parseSpreadsheetNumber(obj.facturaSubtotal) : undefined,
+      facturaImpuesto:
+        obj.facturaImpuesto !== undefined ? parseSpreadsheetNumber(obj.facturaImpuesto) : undefined,
+      facturaCufe: String(obj.facturaCufe ?? obj.cufe ?? '').trim() || undefined,
+      erpDestino: 'SAP',
+      estadoContable: 'borrador',
+      origenRegistro: 'api_clara',
+    });
+  });
+
+  if (transactions.length === 0 && rawRows.length > 0) {
+    rawRows.forEach((row, index) => {
+      if (!Array.isArray(row)) return;
+      const mapped = mapRawTableRowToClaraTx(
+        row.map((c) => String(c ?? '')),
+        index,
+        defaultSociedad,
+        detectExteriorAuto
+      );
+      if (mapped) transactions.push(mapped);
+    });
+  }
+
+  const wmResults: PythonWmCheckResultItem[] = [];
+  rawResults.forEach((r) => {
+    if (!r || typeof r !== 'object') return;
+    const item = r as Record<string, unknown>;
+    wmResults.push({
+      txId: item.txId ? String(item.txId) : undefined,
+      numeroFactura: item.numeroFactura ? String(item.numeroFactura).trim() : undefined,
+      estado: normalizePythonWmEstado(item.estado ?? item.status),
+      radicacionFecha: item.radicacionFecha ? String(item.radicacionFecha) : undefined,
+      mensaje: item.mensaje || item.message ? String(item.mensaje ?? item.message) : undefined,
+    });
+  });
+
+  return { transactions, wmResults };
+};
+
+export const downloadWmPendingForPythonJson = (transactions: ClaraTransaction[]): {
+  fileName: string;
+  count: number;
+} => {
+  const candidates = transactions.filter((t) => t.origenGasto !== 'exterior');
+  const payload = {
+    schemaVersion: 'premex-wm-python-input-v1',
+    generatedAtIso: new Date().toISOString(),
+    workManagerUrl: 'https://pan.iluma.bio:8037/Account/Login',
+    invoicesCount: candidates.length,
+    invoices: candidates.map((t) => ({
+      txId: t.id,
+      claraTxId: t.claraTxId || t.id,
+      sociedad: t.sociedad,
+      comercio: t.comercio,
+      nitEmisor: t.facturaNit || t.nitComercio || '',
+      numeroFactura: t.facturaNumero || t.workManagerNumeroFactura || '',
+      fecha: t.facturaFecha || t.fecha,
+      moneda: t.moneda,
+      total: t.facturaTotal || t.valor,
+      estadoActualWm: t.wmRadicacionStatus || 'pendiente',
+    })),
+  };
+
+  const fileName = `wm_pendientes_python_${new Date().toISOString().slice(0, 10)}.json`;
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  return { fileName, count: candidates.length };
+};
+
 

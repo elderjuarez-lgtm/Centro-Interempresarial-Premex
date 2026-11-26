@@ -38,10 +38,12 @@ export interface ServerConnectivityProbeResult {
 export interface LocalAgentHealthResponse {
   ok: boolean;
   agent: string;
+  runtime?: string;
   version: string;
   browserActive: boolean;
   claraUrl: string;
   workManagerUrl: string;
+  wmMode?: string;
   timestamp: string;
 }
 
@@ -198,9 +200,11 @@ export async function runLocalAgentClaraExtract(
   period?: string
 ): Promise<{
   ok: boolean;
+  engine?: string;
   extractedAtIso: string;
   rawTableRowsCount: number;
   rows: string[][];
+  transactions?: Record<string, unknown>[];
 }> {
   const base = normalizeAgentUrl(agentUrl);
   const res = await fetch(`${base}/clara/extract`, {

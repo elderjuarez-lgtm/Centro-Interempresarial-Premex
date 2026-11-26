@@ -64,6 +64,7 @@ import {
   VIATICO_CATEGORIES,
   VIATICO_CURRENCIES,
   calculateTaxBreakdown,
+  formatExchangeRate,
   formatViaticoAmount,
   roundExchangeRate,
   roundMoney,
@@ -151,6 +152,7 @@ type InlineEditableField =
   | 'moneda'
   | 'valorFactura'
   | 'tipoCambio'
+  | 'valorReintegrar'
   | 'categoria'
   | 'clienteContacto'
   | 'objetivoComercial'
@@ -178,6 +180,7 @@ interface ItemFormState {
   moneda: ViaticoCurrency;
   valorFactura: string;
   tipoCambio: string;
+  valorReintegrarManual: string;
   categoria: ViaticoCategory;
   clienteContacto: string;
   objetivoComercial: string;
@@ -227,6 +230,7 @@ const createEmptyForm = (
   moneda: baseCurrency,
   valorFactura: '',
   tipoCambio: docExchangeRate && docExchangeRate > 0 ? String(docExchangeRate) : '1.00',
+  valorReintegrarManual: '',
   categoria: 'Alimentación',
   clienteContacto: defaultCliente,
   objetivoComercial: defaultObjetivo,
@@ -603,7 +607,14 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   const numericValorFactura = Math.max(0, Number(form.valorFactura) || 0);
   const numericTipoCambio =
     Number(form.tipoCambio) > 0 ? Number(form.tipoCambio) : 1;
-  const computedReintegrar = roundMoney(numericValorFactura * numericTipoCambio);
+  const hasManualReintegrar =
+    form.moneda !== baseCurrency &&
+    form.valorReintegrarManual.trim() !== '' &&
+    Number.isFinite(Number(form.valorReintegrarManual)) &&
+    Number(form.valorReintegrarManual) >= 0;
+  const computedReintegrar = hasManualReintegrar
+    ? roundMoney(Number(form.valorReintegrarManual))
+    : roundMoney(numericValorFactura * numericTipoCambio);
   const numericTaxRate = Math.max(0, Number(form.porcentajeImpuesto) || 0);
   const manualTaxOverride =
     form.montoImpuestoManual.trim() !== '' &&
@@ -723,6 +734,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             : extracted.moneda === liquidation.monedaBase
             ? '1.00'
             : String(extracted.tipoCambioSugerido || 1),
+        valorReintegrarManual: '',
         categoria: extracted.categoriaSugerida || prev.categoria,
         clienteContacto: prev.clienteContacto || lastCliente,
         objetivoComercial: prev.objetivoComercial || lastObjetivo,
@@ -1161,6 +1173,24 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
         tipoCambio: nextFx,
         valorReintegrar: roundMoney(item.valorFactura * nextFx),
       };
+    } else if (field === 'valorReintegrar') {
+      const parsed = Number(rawStr);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setInlineEditCell(null);
+        return;
+      }
+      const nextReintegrar = roundMoney(parsed);
+      const nextFx =
+        item.valorFactura > 0 && nextReintegrar > 0
+          ? roundExchangeRate(nextReintegrar / item.valorFactura)
+          : item.tipoCambio > 0
+          ? item.tipoCambio
+          : 1;
+      nextItem = {
+        ...item,
+        valorReintegrar: nextReintegrar,
+        tipoCambio: nextFx,
+      };
     } else if (field === 'moneda') {
       const nextCurrency = rawStr as ViaticoCurrency;
       const nextFx =
@@ -1517,6 +1547,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
             : extracted.moneda === liquidation.monedaBase
             ? '1.00'
             : String(extracted.tipoCambioSugerido || prev.tipoCambio || 1),
+        valorReintegrarManual: '',
         categoria: extracted.categoriaSugerida || prev.categoria,
         descripcionGasto: extracted.descripcionSugerida || prev.descripcionGasto,
         aplicaImpuestos: extracted.aplicaImpuestos,
@@ -1566,6 +1597,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
           : prev.tipoCambio === '1.00'
           ? '7.90'
           : prev.tipoCambio,
+      valorReintegrarManual: '',
       porcentajeImpuesto: prev.aplicaImpuestos ? String(nextDefaultRate) : prev.porcentajeImpuesto,
       montoImpuestoManual: '',
     }));
@@ -1606,6 +1638,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
       moneda: item.moneda,
       valorFactura: String(item.valorFactura),
       tipoCambio: String(item.tipoCambio),
+      valorReintegrarManual: item.moneda !== baseCurrency ? String(item.valorReintegrar) : '',
       categoria: item.categoria,
       clienteContacto: item.clienteContacto,
       objetivoComercial: item.objetivoComercial,
@@ -3156,6 +3189,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         setForm({
                           ...form,
                           valorFactura: e.target.value,
+                          valorReintegrarManual: '',
                           montoImpuestoManual: '',
                         })
                       }
@@ -3191,10 +3225,16 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                       <input
                         type="number"
                         inputMode="decimal"
-                        step="0.0001"
-                        min="0.0001"
+                        step="any"
+                        min="0.00000001"
                         value={form.tipoCambio}
-                        onChange={(e) => setForm({ ...form, tipoCambio: e.target.value })}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            tipoCambio: e.target.value,
+                            valorReintegrarManual: '',
+                          })
+                        }
                         className="w-full min-h-[3.375rem] lg:min-h-0 px-3.5 lg:px-2.5 py-3 lg:py-1.5 text-lg lg:text-xs text-right font-mono tabular-nums rounded-2xl lg:rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
                       />
                     </div>
@@ -3304,13 +3344,63 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                     </div>
                   )}
 
-                  <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-2 lg:block lg:text-right pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-200/80">
-                    <div className="text-xs lg:text-[10px] font-extrabold uppercase tracking-wider text-slate-600 lg:text-slate-500">
-                      Valor Reintegrar ({baseCurrency})
+                  <div className="lg:col-span-3 flex flex-col items-stretch lg:items-end justify-center pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-200/80">
+                    <div className="text-xs lg:text-[10px] font-extrabold uppercase tracking-wider text-slate-600 lg:text-slate-500 mb-1">
+                      Valor Pago / Reintegrar ({baseCurrency})
                     </div>
-                    <div className="text-2xl lg:text-base font-extrabold text-[#132B63] font-mono tabular-nums">
-                      {formatViaticoAmount(computedReintegrar, baseCurrency, true)}
-                    </div>
+                    {form.moneda !== baseCurrency ? (
+                      <div className="w-full lg:max-w-[175px] space-y-1">
+                        <div className="relative flex items-center">
+                          <span className="absolute left-2.5 text-xs font-bold text-slate-500 pointer-events-none">
+                            {CURRENCY_SYMBOLS[baseCurrency] || ''}
+                          </span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min="0"
+                            aria-label={`Valor de pago en ${baseCurrency}`}
+                            value={
+                              form.valorReintegrarManual !== ''
+                                ? form.valorReintegrarManual
+                                : numericValorFactura > 0
+                                ? computedReintegrar.toFixed(2)
+                                : ''
+                            }
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const parsed = Number(raw);
+                              setForm((prev) => {
+                                const invVal = Math.max(0, Number(prev.valorFactura) || 0);
+                                let nextTc = prev.tipoCambio;
+                                if (
+                                  raw.trim() !== '' &&
+                                  Number.isFinite(parsed) &&
+                                  parsed > 0 &&
+                                  invVal > 0
+                                ) {
+                                  nextTc = String(roundExchangeRate(parsed / invVal));
+                                }
+                                return {
+                                  ...prev,
+                                  valorReintegrarManual: raw,
+                                  tipoCambio: nextTc,
+                                };
+                              });
+                            }}
+                            placeholder="0.00"
+                            className="w-full min-h-[3rem] lg:min-h-0 pl-10 pr-2.5 py-2 lg:py-1 text-lg lg:text-sm font-extrabold text-right font-mono tabular-nums text-[#132B63] bg-white rounded-xl lg:rounded-lg border-2 border-[#1E60A8]/50 focus:outline-hidden focus:ring-2 focus:ring-[#1E60A8]/30 focus:border-[#1E60A8]"
+                          />
+                        </div>
+                        <div className="text-[10px] text-[#1E60A8] font-medium text-left lg:text-right">
+                          Editable: recalcula el tipo de cambio automáticamente
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-2xl lg:text-base font-extrabold text-[#132B63] font-mono tabular-nums">
+                        {formatViaticoAmount(computedReintegrar, baseCurrency, true)}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -4622,23 +4712,45 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
                         {isEditingCell('tipoCambio') ? (
                           <input
                             type="number"
-                            step="0.0001"
-                            min="0.0001"
+                            step="any"
+                            min="0.00000001"
                             autoFocus
                             value={inlineDraftValue}
                             onChange={(e) => setInlineDraftValue(e.target.value)}
                             onBlur={() => commitInlineEdit(item, 'tipoCambio')}
                             onKeyDown={(e) => handleInlineKeyDown(e, 'tipoCambio')}
-                            className="w-20 px-1.5 py-1 text-xs text-right font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                            className="w-24 px-1.5 py-1 text-xs text-right font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
                           />
                         ) : (
-                          formatViaticoAmount(item.tipoCambio)
+                          formatExchangeRate(item.tipoCambio)
                         )}
                       </td>
 
                       {/* Valor Reintegrar */}
-                      <td className="py-2 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-right font-mono font-bold tabular-nums text-slate-900 bg-slate-50/60">
-                        {formatViaticoAmount(item.valorReintegrar)}
+                      <td
+                        onDoubleClick={() => startInlineEdit(item, 'valorReintegrar')}
+                        title={
+                          isLocked
+                            ? undefined
+                            : 'Doble clic para editar valor de pago y recalcular tipo de cambio'
+                        }
+                        className={`py-2 px-2.5 border-r border-slate-200/80 whitespace-nowrap text-right font-mono font-bold tabular-nums text-slate-900 bg-slate-50/60 ${editableCellClass}`}
+                      >
+                        {isEditingCell('valorReintegrar') ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            autoFocus
+                            value={inlineDraftValue}
+                            onChange={(e) => setInlineDraftValue(e.target.value)}
+                            onBlur={() => commitInlineEdit(item, 'valorReintegrar')}
+                            onKeyDown={(e) => handleInlineKeyDown(e, 'valorReintegrar')}
+                            className="w-24 px-1.5 py-1 text-xs text-right font-mono bg-white border border-[#1E60A8] rounded focus:outline-hidden"
+                          />
+                        ) : (
+                          formatViaticoAmount(item.valorReintegrar)
+                        )}
                       </td>
 
                       {/* Categoría */}

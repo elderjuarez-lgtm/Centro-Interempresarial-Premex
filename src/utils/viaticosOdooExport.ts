@@ -1305,7 +1305,7 @@ export function exportViaticosOdooCsv(
         r.porcentajeImpuesto,
         r.monedaFactura,
         r.valorFactura.toFixed(2),
-        r.tipoCambio.toFixed(4),
+        String(Math.round((r.tipoCambio + Number.EPSILON) * 100000000) / 100000000),
         r.monedaBase,
         r.baseReintegrar.toFixed(2),
         r.impuestoReintegrar.toFixed(2),
