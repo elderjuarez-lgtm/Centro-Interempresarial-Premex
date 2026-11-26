@@ -903,6 +903,7 @@ service cloud.firestore {
           'active',
           'notes',
           'odooEmployeeName',
+          'assignedEmployees',
           'centroCosto',
           'odooAnalyticDistribution',
           'updatedBy',
