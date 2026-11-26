@@ -34,6 +34,7 @@ import {
   Users,
   Search,
   Layers,
+  Server,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -140,6 +141,7 @@ interface ViaticosLiquidadorViewProps {
   isDownloadingExcel: boolean;
   isDownloadingPdf: boolean;
   onOpenClosedArchive: () => void;
+  onOpenOdooPost?: (liq: ViaticoLiquidation) => void;
   zoomPercent?: number;
 }
 
@@ -279,6 +281,7 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
   isDownloadingExcel,
   isDownloadingPdf,
   onOpenClosedArchive,
+  onOpenOdooPost,
   zoomPercent = 100,
 }) => {
   const catalogs = useMemo(
@@ -2809,6 +2812,22 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <Send className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
               <span>Correo</span>
             </button>
+            {permissions.canOperate && onOpenOdooPost && (
+              <button
+                type="button"
+                onClick={() => onOpenOdooPost(liquidation)}
+                disabled={liquidation.items.length === 0}
+                title="Contabilizar esta liquidación en el módulo de Gastos de Odoo (hr.expense)"
+                className="inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-2.5 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-2xl lg:rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              >
+                <Server className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-emerald-200" />
+                <span>
+                  {liquidation.odooSyncStatus === 'contabilizado_api'
+                    ? 'Odoo API ✓'
+                    : 'Contabilizar Odoo'}
+                </span>
+              </button>
+            )}
             {liquidation.estado !== 'borrador' && (
               <button
                 type="button"
@@ -3998,6 +4017,23 @@ export const ViaticosLiquidadorView: React.FC<ViaticosLiquidadorViewProps> = ({
               <Send className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-[#1E60A8]" />
               <span>Enviar Correo</span>
             </button>
+
+            {permissions.canOperate && onOpenOdooPost && (
+              <button
+                type="button"
+                onClick={() => onOpenOdooPost(liquidation)}
+                disabled={liquidation.items.length === 0}
+                title="Contabilizar esta liquidación directamente en el módulo de Gastos de Odoo (hr.expense)"
+                className={`${isZoomExtra ? '' : 'col-span-2 lg:col-span-1'} inline-flex items-center justify-center gap-2 min-h-[3rem] lg:min-h-0 px-3.5 lg:px-3 py-2.5 lg:py-1.5 text-sm lg:text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-2xl lg:rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap`}
+              >
+                <Server className="w-4 h-4 lg:w-3.5 lg:h-3.5 text-emerald-200" />
+                <span>
+                  {liquidation.odooSyncStatus === 'contabilizado_api'
+                    ? 'Contabilizado Odoo ✓'
+                    : 'Contabilizar en Odoo'}
+                </span>
+              </button>
+            )}
           </div>
         </div>
 

@@ -355,6 +355,30 @@ const sanitizeLiquidation = (l: ViaticoLiquidation): ViaticoLiquidation => {
       Math.floor(Number(l.contabilizadaDescargasCount))
     );
   }
+  if (
+    l.odooSyncStatus === 'pendiente' ||
+    l.odooSyncStatus === 'preparado' ||
+    l.odooSyncStatus === 'contabilizado_api' ||
+    l.odooSyncStatus === 'error'
+  ) {
+    base.odooSyncStatus = l.odooSyncStatus;
+  }
+  if (Array.isArray(l.odooExpenseIds) && l.odooExpenseIds.length > 0) {
+    const cleanIds = l.odooExpenseIds
+      .map((id) => Math.floor(Number(id)))
+      .filter((id) => Number.isFinite(id) && id > 0)
+      .slice(0, 500);
+    if (cleanIds.length > 0) base.odooExpenseIds = cleanIds;
+  }
+  if (Number.isFinite(Number(l.odooExpenseSheetId)) && Number(l.odooExpenseSheetId) > 0) {
+    base.odooExpenseSheetId = Math.floor(Number(l.odooExpenseSheetId));
+  }
+  if (l.odooLastSyncAtIso) {
+    base.odooLastSyncAtIso = String(l.odooLastSyncAtIso).slice(0, 60);
+  }
+  if (l.odooLastSyncMessage) {
+    base.odooLastSyncMessage = String(l.odooLastSyncMessage).trim().slice(0, 320);
+  }
 
   return recalculateLiquidationTotals(base);
 };

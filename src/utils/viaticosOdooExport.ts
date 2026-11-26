@@ -71,6 +71,11 @@ export interface OdooExpenseUploadRow {
   payment_reference: string;
   l10n_gt_edi_doc_type: string;
   analytic_distribution: string;
+  // Metadata adicional para API Odoo hr.expense (no altera las 15 columnas Excel/CSV)
+  accounting_date?: string; // YYYY-MM-DD
+  attachmentId?: string;
+  attachmentName?: string;
+  attachmentMimeType?: string;
 }
 
 export interface OdooConsolidatedExpenseRow {
@@ -461,6 +466,10 @@ export function buildOdooAccountingDataset(
         serial_number: item.serieDoc || '',
         payment_reference: itemPaymentRef,
         l10n_gt_edi_doc_type: itemDocType,
+        accounting_date: itemAccountingDate,
+        attachmentId: item.attachmentId,
+        attachmentName: item.attachmentName,
+        attachmentMimeType: item.attachmentMimeType,
         originalTotalAmountCurrency: settlementAmount,
         odooDistributionOptionId: distOpt?.id || item.odooDistributionOptionId,
         odooDistributionMode: distOpt?.mode,
@@ -1682,3 +1691,82 @@ export async function exportViaticosContabilidadPdf(
   triggerBlobDownload(blob, filename);
   return filename;
 }
+
+export interface OdooApiExpensePayloadItem {
+  rowKey: string;
+  liquidationId: string;
+  itemId: string;
+  empresa: string;
+  semana: string;
+  name: string;
+  product_id: string;
+  total_amount_currency: number;
+  currency_id: string;
+  tax_ids: string;
+  employee_id: string;
+  expense_type: OdooExpenseType;
+  date: string;
+  accounting_date: string;
+  Partner_id: string;
+  Journal: string;
+  vendor_ref: string;
+  serial_number: string;
+  payment_reference: string;
+  l10n_gt_edi_doc_type: string;
+  analytic_distribution: string;
+  costCenterLabel: string;
+  attachmentId?: string;
+  attachmentName?: string;
+  attachmentMimeType?: string;
+}
+
+export function buildOdooExpenseApiPayloads(
+  rows: OdooExpenseUploadRow[]
+): OdooApiExpensePayloadItem[] {
+  return rows.map((row) => ({
+    rowKey: row.rowKey,
+    liquidationId: row.liquidationId,
+    itemId: row.itemId,
+    empresa: row.empresa,
+    semana: row.semana,
+    name: row.name,
+    product_id: row.product_id,
+    total_amount_currency: roundMoney(row.total_amount_currency),
+    currency_id: row.currency_id || 'GTQ',
+    tax_ids: row.tax_ids,
+    employee_id: row.employee_id,
+    expense_type: row.expense_type || 'Gasto',
+    date: row.date,
+    accounting_date: row.accounting_date || row.date,
+    Partner_id: formatOdooNitWithoutHyphen(row.Partner_id),
+    Journal: row.Journal,
+    vendor_ref: row.vendor_ref,
+    serial_number: row.serial_number,
+    payment_reference: row.payment_reference,
+    l10n_gt_edi_doc_type: row.l10n_gt_edi_doc_type,
+    analytic_distribution: row.analytic_distribution,
+    costCenterLabel: row.costCenterLabel,
+    ...(row.attachmentId ? { attachmentId: row.attachmentId } : {}),
+    ...(row.attachmentName ? { attachmentName: row.attachmentName } : {}),
+    ...(row.attachmentMimeType ? { attachmentMimeType: row.attachmentMimeType } : {}),
+  }));
+}
+
+export function exportViaticosOdooApiJson(
+  rows: OdooExpenseUploadRow[],
+  batchLabel = 'Gastos_Odoo'
+): string {
+  const payload = {
+    model: 'hr.expense',
+    generatedAtIso: new Date().toISOString(),
+    totalLines: rows.length,
+    lines: buildOdooExpenseApiPayloads(rows),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json;charset=utf-8;',
+  });
+  const filename = `Payload_API_Odoo_Gastos_${sanitizeSlug(batchLabel)}_${todayIso()}.json`;
+  triggerBlobDownload(blob, filename);
+  return filename;
+}
+

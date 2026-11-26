@@ -784,13 +784,24 @@ export interface ViaticoLiquidation {
   sentAtIso?: string;
   sentToEmail?: string;
   notas?: string;
-  /** Seguimiento de contabilización en Odoo (activado automáticamente al descargar archivo contable) */
+  /** Seguimiento de contabilización en Odoo (activado automáticamente al descargar archivo contable o contabilizar vía API) */
   contabilizada?: boolean;
   contabilizadaAtIso?: string;
   contabilizadaPorEmail?: string;
   contabilizadaPorNombre?: string;
   contabilizadaDescargasCount?: number;
+  odooSyncStatus?: OdooExpenseSyncStatus;
+  odooExpenseIds?: number[];
+  odooExpenseSheetId?: number;
+  odooLastSyncAtIso?: string;
+  odooLastSyncMessage?: string;
 }
+
+export type OdooExpenseSyncStatus =
+  | 'pendiente'
+  | 'preparado'
+  | 'contabilizado_api'
+  | 'error';
 
 export interface ViaticoOdooCategoryAccount {
   accountCode: string;

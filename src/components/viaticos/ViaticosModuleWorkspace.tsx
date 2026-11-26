@@ -75,6 +75,10 @@ import {
   ViaticosNewLiquidationModal,
 } from './ViaticosNewLiquidationModal';
 import { ViaticosCloseConfirmModal } from './ViaticosCloseConfirmModal';
+import {
+  OdooApiLiquidationSyncUpdate,
+  ViaticosOdooPostModal,
+} from './ViaticosOdooPostModal';
 
 interface ViaticosModuleWorkspaceProps {
   data: ViaticosWorkspaceData;
@@ -144,6 +148,7 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
   const [closeConfirmLiqId, setCloseConfirmLiqId] = useState<string | null>(null);
   const [closeModalLiqId, setCloseModalLiqId] = useState<string | null>(null);
   const [planillaPreviewLiqId, setPlanillaPreviewLiqId] = useState<string | null>(null);
+  const [odooPostTargetLiqIds, setOdooPostTargetLiqIds] = useState<string[] | null>(null);
   const [toast, setToast] = useState<{
     type: 'success' | 'info' | 'error';
     message: string;
@@ -1278,6 +1283,63 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
     );
   };
 
+  const handleOpenOdooPostModal = (targets: ViaticoLiquidation[]) => {
+    const valid = targets.filter((l) => l && l.items && l.items.length > 0);
+    if (valid.length === 0) {
+      showToast('info', 'Selecciona al menos una liquidación con comprobantes para contabilizar en Odoo.');
+      return;
+    }
+    setOdooPostTargetLiqIds(valid.map((l) => l.id));
+  };
+
+  const handleRecordOdooApiSyncUpdates = (
+    updates: OdooApiLiquidationSyncUpdate[]
+  ) => {
+    if (!permissions.canOperate || updates.length === 0) return;
+    const byId = new Map<string, OdooApiLiquidationSyncUpdate>(
+      updates.map((u) => [u.liquidationId, u])
+    );
+    const stamp = resolveOperatingUserPermissionsStamp(
+      permissions,
+      currentUser?.email || undefined,
+      currentUser?.displayName || undefined
+    );
+
+    mutateAndAutoSync(
+      (prev) => ({
+        ...prev,
+        liquidaciones: prev.liquidaciones.map((l) => {
+          const upd = byId.get(l.id);
+          if (!upd) return l;
+          const baseNext: ViaticoLiquidation = {
+            ...l,
+            odooSyncStatus: upd.status,
+            odooLastSyncAtIso: stamp.atIso,
+            odooLastSyncMessage: upd.message,
+            updatedAtIso: stamp.atIso,
+          };
+          if (upd.expenseIds && upd.expenseIds.length > 0) {
+            baseNext.odooExpenseIds = upd.expenseIds;
+          }
+          if (upd.expenseSheetId && upd.expenseSheetId > 0) {
+            baseNext.odooExpenseSheetId = upd.expenseSheetId;
+          }
+          if (upd.status === 'contabilizado_api') {
+            baseNext.contabilizada = true;
+            baseNext.contabilizadaAtIso = stamp.atIso;
+            baseNext.contabilizadaPorEmail = stamp.email;
+            baseNext.contabilizadaPorNombre = stamp.name;
+          }
+          return baseNext;
+        }),
+      }),
+      {
+        errorPrefix:
+          'Registro de sincronización Odoo guardado localmente, pero falló la sincronización en la nube',
+      }
+    );
+  };
+
   const handleDeleteConsultor = (consultorId: string) => {
     if (!permissions.isAdmin) return;
     mutateAndAutoSync(
@@ -1565,6 +1627,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
                   setActiveTab('cerradas');
                 }
               }}
+              onOpenOdooPost={
+                permissions.canOperate
+                  ? (liq) => handleOpenOdooPostModal([liq])
+                  : undefined
+              }
               zoomPercent={zoomPercent}
             />
           ) : activeTab === 'sociedades' ? (
@@ -1599,6 +1666,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               onSaveOdooCatalogs={handleSaveOdooCatalogs}
               onUpdateExpenseItemOdoo={handleUpdateExpenseItemOdoo}
               onMarkLiquidationsContabilizadas={handleMarkLiquidationsContabilizadas}
+              onOpenOdooPost={
+                permissions.canOperate
+                  ? (liqs) => handleOpenOdooPostModal(liqs)
+                  : undefined
+              }
               onUpsertPermissionRecord={onUpsertPermissionRecord}
               onNotify={showToast}
             />
@@ -1635,6 +1707,11 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
               }}
               onOpenCloseConfirmFor={(liq) => setCloseConfirmLiqId(liq.id)}
               onOpenCloseEmailFor={(liq) => setCloseModalLiqId(liq.id)}
+              onOpenOdooPost={
+                permissions.canOperate
+                  ? (liq) => handleOpenOdooPostModal([liq])
+                  : undefined
+              }
               onReopenLiquidation={
                 permissions.isAdmin
                   ? (liqId) => {
@@ -1741,6 +1818,24 @@ export const ViaticosModuleWorkspace: React.FC<ViaticosModuleWorkspaceProps> = (
             ? () => setPlanillaPreviewLiqId(modalLiquidation.id)
             : undefined
         }
+      />
+
+      {/* Contabilizar en Gastos Odoo (hr.expense API / Dry-run) */}
+      <ViaticosOdooPostModal
+        isOpen={Boolean(odooPostTargetLiqIds && odooPostTargetLiqIds.length > 0)}
+        onClose={() => setOdooPostTargetLiqIds(null)}
+        liquidaciones={
+          odooPostTargetLiqIds
+            ? data.liquidaciones.filter((l) => odooPostTargetLiqIds.includes(l.id))
+            : []
+        }
+        consultores={data.consultores}
+        odooCatalogs={resolvedOdooCatalogs}
+        permissionRecords={permissionRecords}
+        mediaMap={mediaMap}
+        onEnsureMediaLoaded={ensureReceiptMediaIdsLoaded}
+        onRecordApiSyncUpdates={handleRecordOdooApiSyncUpdates}
+        onNotify={showToast}
       />
 
       {/* Mobile Bottom Navigation Bar */}

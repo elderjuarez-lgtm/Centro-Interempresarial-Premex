@@ -8,6 +8,10 @@ import {
 } from './api/viaticos/extract-invoice.ts';
 import { processClaraExtractInvoiceBody } from './api/clara/extract-invoice.ts';
 import { processProbeRequest } from './api/clara/probe.ts';
+import {
+  processOdooExpensesRequest,
+  processOdooStatusRequest,
+} from './api/odoo/expenses.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +49,18 @@ async function startServer() {
   // SSRF-safe connectivity diagnostic probe for Clara and Work Manager (:8037)
   app.post('/api/clara/probe', async (req, res) => {
     const result = await processProbeRequest(req.body?.target);
+    res.status(result.status).json(result.body);
+  });
+
+  // Server-side Odoo Expenses (hr.expense) JSON-RPC connector & preflight validator
+  app.get('/api/odoo/expenses', async (req, res) => {
+    const probe = req.query?.probe === '1' || req.query?.probe === 'true';
+    const result = await processOdooStatusRequest(probe);
+    res.status(result.status).json(result.body);
+  });
+
+  app.post('/api/odoo/expenses', async (req, res) => {
+    const result = await processOdooExpensesRequest(req.body ?? {});
     res.status(result.status).json(result.body);
   });
 

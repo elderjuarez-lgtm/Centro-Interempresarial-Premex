@@ -19,6 +19,7 @@ import {
   Coins,
   Archive,
   Printer,
+  Server,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -55,6 +56,7 @@ interface ViaticosHistorialViewProps {
   onDownloadPdf: (liq: ViaticoLiquidation) => void;
   onOpenCloseConfirmFor: (liq: ViaticoLiquidation) => void;
   onOpenCloseEmailFor: (liq: ViaticoLiquidation) => void;
+  onOpenOdooPost?: (liq: ViaticoLiquidation) => void;
   onReopenLiquidation?: (liqId: string) => void;
   onUpsertConsultor: (consultor: ViaticoConsultor) => void;
   onDeleteConsultor: (consultorId: string) => void;
@@ -77,6 +79,7 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
   onDownloadPdf,
   onOpenCloseConfirmFor,
   onOpenCloseEmailFor,
+  onOpenOdooPost,
   onReopenLiquidation,
   onUpsertConsultor,
   onDeleteConsultor,
@@ -675,15 +678,32 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
-                      <button
-                        type="button"
-                        onClick={() => onPreviewPlanillaPdf(liq)}
-                        disabled={liq.items.length === 0}
-                        className="inline-flex items-center gap-1.5 min-h-[38px] px-2.5 py-1 text-xs font-semibold text-[#1E60A8] bg-slate-50 border border-slate-200 rounded-lg disabled:opacity-40 cursor-pointer"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        <span>Vista Planilla</span>
-                      </button>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onPreviewPlanillaPdf(liq)}
+                          disabled={liq.items.length === 0}
+                          className="inline-flex items-center gap-1.5 min-h-[38px] px-2.5 py-1 text-xs font-semibold text-[#1E60A8] bg-slate-50 border border-slate-200 rounded-lg disabled:opacity-40 cursor-pointer"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>Vista Planilla</span>
+                        </button>
+                        {permissions.canOperate && onOpenOdooPost && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenOdooPost(liq)}
+                            disabled={liq.items.length === 0}
+                            className="inline-flex items-center gap-1.5 min-h-[38px] px-2.5 py-1 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg disabled:opacity-40 cursor-pointer"
+                          >
+                            <Server className="w-3.5 h-3.5" />
+                            <span>
+                              {liq.odooSyncStatus === 'contabilizado_api'
+                                ? 'Odoo API ✓'
+                                : 'Contabilizar Odoo'}
+                            </span>
+                          </button>
+                        )}
+                      </div>
 
                       <div className="flex items-center gap-1.5">
                         {isDraft && permissions.canOperate && (
@@ -948,6 +968,27 @@ export const ViaticosHistorialView: React.FC<ViaticosHistorialViewProps> = ({
                             >
                               <Send className="w-4 h-4" />
                             </button>
+
+                            {permissions.canOperate && onOpenOdooPost && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenOdooPost(liq)}
+                                disabled={liq.items.length === 0}
+                                title="Contabilizar directamente en Módulo de Gastos Odoo (API)"
+                                className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded-lg disabled:opacity-40 cursor-pointer ${
+                                  liq.odooSyncStatus === 'contabilizado_api'
+                                    ? 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200'
+                                    : 'bg-emerald-700 text-white hover:bg-emerald-800'
+                                }`}
+                              >
+                                <Server className="w-3 h-3" />
+                                <span>
+                                  {liq.odooSyncStatus === 'contabilizado_api'
+                                    ? 'Odoo ✓'
+                                    : 'Odoo'}
+                                </span>
+                              </button>
+                            )}
 
                             {!isDraft && permissions.isAdmin && onReopenLiquidation && (
                               <button

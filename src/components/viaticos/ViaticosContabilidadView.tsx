@@ -25,6 +25,7 @@ import {
   BadgeCheck,
   Filter,
   FolderOpen,
+  Server,
 } from 'lucide-react';
 import {
   EffectivePermissions,
@@ -96,6 +97,7 @@ interface ViaticosContabilidadViewProps {
     liquidationIds: string[],
     contabilizada: boolean
   ) => void;
+  onOpenOdooPost?: (liquidaciones: ViaticoLiquidation[]) => void;
   onUpsertPermissionRecord?: (record: UserPermissionRecord) => Promise<void>;
   onNotify: (type: 'success' | 'info' | 'error', message: string) => void;
 }
@@ -127,6 +129,7 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
   onSaveOdooCatalogs,
   onUpdateExpenseItemOdoo,
   onMarkLiquidationsContabilizadas,
+  onOpenOdooPost,
   onUpsertPermissionRecord,
   onNotify,
 }) => {
@@ -653,6 +656,19 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
         </div>
 
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0">
+          {permissions.canOperate && onOpenOdooPost && (
+            <button
+              type="button"
+              onClick={() => onOpenOdooPost(selectedLiquidaciones)}
+              disabled={dataset.hrExpenseRows.length === 0}
+              title="Enviar esta carga plana (hr.expense) directamente al módulo de Gastos de Odoo"
+              className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-2 min-h-[40px] px-4 py-2 text-xs font-extrabold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Server className="w-4 h-4 text-emerald-200" />
+              <span>Contabilizar en Odoo (API)</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -1417,6 +1433,23 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
 
                         {/* Per-liquidation quick Odoo export + contabilizado toggle */}
                         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          {permissions.canOperate && onOpenOdooPost && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenOdooPost([liq])}
+                              disabled={liqDataset.hrExpenseRows.length === 0}
+                              title="Contabilizar esta liquidación directamente en el módulo de Gastos de Odoo (hr.expense)"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-45 rounded-lg cursor-pointer whitespace-nowrap"
+                            >
+                              <Server className="w-3.5 h-3.5 text-emerald-200" />
+                              <span>
+                                {liq.odooSyncStatus === 'contabilizado_api'
+                                  ? 'Odoo API ✓'
+                                  : 'Contabilizar Odoo'}
+                              </span>
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => {
@@ -1679,6 +1712,18 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          {permissions.canOperate && onOpenOdooPost && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenOdooPost([liq])}
+                              disabled={liqDataset.hrExpenseRows.length === 0}
+                              title="Contabilizar esta liquidación en el módulo de Gastos de Odoo"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-45 rounded-lg cursor-pointer whitespace-nowrap"
+                            >
+                              <Server className="w-3.5 h-3.5 text-emerald-200" />
+                              <span>Contabilizar Odoo</span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => {
@@ -2300,6 +2345,16 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                             C.C.: {cc || 'Sin asignar'}
                           </span>
                           <div className="flex items-center gap-1.5">
+                            {permissions.canOperate && onOpenOdooPost && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenOdooPost([liq])}
+                                disabled={liq.items.length === 0}
+                                className="min-h-[38px] px-2.5 py-1 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg disabled:opacity-40 cursor-pointer"
+                              >
+                                Odoo API
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
@@ -2480,6 +2535,17 @@ export const ViaticosContabilidadView: React.FC<ViaticosContabilidadViewProps> =
                             >
                               <Printer className="w-4 h-4" />
                             </button>
+                            {permissions.canOperate && onOpenOdooPost && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenOdooPost([liq])}
+                                disabled={liq.items.length === 0}
+                                title="Contabilizar en módulo de Gastos Odoo (API)"
+                                className="p-1.5 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 rounded-lg cursor-pointer"
+                              >
+                                <Server className="w-4 h-4" />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
